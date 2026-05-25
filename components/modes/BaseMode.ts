@@ -72,6 +72,15 @@ export abstract class BaseMode implements GameMode {
     // Ground Grid helper 1 - Larger size 800 with 160 divisions (cell size = 5)
     this.gridHelper1 = new THREE.GridHelper(800, 160, 0x00ffff, 0x1e1e4a);
     this.gridHelper1.position.set(0, 0, 0);
+    
+    // Add a solid black ground plane below the grid to hide the sky background below the horizon
+    const groundGeom = new THREE.PlaneGeometry(1600, 1600);
+    const groundMat = new THREE.MeshBasicMaterial({ color: 0x0a0a14 });
+    const groundMesh = new THREE.Mesh(groundGeom, groundMat);
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.position.y = -0.1;
+    this.gridHelper1.add(groundMesh);
+
     this.environmentGroup.add(this.gridHelper1);
 
     // Synthwave Sun

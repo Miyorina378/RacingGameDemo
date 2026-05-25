@@ -15,6 +15,7 @@ export interface TrackConfig {
   FenceType?: 'guardrail' | 'silverstone';
   HaveGrass?: boolean;
   GrassWidth?: number;
+  time?: 'afternoon' | 'evening' | 'night';
 }
 
 export const TRACKS_DATABASE: TrackConfig[] = [
@@ -41,7 +42,8 @@ export const TRACKS_DATABASE: TrackConfig[] = [
       new THREE.Vector3(0, 2, 12)
     ],
     HaveCrub: true,
-    HaveFence: false
+    HaveFence: false,
+    time: 'afternoon'
   },
   {
     id: 'sprint_circuit',
@@ -65,7 +67,8 @@ export const TRACKS_DATABASE: TrackConfig[] = [
       new THREE.Vector3(0, 2, 12)
     ],
     HaveCrub: true,
-    HaveFence: true
+    HaveFence: true,
+    time: 'afternoon'
   },
   {
     id: 'pro_race',
@@ -97,7 +100,8 @@ export const TRACKS_DATABASE: TrackConfig[] = [
     ],
     HaveCrub: true,
     HaveFence: true,
-    FenceType: 'silverstone'
+    FenceType: 'silverstone',
+    time: 'night'
   },
   {
     id: 'tokyo_megaloop',
@@ -126,7 +130,8 @@ export const TRACKS_DATABASE: TrackConfig[] = [
       new THREE.Vector3(0, 2, 12)
     ],
     HaveCrub: false,
-    HaveFence: true
+    HaveFence: true,
+    time: 'night'
   },
   {
     id: 'canopy_speedway',
@@ -156,7 +161,8 @@ export const TRACKS_DATABASE: TrackConfig[] = [
       new THREE.Vector3(-134, 5, -231)
     ],
     HaveCrub: true,
-    HaveFence: false
+    HaveFence: false,
+    time: 'afternoon'
   },
   {
     id: 'east_hill_mountain',
@@ -187,6 +193,7 @@ export const TRACKS_DATABASE: TrackConfig[] = [
     HaveFence: true,
     FenceType: 'silverstone',
     HaveGrass: true,
-    GrassWidth: 6.0
+    GrassWidth: 6.0,
+    time: 'evening'
   }
 ];

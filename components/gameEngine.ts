@@ -8,6 +8,7 @@ import { LicenseMode } from './modes/LicenseMode';
 import { RaceMode } from './modes/RaceMode';
 import { TutorialMode } from './modes/TutorialMode';
 import { TRACKS_DATABASE } from './config/TrackDatabase';
+import { Sky } from './objects/Sky';
 
 import { CarConfig } from './config/CarDatabase';
 export type { CarConfig };
@@ -35,7 +36,7 @@ export class GameEngine {
   // Shared across modes
   public environmentGroup!: THREE.Group;
   public vehicle!: Vehicle;
-  public starsMesh?: THREE.Points;
+  public sky!: Sky;
   public particles!: ParticleSystem;
   public keys: { [key: string]: boolean } = {};
 
@@ -95,7 +96,6 @@ export class GameEngine {
     const height = this.canvas.clientHeight;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x0a0a14, 0.007); // Dark indigo cyber-fog
 
     this.camera = new THREE.PerspectiveCamera(65, width / height, 0.1, 4000);
 
@@ -106,7 +106,6 @@ export class GameEngine {
     });
     this.renderer.setSize(width, height, false);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x0a0a14, 1);
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0x24244d, 1.0);
@@ -117,8 +116,8 @@ export class GameEngine {
     this.scene.add(this.dirLight);
     this.scene.add(this.dirLight.target);
 
-    // Starfield Background
-    this.createStarfield();
+    // Initialize Sky
+    this.sky = new Sky(this.scene, this.renderer, ambientLight, this.dirLight);
 
     // Setup environments group
     this.environmentGroup = new THREE.Group();
@@ -136,58 +135,6 @@ export class GameEngine {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
   };
-
-  private createStarfield() {
-    const starCount = 1500;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(starCount * 3);
-    const colors = new Float32Array(starCount * 3);
-
-    for (let i = 0; i < starCount; i++) {
-      const u = Math.random();
-      const v = Math.random();
-      const theta = u * 2.0 * Math.PI;
-      const phi = Math.acos(2.0 * v - 1.0);
-      const r = 300 + Math.random() * 200;
-
-      const x = r * Math.sin(phi) * Math.cos(theta);
-      const y = Math.abs(r * Math.sin(phi) * Math.sin(theta));
-      const z = r * Math.cos(phi);
-
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = z;
-
-      const randColor = Math.random();
-      if (randColor < 0.4) {
-        colors[i * 3] = 0.0;
-        colors[i * 3 + 1] = 0.8;
-        colors[i * 3 + 2] = 1.0;
-      } else if (randColor < 0.8) {
-        colors[i * 3] = 1.0;
-        colors[i * 3 + 1] = 0.05;
-        colors[i * 3 + 2] = 0.6;
-      } else {
-        colors[i * 3] = 1.0;
-        colors[i * 3 + 1] = 1.0;
-        colors[i * 3 + 2] = 1.0;
-      }
-    }
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-      size: 1.2,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.8,
-    });
-
-    const stars = new THREE.Points(geometry, material);
-    this.scene.add(stars);
-    this.starsMesh = stars;
-  }
 
   private setupInputs() {
     window.addEventListener('keydown', (e) => {
@@ -243,23 +190,33 @@ export class GameEngine {
   }
 
   public buildGarage() {
+    this.sky.updateTimeOfDay('night');
     this.changeMode('garage', new GarageMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
   public buildOpenWorld() {
+    this.sky.updateTimeOfDay('night');
     this.changeMode('free_roam', new FreeRoamMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
   public buildLicenseTest() {
+    this.sky.updateTimeOfDay('afternoon');
     this.changeMode('license', new LicenseMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
   public buildRaceTrack(trackId: string = 'sprint_circuit') {
     this.activeTrackId = trackId;
+    const trackConfig = TRACKS_DATABASE.find(t => t.id === trackId);
+    if (trackConfig && trackConfig.time) {
+      this.sky.updateTimeOfDay(trackConfig.time);
+    } else {
+      this.sky.updateTimeOfDay('night');
+    }
     this.changeMode('race', new RaceMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, trackId));
   }
 
   public buildTutorial() {
+    this.sky.updateTimeOfDay('afternoon');
     this.changeMode('tutorial', new TutorialMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
@@ -482,9 +439,9 @@ export class GameEngine {
       }
     }
 
-    // Center starfield on camera position to mimic stars at infinity
-    if (this.starsMesh) {
-      this.starsMesh.position.copy(this.camera.position);
+    // Center starfield and sky objects on camera position
+    if (this.sky) {
+      this.sky.updateSkyPosition(this.camera.position);
     }
 
     // 2. Render Loop HUD speed calculations
