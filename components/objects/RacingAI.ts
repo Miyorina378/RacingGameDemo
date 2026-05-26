@@ -3,11 +3,16 @@ import { Vehicle } from './Vehicle';
 import { Obstacle } from './Obstacle';
 
 /**
- * RacingAI — Gran Turismo PS1-style racing AI controller.
+ * RacingAI — Simcade racing AI controller with PD steering and predictive braking.
  *
  * Drives a Vehicle by outputting simulated player inputs (throttleAnalog, reverseAnalog, steerAnalog).
- * Uses spline-following with lookahead, corner-speed braking, smooth steering interpolation,
- * wall/grass/obstacle avoidance, and spin recovery.
+ * Uses:
+ * - Multi-point lookahead blending (near/mid/far)
+ * - PD (Proportional-Derivative) steering controller with yawRate damping
+ * - Curvature-based cornering speed calculation
+ * - Trail braking into corners
+ * - Wall/grass/obstacle avoidance
+ * - Spin recovery
  *
  * No machine learning. No teleportation. Just good old-fashioned simcade AI.
  */
@@ -29,9 +34,14 @@ export class RacingAI {
   private prevClosestIdx: number = 0;    // Cached closest spline index for fast local search
   private recoveryTimer: number = 0;     // Countdown during wall/spin recovery
   private grassTimer: number = 0;        // Time spent continuously on grass
+  private prevYawError: number = 0;      // Previous frame yaw error for derivative term
 
   // Precomputed tangent vectors for corner analysis (computed once on init)
   private tangents: THREE.Vector3[] = [];
+
+  // PD controller gains
+  private readonly KP = 2.2;   // Proportional gain — how aggressively to steer toward target
+  private readonly KD = 0.8;   // Derivative gain — how much yawRate dampens steering
 
   constructor(
     vehicle: Vehicle,
@@ -69,6 +79,28 @@ export class RacingAI {
   }
 
   /**
+   * Compute path curvature at a given index by measuring tangent change over distance.
+   * Returns curvature in 1/meters (higher = sharper turn).
+   */
+  private getCurvatureAt(idx: number, sampleSpan: number = 6): number {
+    const pathLen = this.densePath.length;
+    const aIdx = idx % pathLen;
+    const bIdx = (idx + sampleSpan) % pathLen;
+
+    const tA = this.tangents[aIdx];
+    const tB = this.tangents[bIdx];
+
+    const dot = THREE.MathUtils.clamp(tA.dot(tB), -1, 1);
+    const angle = Math.acos(dot); // Radians of heading change
+
+    // Distance between the two sample points
+    const dist = this.densePath[aIdx].distanceTo(this.densePath[bIdx]);
+    if (dist < 0.1) return 0;
+
+    return angle / dist; // curvature = angle / arc length
+  }
+
+  /**
    * Main AI tick — call once per frame.
    * Returns a keys object that can be passed directly to Vehicle.update().
    */
@@ -91,6 +123,7 @@ export class RacingAI {
     const speed = this.vehicle.speed;
     const yaw = this.vehicle.yaw;
     const maxSpeed = this.vehicle.maxSpeed;
+    const yawRate = this.vehicle.yawRate;
 
     // =============================================
     // 1. FIND CLOSEST SPLINE POINT (local window)
@@ -113,38 +146,63 @@ export class RacingAI {
     this.prevClosestIdx = closestIdx;
 
     // =============================================
-    // 2. DYNAMIC LOOKAHEAD TARGET
+    // 2. MULTI-POINT LOOKAHEAD BLENDING
     // =============================================
-    // Faster car = look further ahead for smoother lines
-    const baseLookahead = 8;
-    const speedLookahead = Math.abs(speed) * 0.22;
-    const lookaheadSteps = Math.round(baseLookahead + speedLookahead);
-    const targetIdx = (closestIdx + lookaheadSteps) % pathLen;
-    const targetPt = this.densePath[targetIdx];
+    // Blend 3 target points: near (tight turns), mid (general), far (straights)
+    const absSpeed = Math.abs(speed);
+    // Convert to km/h for lookahead step sizing (these were tuned for km/h values)
+    const absSpeedKmh = absSpeed * 3.6;
+    const speedRatio = absSpeed / Math.max(maxSpeed, 1);
 
-    // Apply lateral offset along the track normal at the target point
-    const targetTangent = this.tangents[targetIdx];
-    const targetNormal = new THREE.Vector3(-targetTangent.z, 0, targetTangent.x);
-    const offsetTarget = targetPt.clone().addScaledVector(targetNormal, this.lateralOffset);
+    const nearSteps = Math.round(6 + absSpeedKmh * 0.08);
+    const midSteps = Math.round(12 + absSpeedKmh * 0.18);
+    const farSteps = Math.round(20 + absSpeedKmh * 0.30);
+
+    const getTargetYaw = (lookaheadSteps: number): number => {
+      const targetIdx = (closestIdx + lookaheadSteps) % pathLen;
+      const targetPt = this.densePath[targetIdx];
+
+      // Apply lateral offset along track normal
+      const targetTangent = this.tangents[targetIdx];
+      const targetNormal = new THREE.Vector3(-targetTangent.z, 0, targetTangent.x);
+      const offsetTarget = targetPt.clone().addScaledVector(targetNormal, this.lateralOffset);
+
+      const diff = new THREE.Vector3().subVectors(offsetTarget, pos);
+      diff.y = 0;
+      return Math.atan2(diff.x, diff.z);
+    };
+
+    const nearYaw = getTargetYaw(nearSteps);
+    const midYaw = getTargetYaw(midSteps);
+    const farYaw = getTargetYaw(farSteps);
+
+    // Blend weights: at low speed favor near target, at high speed favor far target
+    const nearWeight = THREE.MathUtils.lerp(0.5, 0.15, Math.min(speedRatio, 1.0));
+    const midWeight = 0.35;
+    const farWeight = 1.0 - nearWeight - midWeight;
+
+    // Compute yaw errors for each target
+    const normalizeAngle = (a: number): number => {
+      while (a < -Math.PI) a += Math.PI * 2;
+      while (a > Math.PI) a -= Math.PI * 2;
+      return a;
+    };
+
+    const nearError = normalizeAngle(nearYaw - yaw);
+    const midError = normalizeAngle(midYaw - yaw);
+    const farError = normalizeAngle(farYaw - yaw);
+
+    const blendedYawError = nearError * nearWeight + midError * midWeight + farError * farWeight;
 
     // =============================================
-    // 3. CALCULATE RAW STEERING
+    // 3. PD STEERING CONTROLLER
     // =============================================
-    const diff = new THREE.Vector3().subVectors(offsetTarget, pos);
-    diff.y = 0;
-    const targetYaw = Math.atan2(diff.x, diff.z);
+    // Proportional: steer toward target
+    // Derivative: damp with yaw rate to prevent oscillation
+    let rawSteer = this.KP * blendedYawError - this.KD * yawRate;
+    rawSteer = THREE.MathUtils.clamp(rawSteer, -1.0, 1.0);
 
-    let yawDiff = targetYaw - yaw;
-    // Normalize to [-PI, PI]
-    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
-
-    // Speed-dependent steering gain:
-    // At low speed, higher gain for tighter turns
-    // At high speed, lower gain for stability
-    const speedRatio = Math.abs(speed) / Math.max(maxSpeed, 1);
-    const steerGain = THREE.MathUtils.lerp(3.0, 1.5, Math.min(speedRatio, 1.0));
-    let rawSteer = THREE.MathUtils.clamp(yawDiff * steerGain, -1.0, 1.0);
+    this.prevYawError = blendedYawError;
 
     // =============================================
     // 4. GRASS AWARENESS
@@ -166,9 +224,7 @@ export class RacingAI {
       const toCenter = new THREE.Vector3().subVectors(info.closestPt, pos);
       toCenter.y = 0;
       const centerYaw = Math.atan2(toCenter.x, toCenter.z);
-      let centerYawDiff = centerYaw - yaw;
-      while (centerYawDiff < -Math.PI) centerYawDiff += Math.PI * 2;
-      while (centerYawDiff > Math.PI) centerYawDiff -= Math.PI * 2;
+      const centerYawDiff = normalizeAngle(centerYaw - yaw);
 
       // Blend toward center steering — stronger the longer we've been on grass
       const grassUrgency = Math.min(this.grassTimer * 2.0, 0.7);
@@ -187,9 +243,7 @@ export class RacingAI {
         const toCenter = new THREE.Vector3().subVectors(info.closestPt, pos);
         toCenter.y = 0;
         const centerYaw = Math.atan2(toCenter.x, toCenter.z);
-        let centerDiff = centerYaw - yaw;
-        while (centerDiff < -Math.PI) centerDiff += Math.PI * 2;
-        while (centerDiff > Math.PI) centerDiff -= Math.PI * 2;
+        const centerDiff = normalizeAngle(centerYaw - yaw);
 
         const wallUrgency = THREE.MathUtils.clamp((wallProximity - 0.80) / 0.20, 0, 1);
         rawSteer = THREE.MathUtils.lerp(rawSteer, THREE.MathUtils.clamp(centerDiff * 3.0, -1, 1), wallUrgency * 0.8);
@@ -217,9 +271,7 @@ export class RacingAI {
 
         // Counter-steer: steer toward the spline forward direction
         const recoveryYaw = Math.atan2(velocityVec.x, velocityVec.z);
-        let recoveryDiff = recoveryYaw - yaw;
-        while (recoveryDiff < -Math.PI) recoveryDiff += Math.PI * 2;
-        while (recoveryDiff > Math.PI) recoveryDiff -= Math.PI * 2;
+        const recoveryDiff = normalizeAngle(recoveryYaw - yaw);
 
         rawSteer = THREE.MathUtils.clamp(recoveryDiff * 2.0, -1.0, 1.0);
       }
@@ -231,42 +283,35 @@ export class RacingAI {
     }
 
     // =============================================
-    // 7. SMOOTH STEERING
+    // 7. SMOOTH STEERING (with speed-dependent rate)
     // =============================================
     // Lerp toward raw steer — prevents sudden snap turns
     // Rate is slower at high speed for GT-like stability
-    const smoothRate = THREE.MathUtils.lerp(6.0, 3.0, Math.min(speedRatio, 1.0));
+    const smoothRate = THREE.MathUtils.lerp(8.0, 4.0, Math.min(speedRatio, 1.0));
     this.smoothSteer = THREE.MathUtils.lerp(this.smoothSteer, rawSteer, smoothRate * deltaTime);
 
     // Clamp final steer output
     keys.steerAnalog = THREE.MathUtils.clamp(this.smoothSteer, -1.0, 1.0);
 
     // =============================================
-    // 8. CORNER SPEED CALCULATION (multi-point scan)
+    // 8. CURVATURE-BASED CORNER SPEED
     // =============================================
-    // Look at 3 distances ahead and find the sharpest upcoming turn
-    const scanDistances = [18, 32, 50]; // spline steps ahead
-    let worstCornerSharpness = 0;
+    // Scan multiple distances ahead and find the worst (sharpest) curvature
+    const scanDistances = [nearSteps, midSteps, farSteps, farSteps + 15];
+    let worstCurvature = 0;
 
     for (const scanDist of scanDistances) {
-      const aIdx = (closestIdx + scanDist) % pathLen;
-      const bIdx = (closestIdx + scanDist + 8) % pathLen;
-
-      const tangentA = this.tangents[aIdx];
-      const tangentB = this.tangents[bIdx];
-
-      const dot = THREE.MathUtils.clamp(tangentA.dot(tangentB), -1, 1);
-      const sharpness = Math.acos(dot);
-
-      if (sharpness > worstCornerSharpness) {
-        worstCornerSharpness = sharpness;
+      const curvature = this.getCurvatureAt((closestIdx + scanDist) % pathLen);
+      if (curvature > worstCurvature) {
+        worstCurvature = curvature;
       }
     }
 
-    // Convert corner sharpness to a safe speed
-    // Sharper turn = lower safe speed
-    // sharpness 0 (straight) = full speed, sharpness ~0.5+ (tight corner) = 35-45% speed
-    const cornerSpeedFactor = Math.max(0.30, 1.0 - worstCornerSharpness * 1.4);
+    // Convert curvature to safe cornering speed
+    // v = sqrt(grip × g / curvature), simplified for simcade:
+    // At curvature ~0 (straight), full speed
+    // At curvature ~0.05+ (tight corner), ~35-50% speed
+    const cornerSpeedFactor = Math.max(0.30, 1.0 / (1.0 + worstCurvature * 25.0));
     const baseTargetSpeed = maxSpeed * this.speedFactor;
     let targetSpeed = baseTargetSpeed * cornerSpeedFactor;
 
@@ -281,20 +326,38 @@ export class RacingAI {
     }
 
     // =============================================
-    // 9. THROTTLE / BRAKE CONTROL
+    // 9. TRAIL BRAKING & THROTTLE CONTROL
     // =============================================
     const speedError = targetSpeed - speed;
+
+    // Detect if we're entering a corner (curvature increasing ahead)
+    const currentCurvature = this.getCurvatureAt(closestIdx);
+    const aheadCurvature = this.getCurvatureAt((closestIdx + midSteps) % pathLen);
+    const isCornerEntry = aheadCurvature > currentCurvature * 1.5 && aheadCurvature > 0.01;
 
     if (speedError > 0) {
       // Need to accelerate
       // Soft throttle ramp — more gas when far from target, less when close
-      keys.throttleAnalog = THREE.MathUtils.clamp(speedError * 0.15, 0.05, 1.0);
+      let throttle = THREE.MathUtils.clamp(speedError * 0.12, 0.05, 1.0);
+
+      // In corner entry, be gentler on throttle
+      if (isCornerEntry) {
+        throttle *= 0.6;
+      }
+
+      keys.throttleAnalog = throttle;
       keys.reverseAnalog = 0;
     } else {
       // Need to slow down
       keys.throttleAnalog = 0;
-      // Progressive braking — harder braking for larger overspeed
-      keys.reverseAnalog = THREE.MathUtils.clamp(-speedError * 0.25, 0, 1.0);
+
+      // Trail braking: progressive braking that eases off as we approach target speed
+      // Harder braking when further from target, lighter as we get close
+      const brakeIntensity = THREE.MathUtils.clamp(-speedError * 0.20, 0, 1.0);
+
+      // In corner entry, brake harder (trail braking)
+      const trailBrakeFactor = isCornerEntry ? 1.3 : 1.0;
+      keys.reverseAnalog = Math.min(1.0, brakeIntensity * trailBrakeFactor);
     }
 
     // =============================================
@@ -303,7 +366,7 @@ export class RacingAI {
     // Reduce throttle when turning hard — prevents AI from overdriving corners
     const steerMagnitude = Math.abs(this.smoothSteer);
     if (steerMagnitude > 0.15 && typeof keys.throttleAnalog === 'number') {
-      const throttleReduction = 1.0 - steerMagnitude * 0.4;
+      const throttleReduction = 1.0 - steerMagnitude * 0.35;
       keys.throttleAnalog = (keys.throttleAnalog as number) * Math.max(0.3, throttleReduction);
     }
 

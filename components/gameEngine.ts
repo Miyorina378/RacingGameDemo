@@ -47,6 +47,7 @@ export class GameEngine {
   public gameTimer = 0;
   public isPaused = false;
   public activeTrackId = 'sprint_circuit';
+  public cameraViewMode: 'chase' | 'driver' = 'chase';
 
   // Player Stats
   public playerCredits = 500;
@@ -142,6 +143,12 @@ export class GameEngine {
       if (e.key.toLowerCase() === 'r' && this.activeMode !== 'garage' && !this.isPaused) {
         this.resetCar();
       }
+      if (e.key.toLowerCase() === 'z' && this.activeMode !== 'garage' && !this.isPaused) {
+        this.cameraViewMode = this.cameraViewMode === 'chase' ? 'driver' : 'chase';
+        if (this.cameraViewMode === 'chase') {
+          this.camera.up.set(0, 1, 0);
+        }
+      }
     });
 
     window.addEventListener('keyup', (e) => {
@@ -169,24 +176,40 @@ export class GameEngine {
   }
 
   private snapCameraBehindCar() {
-    const followDist = 8.5;
-    const heightOffset = 3.6;
+    if (this.cameraViewMode === 'driver') {
+      this.vehicle.mesh.updateMatrixWorld(true);
+      const localCamPos = new THREE.Vector3(0, 1.05, 0.8);
+      const worldCamPos = localCamPos.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
+      this.camera.position.copy(worldCamPos);
 
-    const backOffset = new THREE.Vector3(0, 0, -1)
-      .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.vehicle.yaw)
-      .multiplyScalar(followDist);
+      const localLookDir = new THREE.Vector3(0, 1.05, 10.8);
+      const worldLookTarget = localLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
+      this.camera.lookAt(worldLookTarget);
 
-    const camPos = new THREE.Vector3()
-      .copy(this.vehicle.pos)
-      .add(backOffset);
-    camPos.y += heightOffset;
+      const localUp = new THREE.Vector3(0, 1, 0);
+      const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
+      this.camera.up.copy(worldUp);
+    } else {
+      this.camera.up.set(0, 1, 0);
+      const followDist = 8.5;
+      const heightOffset = 3.6;
 
-    this.camera.position.copy(camPos);
+      const backOffset = new THREE.Vector3(0, 0, -1)
+        .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.vehicle.yaw)
+        .multiplyScalar(followDist);
 
-    const lookTarget = new THREE.Vector3()
-      .copy(this.vehicle.pos)
-      .add(new THREE.Vector3(0, 0.5, 0));
-    this.camera.lookAt(lookTarget);
+      const camPos = new THREE.Vector3()
+        .copy(this.vehicle.pos)
+        .add(backOffset);
+      camPos.y += heightOffset;
+
+      this.camera.position.copy(camPos);
+
+      const lookTarget = new THREE.Vector3()
+        .copy(this.vehicle.pos)
+        .add(new THREE.Vector3(0, 0.5, 0));
+      this.camera.lookAt(lookTarget);
+    }
   }
 
   public buildGarage() {
@@ -444,8 +467,8 @@ export class GameEngine {
       this.sky.updateSkyPosition(this.camera.position);
     }
 
-    // 2. Render Loop HUD speed calculations
-    const displaySpeed = Math.round(Math.abs(this.vehicle.speed));
+    // 2. Render Loop HUD speed calculations (convert m/s → km/h for display)
+    const displaySpeed = Math.round(Math.abs(this.vehicle.speed) * 3.6);
     this.callbacks.onSpeedChange(displaySpeed);
     if (this.callbacks.onVehicleStatsChange) {
       this.callbacks.onVehicleStatsChange(
@@ -485,25 +508,44 @@ export class GameEngine {
       );
       this.camera.lookAt(0, 0.9, 0);
     } else {
-      const followDist = 8.5;
-      const heightOffset = 3.6;
+      if (this.cameraViewMode === 'driver') {
+        this.vehicle.mesh.updateMatrixWorld(true);
+        
+        // Offset: placed on the hood/roof facing forward (x=0, y=1.05, z=0.8)
+        const localCamPos = new THREE.Vector3(0, 1.05, 0.8);
+        const worldCamPos = localCamPos.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
+        this.camera.position.copy(worldCamPos);
 
-      const backOffset = new THREE.Vector3(0, 0, -1)
-        .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.vehicle.yaw)
-        .multiplyScalar(followDist);
+        const localLookDir = new THREE.Vector3(0, 1.05, 10.8);
+        const worldLookTarget = localLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
+        this.camera.lookAt(worldLookTarget);
 
-      const targetCamPos = new THREE.Vector3()
-        .copy(this.vehicle.pos)
-        .add(backOffset);
+        const localUp = new THREE.Vector3(0, 1, 0);
+        const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
+        this.camera.up.copy(worldUp);
+      } else {
+        this.camera.up.set(0, 1, 0);
+        
+        const followDist = 8.5;
+        const heightOffset = 3.6;
 
-      targetCamPos.y += heightOffset;
-      this.camera.position.lerp(targetCamPos, 0.15);
+        const backOffset = new THREE.Vector3(0, 0, -1)
+          .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.vehicle.yaw)
+          .multiplyScalar(followDist);
 
-      const lookTarget = new THREE.Vector3()
-        .copy(this.vehicle.pos)
-        .add(new THREE.Vector3(0, 0.5, 0));
+        const targetCamPos = new THREE.Vector3()
+          .copy(this.vehicle.pos)
+          .add(backOffset);
 
-      this.camera.lookAt(lookTarget);
+        targetCamPos.y += heightOffset;
+        this.camera.position.lerp(targetCamPos, 0.15);
+
+        const lookTarget = new THREE.Vector3()
+          .copy(this.vehicle.pos)
+          .add(new THREE.Vector3(0, 0.5, 0));
+
+        this.camera.lookAt(lookTarget);
+      }
     }
   }
 

@@ -91,7 +91,7 @@ export class FreeRoamMode extends BaseMode {
     }
 
     // 5. Fire boosters at high speed throttle
-    if (Math.abs(this.vehicle.speed) > 20 && (this.keys['w'] || this.keys['arrowup'])) {
+    if (Math.abs(this.vehicle.speed) > 5.6 && (this.keys['w'] || this.keys['arrowup'])) {
       this.particles.emitBoosters(this.vehicle.mesh.matrixWorld, this.vehicle.yaw, this.vehicle.speed, this.vehicle.boosterColor);
     }
 
@@ -111,7 +111,7 @@ export class FreeRoamMode extends BaseMode {
           this.vehicle.pitch = collision.slantAngle;
           
           // Launch off the lip of the ramp!
-          if (collision.progress > 0.95 && this.vehicle.speed > 15) {
+          if (collision.progress > 0.95 && this.vehicle.speed > 4.2) {
             this.vehicle.isGrounded = false;
             // Launch velocity based on speed and slant angle
             this.vehicle.yVelocity = this.vehicle.speed * Math.sin(-collision.slantAngle) * 0.95 + 3.0;
@@ -141,7 +141,7 @@ export class FreeRoamMode extends BaseMode {
           this.particles.emitSparks(15, this.vehicle.pos, 0xff00ff);
           
           // Reduce speed significantly and reverse direction
-          this.vehicle.speed = -this.vehicle.speed * 0.4;
+          this.vehicle.setForwardSpeed(-this.vehicle.speed * 0.4);
           this.collisionCooldown = 0.5; // half second immunity
           
           // Reset drift multiplier
@@ -167,7 +167,8 @@ export class FreeRoamMode extends BaseMode {
   }
 
   private accumulateDriftingPoints(deltaTime: number) {
-    const points = Math.round(Math.abs(this.vehicle.speed) * Math.abs(this.vehicle.driftAngle) * 5 * deltaTime);
+    // Speed is in m/s; multiply by 18 (was 5) to maintain same drift point rate at 3.6× lower speed values
+    const points = Math.round(Math.abs(this.vehicle.speed) * Math.abs(this.vehicle.driftAngle) * 18 * deltaTime);
     if (points > 0) {
       this.engine.accumulateDrift(points);
     }

@@ -1514,6 +1514,10 @@ export default function Game() {
         <div className="flex flex-col gap-3 pointer-events-auto">
           {activeMode === 'garage' && (
             <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+              <span className="text-xs font-black tracking-[0.25em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500 uppercase select-none italic font-sans pr-1">
+                CYBER DRIVE
+              </span>
+              <div className="h-4 w-px bg-slate-800" />
               <div className="flex items-center gap-2" onClick={cheatCredits} title="Double-click to get test credits!">
                 <Coins className="w-5 h-5 text-yellow-400 cursor-pointer hover:scale-110 transition-transform" />
                 <span className="font-mono font-bold text-yellow-400 text-lg">
@@ -2124,7 +2128,7 @@ export default function Game() {
                             </div>
                             <div className="flex flex-col items-end">
                               <span className={`text-[10px] font-mono ${!isLocked ? 'text-cyan-400' : 'text-slate-500'}`}>
-                                Up to +1000 CR
+                                Up to +{track.baseReward} CR
                               </span>
                               <span className="text-[9px] font-mono text-slate-500">
                                 {formatDistance(length)}

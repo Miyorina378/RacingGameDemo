@@ -93,8 +93,8 @@ export class ParticleSystem {
     mesh.position.copy(boosterPos);
     this.scene.add(mesh);
 
-    // Blast backwards relative to car orientation
-    const backVector = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), carYaw).multiplyScalar(8 + Math.abs(speed) * 0.4);
+    // Speed is in m/s; multiplier scaled up (1.44 vs 0.4) to maintain same visual blast length
+    const backVector = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), carYaw).multiplyScalar(8 + Math.abs(speed) * 1.44);
     
     this.boosterParticles.push({
       mesh,

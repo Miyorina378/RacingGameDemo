@@ -99,7 +99,7 @@ export class LicenseMode extends BaseMode {
     }
     
     // Speed exhaust booster flames
-    if (Math.abs(this.vehicle.speed) > 20 && (this.keys['w'] || this.keys['arrowup'])) {
+    if (Math.abs(this.vehicle.speed) > 5.6 && (this.keys['w'] || this.keys['arrowup'])) {
       this.particles.emitBoosters(this.vehicle.mesh.matrixWorld, this.vehicle.yaw, this.vehicle.speed, this.vehicle.boosterColor);
     }
     this.particles.update(deltaTime);
