@@ -273,7 +273,7 @@ export class RaceMode extends BaseMode {
       }
 
       // Emit boosters if going fast
-      if (ai.vehicle.speed > 20) {
+      if (ai.vehicle.speed > 5.6) {
         this.particles.emitBoosters(ai.vehicle.mesh.matrixWorld, ai.vehicle.yaw, ai.vehicle.speed, ai.vehicle.boosterColor);
       }
 
@@ -296,8 +296,8 @@ export class RaceMode extends BaseMode {
         ai.vehicle.pos.addScaledVector(collisionVec, -pushForce * deltaTime);
 
         // Reduce speed slightly
-        this.vehicle.speed *= 0.85;
-        ai.vehicle.speed *= 0.85;
+        this.vehicle.scaleVelocity(0.85);
+        ai.vehicle.scaleVelocity(0.85);
         ai.speed = ai.vehicle.speed;
 
         // Visual Spark particles on the contact point
@@ -321,8 +321,8 @@ export class RaceMode extends BaseMode {
             ai.vehicle.pos.addScaledVector(collisionVec, pushForce * deltaTime);
             otherAi.vehicle.pos.addScaledVector(collisionVec, -pushForce * deltaTime);
 
-            ai.vehicle.speed *= 0.9;
-            otherAi.vehicle.speed *= 0.9;
+            ai.vehicle.scaleVelocity(0.9);
+            otherAi.vehicle.scaleVelocity(0.9);
             ai.speed = ai.vehicle.speed;
             otherAi.speed = otherAi.vehicle.speed;
 
@@ -345,7 +345,7 @@ export class RaceMode extends BaseMode {
     }
     
     // Boosters fire at speed
-    if (Math.abs(this.vehicle.speed) > 20 && (this.keys['w'] || this.keys['arrowup'])) {
+    if (Math.abs(this.vehicle.speed) > 5.6 && (this.keys['w'] || this.keys['arrowup'])) {
       this.particles.emitBoosters(this.vehicle.mesh.matrixWorld, this.vehicle.yaw, this.vehicle.speed, this.vehicle.boosterColor);
     }
     this.particles.update(deltaTime);
@@ -488,7 +488,7 @@ export class RaceMode extends BaseMode {
   }
 
   private triggerCrash() {
-    this.vehicle.speed = -5; // Bounce velocity
+    this.vehicle.setForwardSpeed(-1.4); // Bounce velocity (~5 km/h)
     this.particles.emitSparks(35, this.vehicle.pos, 0xff0000); // Big orange-red explosion
     
     // Shake coordinates slightly

@@ -40,7 +40,7 @@ export class TutorialMode extends BaseMode {
     }
     
     // Jet exhausts
-    if (Math.abs(this.vehicle.speed) > 20 && (this.keys['w'] || this.keys['arrowup'])) {
+    if (Math.abs(this.vehicle.speed) > 5.6 && (this.keys['w'] || this.keys['arrowup'])) {
       this.particles.emitBoosters(this.vehicle.mesh.matrixWorld, this.vehicle.yaw, this.vehicle.speed, this.vehicle.boosterColor);
     }
     this.particles.update(deltaTime);
@@ -55,7 +55,7 @@ export class TutorialMode extends BaseMode {
           this.vehicle.pos.y = collision.rampHeight;
           this.vehicle.pitch = collision.slantAngle;
           
-          if (collision.progress > 0.95 && this.vehicle.speed > 15) {
+          if (collision.progress > 0.95 && this.vehicle.speed > 4.2) {
             this.vehicle.isGrounded = false;
             this.vehicle.yVelocity = this.vehicle.speed * Math.sin(-collision.slantAngle) * 0.95 + 3.0;
           }
