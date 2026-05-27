@@ -30,6 +30,8 @@ export class Obstacle {
 
       this.mesh = new THREE.Mesh(geometry, material);
       this.mesh.position.set(pos.x, height / 2, pos.z);
+      this.mesh.castShadow = true;
+      this.mesh.receiveShadow = true;
 
       // Add a glowing wireframe edge overlay
       const wireframe = new THREE.EdgesGeometry(geometry);
@@ -51,6 +53,8 @@ export class Obstacle {
       this.mesh = new THREE.Mesh(geometry, material);
       this.mesh.position.copy(pos);
       this.mesh.position.y = 2.5;
+      this.mesh.castShadow = true;
+      this.mesh.receiveShadow = true;
 
       // Glowing red rings around it
       const borderGeom = new THREE.BoxGeometry(3, 0.2, 3);

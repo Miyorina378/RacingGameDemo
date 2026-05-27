@@ -28,6 +28,8 @@ export class Ramp {
     this.rampMesh = new THREE.Mesh(rampGeom, rampMat);
     this.rampMesh.position.set(0, this.height / 2, 0);
     this.rampMesh.rotation.x = -Math.atan2(this.height, this.length); // Slanted angle
+    this.rampMesh.castShadow = true;
+    this.rampMesh.receiveShadow = true;
     this.mesh.add(this.rampMesh);
 
     // Add warning side stripes

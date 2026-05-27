@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CARS_DATABASE } from '../config/CarDatabase';
 import { updateGrassInstability, applyGrassLateralSlide, applyGrassSpeedReduction } from './Grass';
 import { enforceFenceBoundary } from './Fence';
@@ -55,6 +56,7 @@ export class Vehicle {
   public prevSpeed = 0;             // Previous frame speed for computing longitudinal acceleration
   public longitudinalAccel = 0;     // Smoothed acceleration value (m/s²) for pitch effects
   public shiftPitchImpulse = 0;     // Transient pitch impulse during gear shifts
+  private wheelSpinAngle = 0;       // Accumulated wheel rolling angle (radians) for visual spin
 
   // --- SPIN-OUT & CAR CHARACTER VARIABLES ---
   public rearSlipAngle = 0;         // Current rear tire slip angle (radians)
@@ -250,6 +252,14 @@ export class Vehicle {
   }
 
   private buildMesh() {
+    if (this.carId === 'honda_s2000') {
+      this.buildGltfMesh('/models/honda_s2000.glb');
+    } else {
+      this.buildProceduralMesh();
+    }
+  }
+
+  private buildProceduralMesh() {
     // Chassis Base
     const chassisGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
     const chassisMat = new THREE.MeshStandardMaterial({
@@ -374,20 +384,26 @@ export class Vehicle {
     });
 
     const createWheelAssembly = (x: number, y: number, z: number, isFront: boolean) => {
-      const wGroup = new THREE.Group();
-      wGroup.position.set(x, y, z);
+      // Outer group: handles position + steering (Y rotation only)
+      const steerPivot = new THREE.Group();
+      steerPivot.position.set(x, y, z);
+
+      // Inner group: handles rolling spin (X rotation only)
+      const spinNode = new THREE.Group();
+      steerPivot.add(spinNode);
+      steerPivot.userData.spinNode = spinNode;
 
       const tire = new THREE.Mesh(wheelGeom, wheelMat);
       const rim = new THREE.Mesh(rimGeom, rimMat);
-      wGroup.add(tire);
-      wGroup.add(rim);
+      spinNode.add(tire);
+      spinNode.add(rim);
 
-      this.mesh.add(wGroup);
-      this.wheels.push(wGroup);
+      this.mesh.add(steerPivot);
+      this.wheels.push(steerPivot);
 
       if (isFront) {
-        if (x < 0) this.leftFrontWheel = wGroup;
-        else this.rightFrontWheel = wGroup;
+        if (x < 0) this.leftFrontWheel = steerPivot;
+        else this.rightFrontWheel = steerPivot;
       }
     };
 
@@ -396,6 +412,356 @@ export class Vehicle {
     createWheelAssembly(1.25, 0.48, 1.6, true);   // Front Right
     createWheelAssembly(-1.25, 0.48, -1.6, false); // Rear Left
     createWheelAssembly(1.25, 0.48, -1.6, false);  // Rear Right
+
+    // Enable shadows for the entire vehicle assembly
+    this.mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }
+
+  private buildGltfMesh(modelPath: string) {
+    // 1. Build a basic procedural box placeholder and fallback wheels synchronously
+    // so visual bounds are present and physics loop doesn't crash during network load.
+    const placeholderGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
+    const placeholderMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(this.color),
+      roughness: 0.5,
+      metalness: 0.5,
+      transparent: true,
+      opacity: 0.6
+    });
+    const placeholder = new THREE.Mesh(placeholderGeom, placeholderMat);
+    placeholder.position.y = 0.45;
+    this.mesh.add(placeholder);
+
+    this.buildFallbackWheels();
+
+    // 2. Load the actual model asynchronously
+    const loader = new GLTFLoader();
+    loader.load(
+      modelPath,
+      (gltf: GLTF) => {
+        // Clear all temporary placeholder meshes from this.mesh
+        while (this.mesh.children.length > 0) {
+          this.mesh.remove(this.mesh.children[0]);
+        }
+        this.wheels = [];
+        this.leftFrontWheel = undefined;
+        this.rightFrontWheel = undefined;
+
+        const model = gltf.scene;
+
+        // Auto-scale and align the model
+        // We compute the bounding box of ONLY the THREE.Mesh children in the model,
+        // rather than using setFromObject(model) which includes helper/camera/light nodes at infinity.
+        const meshBox = new THREE.Box3();
+        let hasMeshes = false;
+        model.traverse((child: THREE.Object3D) => {
+          if (child instanceof THREE.Mesh) {
+            meshBox.expandByObject(child);
+            hasMeshes = true;
+          }
+        });
+
+        const box = hasMeshes ? meshBox : new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+
+        // Target length is 4.8m to match collision bounds
+        const targetLength = 4.8;
+        const carLength = Math.max(size.x, size.y, size.z);
+        const scaleFactor = targetLength / Math.max(0.1, carLength);
+
+        // Apply config visualScale override if defined
+        const config = CARS_DATABASE.find(c => c.id === this.carId) || CARS_DATABASE[0];
+        const dbScale = config.visualScale !== undefined ? config.visualScale : 1.0;
+        const finalScale = scaleFactor * dbScale;
+        model.scale.set(finalScale, finalScale, finalScale);
+
+        const center = box.getCenter(new THREE.Vector3());
+        // Align bottom of wheels/chassis to y = 0
+        model.position.set(-center.x * finalScale, -box.min.y * finalScale, -center.z * finalScale);
+
+        this.mesh.add(model);
+
+        // Update matrices so world positions are accurate
+        this.mesh.updateMatrixWorld(true);
+        model.updateMatrixWorld(true);
+
+        // Traverse the loaded GLTF model
+        const paintColor = new THREE.Color(this.color);
+        let originalWheels: THREE.Object3D[] = [];
+
+        model.traverse((child: THREE.Object3D) => {
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+
+            // Dynamically paint the car body parts (handles array materials safely)
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach((mat, idx) => {
+              if (mat && (mat as any).name) {
+                const matName = (mat as any).name.toLowerCase();
+                const nodeName = child.name.toLowerCase();
+                if (
+                  nodeName.includes('body') ||
+                  nodeName.includes('paint') ||
+                  nodeName.includes('chassis') ||
+                  nodeName.includes('exterior') ||
+                  matName.includes('body') ||
+                  matName.includes('paint') ||
+                  matName.includes('exterior') ||
+                  matName.includes('car_paint')
+                ) {
+                  const clonedMat = mat.clone();
+                  if ((clonedMat as any).color) {
+                    (clonedMat as any).color.copy(paintColor);
+                  }
+                  if (Array.isArray(child.material)) {
+                    child.material[idx] = clonedMat;
+                  } else {
+                    child.material = clonedMat;
+                  }
+                }
+              }
+            });
+          }
+        });
+
+        // Search for wheel groups/nodes by name
+        const candidates: THREE.Object3D[] = [];
+        const posRegex = /\b(front|rear|back|left|right|fl|fr|rl|rr|lf|rf|lr|rr)\b|[_ -](l|r|f|b)(?:\b|[_ -]|\d)/i;
+
+        model.traverse((child: THREE.Object3D) => {
+          const name = child.name.toLowerCase();
+          const isWheelTireRim = name.includes('wheel') || name.includes('tire') || name.includes('rim');
+          if (isWheelTireRim && posRegex.test(child.name)) {
+            candidates.push(child);
+          }
+        });
+
+        // Filter to keep only the highest candidate (no ancestor in candidates)
+        originalWheels = candidates.filter(child => {
+          let curr = child.parent;
+          while (curr && curr !== model) {
+            if (candidates.includes(curr)) {
+              return false;
+            }
+            curr = curr.parent;
+          }
+          return true;
+        });
+
+        // Process collected wheels with a 2-level pivot hierarchy:
+        //   steerPivot (position + steering Y) → spinNode (rolling X) → wheel mesh
+        // This separates steering from spin, preventing axis interference.
+        const wheelNodes: THREE.Object3D[] = [];
+        originalWheels.forEach((child) => {
+          child.updateMatrixWorld(true);
+
+          // Use the bounding-box center as the pivot position, NOT the mesh origin.
+          // GLTF models often have mesh origins at the car center, not the wheel center.
+          // Using the visual center ensures the spin axis passes through the wheel hub.
+          const bbox = new THREE.Box3().setFromObject(child);
+          const visualCenter = bbox.getCenter(new THREE.Vector3());
+
+          // Outer group: handles position + steering (Y rotation only)
+          const steerPivot = new THREE.Group();
+          steerPivot.name = child.name + '_steer';
+          this.mesh.add(steerPivot);
+          steerPivot.position.copy(this.mesh.worldToLocal(visualCenter.clone()));
+
+          // Apply model visual scale directly to steerPivot since it's now under this.mesh
+          steerPivot.scale.set(finalScale, finalScale, finalScale);
+
+          // Inner group: handles rolling spin (X rotation only)
+          const spinNode = new THREE.Group();
+          steerPivot.add(spinNode);
+          steerPivot.userData.spinNode = spinNode;
+
+          // Update matrices so attach() can calculate local transforms correctly using updated world matrices
+          steerPivot.updateMatrixWorld(true);
+
+          // Reparent the wheel mesh into spinNode, preserving its world transform.
+          spinNode.attach(child);
+
+          // --- Eliminate orbital offset ---
+          // Update matrices after attachment to ensure world positions are accurate.
+          child.updateMatrixWorld(true);
+
+          // Compute local bounding box of child (including its own geometry and all descendants) in child's local space.
+          const localBox = new THREE.Box3();
+          child.traverse((node) => {
+            if (node instanceof THREE.Mesh && node.geometry) {
+              if (!node.geometry.boundingBox) {
+                node.geometry.computeBoundingBox();
+              }
+              const nodeBox = node.geometry.boundingBox.clone();
+              node.updateMatrixWorld(true);
+              // Compute transform matrix from node to child
+              const m = new THREE.Matrix4().multiplyMatrices(child.matrixWorld.clone().invert(), node.matrixWorld);
+              nodeBox.applyMatrix4(m);
+              localBox.union(nodeBox);
+            }
+          });
+
+          const localCenter = localBox.getCenter(new THREE.Vector3());
+
+          // Shift child's own geometry if it is a Mesh
+          if (child instanceof THREE.Mesh && child.geometry) {
+            child.geometry = child.geometry.clone();
+            child.geometry.translate(-localCenter.x, -localCenter.y, -localCenter.z);
+          }
+
+          // Shift all immediate children's positions
+          child.children.forEach((c) => {
+            c.position.sub(localCenter);
+          });
+
+          // Reset child's local position to exactly (0, 0, 0) relative to spinNode
+          child.position.set(0, 0, 0);
+
+          console.log(`[Wheel] ${child.name} type=${child.type} pos=[${child.position.toArray().map(v => v.toFixed(4))}] quat=[${child.quaternion.toArray().map(v => v.toFixed(4))}] children=${child.children.length}`);
+
+          wheelNodes.push(steerPivot);
+        });
+
+        this.wheels = wheelNodes;
+
+        // Search for caliper nodes by name and attach them to the corresponding steerPivot
+        model.traverse((child: THREE.Object3D) => {
+          const name = child.name.toLowerCase();
+          if (name.includes('caliper') || name.includes('calliper')) {
+            // Avoid adding submeshes of calipers we already processed
+            let hasParentInList = false;
+            let p = child.parent;
+            while (p && p !== model) {
+              const pName = p.name.toLowerCase();
+              if (pName.includes('caliper') || pName.includes('calliper')) {
+                hasParentInList = true;
+                break;
+              }
+              p = p.parent;
+            }
+            if (hasParentInList) return;
+
+            // Identify its position
+            const isFront = name.includes('front') || name.includes('fl') || name.includes('fr') || name.includes('_f');
+            const isLeft = /left|\b(l)\b|[_ -]l(?:\b|[_ -]|\d)/i.test(name);
+            
+            // Find the matching steerPivot
+            const matchingWheel = wheelNodes.find(w => {
+              const wName = w.name.toLowerCase();
+              const wFront = wName.includes('front') || wName.includes('fl') || wName.includes('fr') || wName.includes('_f');
+              const wLeft = /left|\b(l)\b|[_ -]l(?:\b|[_ -]|\d)/i.test(wName);
+              return wFront === isFront && wLeft === isLeft;
+            });
+            
+            if (matchingWheel) {
+              child.updateMatrixWorld(true);
+              matchingWheel.updateMatrixWorld(true);
+              // Reparent the caliper to steerPivot (not spinNode, so it steers but doesn't spin)
+              matchingWheel.attach(child);
+              console.log(`[Caliper] Reparented ${child.name} to steerPivot ${matchingWheel.name}`);
+            }
+          }
+        });
+
+        console.log(`[GLTF Load Success] S2000 loaded. Size:`, size, `Scale factor:`, scaleFactor, `Final scale:`, finalScale, `Wheel nodes detected:`, wheelNodes.map(w => w.name));
+
+        // Map front steering wheels
+        this.wheels.forEach((wheel) => {
+          const name = wheel.name.toLowerCase();
+          const isFront = /front|fore|\b(f)\b|[_ -]f(?:\b|[_ -]|\d)/i.test(name);
+          const isLeft = /left|\b(l)\b|[_ -]l(?:\b|[_ -]|\d)/i.test(name);
+
+          if (isFront) {
+            if (isLeft) {
+              this.leftFrontWheel = wheel;
+            } else {
+              this.rightFrontWheel = wheel;
+            }
+          }
+        });
+
+        // Fallback: If no wheel nodes found in the model, build procedural ones
+        if (this.wheels.length === 0) {
+          this.buildFallbackWheels();
+        } else {
+          // If we couldn't properly classify left/right front, assign fallback references
+          if (!this.leftFrontWheel || !this.rightFrontWheel) {
+            this.leftFrontWheel = this.wheels[0];
+            this.rightFrontWheel = this.wheels[1] || this.wheels[0];
+          }
+        }
+
+        // Add underglow, lights, and exhaust particle systems (only light sources/particles, no duplicate box meshes)
+        this.addGltfVisualHelpers();
+      },
+      undefined,
+      (err: any) => {
+        console.error('Failed to load Honda S2000 model:', err);
+      }
+    );
+  }
+
+  private buildFallbackWheels() {
+    const wheelGeom = new THREE.CylinderGeometry(this.wheelRadius, this.wheelRadius, 0.44, 16);
+    wheelGeom.rotateZ(Math.PI / 2);
+    const wheelMat = new THREE.MeshStandardMaterial({
+      color: 0x111115,
+      roughness: 0.8,
+    });
+    const rimGeom = new THREE.CylinderGeometry(this.wheelRadius * (0.28 / 0.48), this.wheelRadius * (0.28 / 0.48), 0.46, 8);
+    rimGeom.rotateZ(Math.PI / 2);
+    const rimMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffff,
+      emissive: 0x003333,
+      metalness: 0.9,
+    });
+
+    const createWheelAssembly = (x: number, y: number, z: number, isFront: boolean) => {
+      const steerPivot = new THREE.Group();
+      steerPivot.position.set(x, y, z);
+
+      const spinNode = new THREE.Group();
+      steerPivot.add(spinNode);
+      steerPivot.userData.spinNode = spinNode;
+
+      const tire = new THREE.Mesh(wheelGeom, wheelMat);
+      const rim = new THREE.Mesh(rimGeom, rimMat);
+      spinNode.add(tire);
+      spinNode.add(rim);
+
+      this.mesh.add(steerPivot);
+      this.wheels.push(steerPivot);
+
+      if (isFront) {
+        if (x < 0) this.leftFrontWheel = steerPivot;
+        else this.rightFrontWheel = steerPivot;
+      }
+    };
+
+    createWheelAssembly(-1.25, 0.48, 1.6, true);
+    createWheelAssembly(1.25, 0.48, 1.6, true);
+    createWheelAssembly(-1.25, 0.48, -1.6, false);
+    createWheelAssembly(1.25, 0.48, -1.6, false);
+  }
+
+  private addGltfVisualHelpers() {
+    // 1. Front spot light beam (no box mesh, only the spot light source)
+    const frontSpot = new THREE.SpotLight(0x00ffff, 4, 30, Math.PI / 4, 0.5, 1);
+    frontSpot.position.set(0, 0.5, 2.5);
+    frontSpot.target.position.set(0, 0, 10);
+    this.mesh.add(frontSpot);
+    this.mesh.add(frontSpot.target);
+
+    // 2. Underglow PointLight (no box mesh, only the light source)
+    const underglow = new THREE.PointLight(new THREE.Color(this.color), 3, 6);
+    underglow.position.set(0, -0.2, 0);
+    this.mesh.add(underglow);
   }
 
   public updateStats() {
@@ -428,6 +794,10 @@ export class Vehicle {
     if (config.tier === 'Sport Tier') baseMass = 1100;
     else if (config.tier === 'Hyper Tier') baseMass = 1000;
     else if (config.tier === 'Legendary Tier') baseMass = 950;
+    
+    if (config.baseMass !== undefined) {
+      baseMass = config.baseMass;
+    }
     this.baseMass = baseMass;
 
     // [UPGRADE IMPACT]: Weight Reduction stage directly drops target mass (lighter = quicker)
@@ -440,7 +810,8 @@ export class Vehicle {
     this.brakingRate = (config.brakingRate !== undefined ? config.brakingRate : 0.8) + (this.upgrades.brake.level * 0.25);
 
     // [UPGRADE IMPACT]: Engine blueprinting/balancing & ECU expansion raises structural safety limits for RPM
-    this.maxRpm = 6500 + (this.upgrades.engine.ecuLevel * 250) + (this.upgrades.engine.engineBalancingLevel * 350);
+    const configMaxRpm = config.maxRpm !== undefined ? config.maxRpm : 6500;
+    this.maxRpm = configMaxRpm + (this.upgrades.engine.ecuLevel * 250) + (this.upgrades.engine.engineBalancingLevel * 350);
 
     // [UPGRADE IMPACT]: Custom Gearbox ratio setups increase potential Top Speed bound caps (in m/s)
     if (this.upgrades.driveTrain.gearboxLevel > 0) {
@@ -611,12 +982,16 @@ export class Vehicle {
     // --- STEERING INPUT: smoothly interpolate steer angle with speed sensitivity and assists ---
     // At high speeds, full steering angle causes instant tire saturation (extreme understeer).
     // We scale down the max steering angle based on speed to keep tires near peak grip.
+    // However, if the player is drifting or handbraking, we allow a wider steering angle to control the slide or spin.
+    const isDriftingOrHandbraking = this.isDrifting || handbrake;
+    const maxSteerLimit = isDriftingOrHandbraking ? 0.35 : 0.16;
     const speedRatio = Math.min(1.0, absForward / Math.max(1, this.maxSpeed));
-    const maxSteer = THREE.MathUtils.lerp(0.45, 0.12, speedRatio);
+    const maxSteer = THREE.MathUtils.lerp(0.45, maxSteerLimit, speedRatio);
 
     // Dynamic Countersteer Assist (Stability Helper)
+    // Disabled if handbrake is pulled or if the slide exceeds the point of no return (driftAngle >= 0.75 rad)
     let assistSteer = 0;
-    if (absForward > 5 && Math.abs(this.driftAngle) > 0.05) {
+    if (absForward > 5 && Math.abs(this.driftAngle) > 0.05 && !handbrake && Math.abs(this.driftAngle) < 0.75) {
       const isCounterSteer = turnInput * this.driftAngle < 0;
       const isNeutral = Math.abs(turnInput) < 0.05;
       
@@ -627,6 +1002,12 @@ export class Vehicle {
         assistFactor = 0.70; // Help player catch the slide
       } else {
         assistFactor = 0.10; // Player steering into slide, reduce assist
+      }
+
+      // Fade out assist as the slide gets extreme (approaching spin-out)
+      if (Math.abs(this.driftAngle) > 0.5) {
+        const fade = (0.75 - Math.abs(this.driftAngle)) / 0.25;
+        assistFactor *= Math.max(0, fade);
       }
 
       // Scale assist with speed
@@ -645,14 +1026,43 @@ export class Vehicle {
     }
     this.steerAngle = THREE.MathUtils.lerp(this.steerAngle, targetSteerAngle, lerpSpeed * deltaTime);
 
-    // Visual wheel rotation
+    // Visual wheel steering: applied to the steerPivot (Y rotation only)
     if (this.leftFrontWheel && this.rightFrontWheel) {
       this.leftFrontWheel.rotation.y = this.steerAngle;
       this.rightFrontWheel.rotation.y = this.steerAngle;
     }
+
+    // Visual wheel spin: applied to the spinNode child (X rotation only)
+    // Using a shared angle prevents per-wheel floating-point drift.
     const wheelRotSpeed = (local.forward / this.wheelRadius) * deltaTime;
+    this.wheelSpinAngle += wheelRotSpeed;
+    // Normalize to prevent precision loss from unbounded accumulation
+    if (this.wheelSpinAngle > Math.PI * 2) this.wheelSpinAngle -= Math.PI * 2;
+    if (this.wheelSpinAngle < -Math.PI * 2) this.wheelSpinAngle += Math.PI * 2;
     this.wheels.forEach(wheel => {
-      wheel.children[0].rotation.x += wheelRotSpeed;
+      const spinNode = wheel.userData.spinNode as THREE.Group | undefined;
+      if (spinNode) {
+        // Enforce X rotation is spin, and Y/Z are strictly zero to prevent any axis drift
+        spinNode.rotation.x = this.wheelSpinAngle;
+        spinNode.rotation.y = 0;
+        spinNode.rotation.z = 0;
+
+        // Lock child position relative to spinNode to exactly (0, 0, 0)
+        // to prevent any drift/orbiting in Z or Y axes during rotation.
+        spinNode.children.forEach(child => {
+          child.position.set(0, 0, 0);
+        });
+      }
+
+      // Enforce X and Z rotations are strictly zero on the steerPivot
+      wheel.rotation.x = 0;
+      wheel.rotation.z = 0;
+
+      // If this is NOT a front steering wheel, make sure its Y rotation is also strictly 0
+      const isFront = wheel === this.leftFrontWheel || wheel === this.rightFrontWheel;
+      if (!isFront) {
+        wheel.rotation.y = 0;
+      }
     });
 
     // --- EFFECTIVE GRIP ---
@@ -686,7 +1096,7 @@ export class Vehicle {
     let rearGrip = baseGripCoeff * this.character.rearGripMultiplier;
 
     // Handbrake: dramatically reduce rear grip to initiate drift
-    if (handbrake && absForward > 5) {
+    if (handbrake) {
       rearGrip *= 0.15;
     }
 
@@ -698,9 +1108,12 @@ export class Vehicle {
     }
 
     // Power oversteer for RWD: excess throttle on rear tires reduces their lateral grip
-    if (this.driveType === 'RWD' && throttleValue > 0.7 && absForward > 10) {
-      const powerOversteerFactor = (1.0 - this.character.rearGripMultiplier) * throttleValue * 0.35;
-      rearGrip *= (1.0 - powerOversteerFactor);
+    // Works at all speeds (including standstill) to allow burnouts, donuts, and low-speed power slides.
+    if (this.driveType === 'RWD' && throttleValue > 0.7) {
+      // Scale power oversteer factor: higher at low speed for wheelspin/donuts, tapering off at high speeds
+      const speedOversteerScale = absForward < 10 ? 1.5 - (absForward / 10) * 0.5 : 1.0;
+      const powerOversteerFactor = (1.0 - this.character.rearGripMultiplier * 0.7) * throttleValue * 0.45 * speedOversteerScale;
+      rearGrip *= Math.max(0.1, 1.0 - powerOversteerFactor);
     }
 
     // ESC: boost rear grip when sliding
@@ -777,6 +1190,14 @@ export class Vehicle {
       brakeForce = this.brakingRate * 60.0 * this.mass * throttleValue;
     }
 
+    // Handbrake braking force: locks the rear wheels, applying heavy braking force
+    let handbrakeBrakeForce = 0;
+    if (handbrake) {
+      const speedSign = Math.sign(local.forward) || 1;
+      const lowSpeedScale = Math.min(1.0, absForward / 0.5);
+      handbrakeBrakeForce = -this.brakingRate * 60.0 * this.mass * speedSign * lowSpeedScale;
+    }
+
     // Drag + rolling resistance
     // In old physics, dragCoeff was tuned to balance speed limits in arbitrary units (e.g., 0.000012)
     // We scale it up significantly to act as physical drag in Newtons.
@@ -814,16 +1235,21 @@ export class Vehicle {
       rearEngineBrake = engineBraking * 0.6;
     }
 
+    // Handbrake disables rear drive force (spinning in place or locked)
+    if (handbrake) {
+      rearDrive *= 0.05;
+    }
+
     // Split brakeForce using a 60/40 front/rear bias
     const frontBrake = brakeForce * 0.6;
-    const rearBrake = brakeForce * 0.4;
+    const rearBrake = brakeForce * 0.4 + handbrakeBrakeForce;
 
     // Longitudinal contact patch forces for combined grip circle
     const frontLongForce = frontDrive + frontBrake + frontEngineBrake;
     const rearLongForce = rearDrive + rearBrake + rearEngineBrake;
 
     // Total forward force acting on the vehicle chassis
-    const totalForwardForce = driveForce + brakeForce + dragForce + rollingResistance + engineBraking;
+    const totalForwardForce = driveForce + brakeForce + dragForce + rollingResistance + engineBraking + handbrakeBrakeForce;
 
     // --- COMBINED GRIP CIRCLE for front and rear axles ---
     // Ensure drive/braking force + lateral force don't exceed tire friction circle
@@ -873,6 +1299,19 @@ export class Vehicle {
     // --- APPLY FORCES TO VELOCITY ---
     const totalLatForce = frontLatForce + rearLatForce; 
     this.applyLocalForce(totalForwardForce, totalLatForce, deltaTime);
+
+    // Damp lateral velocity at low speeds to prevent endless sideways sliding/creeping
+    const postLocal = this.getLocalVelocity();
+    if (Math.abs(postLocal.forward) < 4.0 && Math.abs(postLocal.lateral) > 0.01) {
+      const dampRatio = Math.max(0, 1.0 - Math.abs(postLocal.forward) / 4.0); // 1.0 at 0 speed, 0.0 at 4 m/s
+      // Apply lateral velocity damping to simulate static tire friction
+      const dampedLateral = postLocal.lateral * Math.pow(0.82, dampRatio * deltaTime * 60);
+      
+      const sinYaw = Math.sin(this.yaw);
+      const cosYaw = Math.cos(this.yaw);
+      this.velocityX = postLocal.forward * sinYaw + dampedLateral * cosYaw;
+      this.velocityZ = postLocal.forward * cosYaw - dampedLateral * sinYaw;
+    }
 
     // --- SPEED LIMITING ---
     const newLocal = this.getLocalVelocity();
@@ -1124,6 +1563,7 @@ export class Vehicle {
     this.previousGear = 1;
     this.isRevLimiterCut = false;
     this.grassInstability = 0;
+    this.wheelSpinAngle = 0;
 
     // Reset velocity-based physics
     this.velocityX = 0;

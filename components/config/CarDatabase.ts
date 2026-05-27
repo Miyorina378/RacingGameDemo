@@ -24,6 +24,10 @@ export interface CarConfig {
   gearRatios?: number[];
   finalDrive?: number;
   wheelRadius?: number;
+  maxRpm?: number;
+  baseMass?: number;
+  visualScale?: number;
+  driverCameraOffset?: { x: number; y: number; z: number };
 
   // Visuals
   hasSpoiler: boolean;
@@ -521,5 +525,30 @@ export const CARS_DATABASE: CarConfig[] = [
     hasSpoiler: true,
     boosterColor: 0xffffff,
     character: { weightDistribution: 0.47, rearGripMultiplier: 0.85, yawInertia: 0.72, oversteerResistance: 0.35 }
+  },
+  {
+    id: 'honda_s2000',
+    name: 'S2000 Roadster',
+    brand: 'Honda',
+    speed: 7.0,
+    acceleration: 6.6,
+    handling: 8.2,
+    price: 2500,
+    unlocked: false,
+    color: '#e2e8f0',
+    tier: 'Sport Tier',
+    requiresLicense: false,
+    maxSpeed: 241,
+    accelerationRate: 0.22,
+    handlingRate: 0.055,
+    dragCoeff: 0.000007,
+    driveType: 'RWD',
+    hasSpoiler: false,
+    boosterColor: 0xffaa00,
+    maxRpm: 9000,
+    baseMass: 1250,
+    visualScale: 3,
+    driverCameraOffset: { x: 0, y: 0.5, z: 0.3 },
+    character: { weightDistribution: 0.50, rearGripMultiplier: 0.92, yawInertia: 0.85, oversteerResistance: 0.48 }
   }
 ];

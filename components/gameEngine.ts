@@ -10,7 +10,7 @@ import { TutorialMode } from './modes/TutorialMode';
 import { TRACKS_DATABASE } from './config/TrackDatabase';
 import { Sky } from './objects/Sky';
 
-import { CarConfig } from './config/CarDatabase';
+import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
 export type { CarConfig };
 
 export interface EngineCallbacks {
@@ -107,6 +107,8 @@ export class GameEngine {
     });
     this.renderer.setSize(width, height, false);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0x24244d, 1.0);
@@ -114,6 +116,21 @@ export class GameEngine {
 
     this.dirLight = new THREE.DirectionalLight(0xffffff, 1.2); // White directional light for realistic road colors
     this.dirLight.position.set(0, 100, -100);
+    this.dirLight.castShadow = true;
+    
+    // Set up high-res shadow maps and bounding box to follow car
+    this.dirLight.shadow.mapSize.width = 2048;
+    this.dirLight.shadow.mapSize.height = 2048;
+    this.dirLight.shadow.camera.near = 0.5;
+    this.dirLight.shadow.camera.far = 400;
+    
+    const d = 120;
+    this.dirLight.shadow.camera.left = -d;
+    this.dirLight.shadow.camera.right = d;
+    this.dirLight.shadow.camera.top = d;
+    this.dirLight.shadow.camera.bottom = -d;
+    this.dirLight.shadow.bias = -0.0005; // Prevent shadow acne
+
     this.scene.add(this.dirLight);
     this.scene.add(this.dirLight.target);
 
@@ -173,19 +190,66 @@ export class GameEngine {
     if (modeName !== 'garage') {
       this.snapCameraBehindCar();
     }
+
+    // Apply shadow settings to all loaded objects in the scene
+    this.applyShadowsToScene();
+  }
+
+  public applyShadowsToScene() {
+    this.scene.traverse((child) => {
+      if (child instanceof THREE.Mesh || child instanceof THREE.InstancedMesh) {
+        // Exclude particle system meshes which use Basic material and don't need lighting
+        if (child.material && (child.material as any).type === 'MeshBasicMaterial') {
+          // Check if it's the black grid floor background (MeshBasicMaterial but we want it to receive shadows)
+          const isGroundGrid = child.geometry && child.geometry.type === 'PlaneGeometry' && (child.material as any).color && (child.material as any).color.getHex() === 0x0a0a14;
+          if (!isGroundGrid) {
+            child.castShadow = false;
+            child.receiveShadow = false;
+            return;
+          }
+        }
+
+        // Road, grass ground, lines and curbs should only receive shadows
+        const isFlatGround = child.name === 'ground' || 
+          (child.geometry && (child.geometry.type === 'BufferGeometry' || child.geometry.type === 'PlaneGeometry') && 
+           child.material && 
+           ((child.material as any).color && 
+            ((child.material as any).color.getHex() === 0x1f1f23 || // road
+             (child.material as any).color.getHex() === 0x7bb369 || // grass
+             (child.material as any).color.getHex() === 0x0a0a14 || // floor grid background
+             (child.material as any).color.getHex() === 0xeeeeee || // lines
+             (child.material as any).color.getHex() === 0xffcc00)));  // center dashed line
+        
+        if (isFlatGround) {
+          child.receiveShadow = true;
+          child.castShadow = false;
+        } else if (child instanceof THREE.InstancedMesh && child.material && (child.material as any).customProgramCacheKey && (child.material as any).customProgramCacheKey() === 'grass_leaves') {
+          // Grass blades only receive shadows for high performance (casting thousands of tiny shadows is extremely slow)
+          child.receiveShadow = true;
+          child.castShadow = false;
+        } else {
+          // Buildings, ramps, concrete walls, fences, fence posts, vehicles, crystals, checkpoints cast & receive shadows
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      }
+    });
   }
 
   private snapCameraBehindCar() {
     if (this.cameraViewMode === 'driver') {
       this.vehicle.mesh.updateMatrixWorld(true);
-      const localCamPos = new THREE.Vector3(0, 1.05, 0.8);
+      const config = CARS_DATABASE.find(c => c.id === this.currentCarId) || CARS_DATABASE[0];
+      const offset = config.driverCameraOffset || { x: 0, y: 1.05, z: 0.8 };
+      const scale = config.visualScale !== undefined ? config.visualScale : 1.0;
+      const localCamPos = new THREE.Vector3(offset.x * scale, offset.y * scale, offset.z * scale);
       const worldCamPos = localCamPos.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
       this.camera.position.copy(worldCamPos);
 
-      const localLookDir = new THREE.Vector3(0, 1.05, 10.8);
+      const localLookDir = new THREE.Vector3(offset.x * scale, offset.y * scale, (offset.z + 10.0) * scale);
       const worldLookTarget = localLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
       this.camera.lookAt(worldLookTarget);
-
+      
       const localUp = new THREE.Vector3(0, 1, 0);
       const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
       this.camera.up.copy(worldUp);
@@ -511,12 +575,14 @@ export class GameEngine {
       if (this.cameraViewMode === 'driver') {
         this.vehicle.mesh.updateMatrixWorld(true);
         
-        // Offset: placed on the hood/roof facing forward (x=0, y=1.05, z=0.8)
-        const localCamPos = new THREE.Vector3(0, 1.05, 0.8);
+        const config = CARS_DATABASE.find(c => c.id === this.currentCarId) || CARS_DATABASE[0];
+        const offset = config.driverCameraOffset || { x: 0, y: 1.05, z: 0.8 };
+        const scale = config.visualScale !== undefined ? config.visualScale : 1.0;
+        const localCamPos = new THREE.Vector3(offset.x * scale, offset.y * scale, offset.z * scale);
         const worldCamPos = localCamPos.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
         this.camera.position.copy(worldCamPos);
 
-        const localLookDir = new THREE.Vector3(0, 1.05, 10.8);
+        const localLookDir = new THREE.Vector3(offset.x * scale, offset.y * scale, (offset.z + 10.0) * scale);
         const worldLookTarget = localLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
         this.camera.lookAt(worldLookTarget);
 

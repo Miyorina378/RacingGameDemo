@@ -21,6 +21,8 @@ export class Crystal {
 
     this.mesh = new THREE.Mesh(geom, mat);
     this.mesh.position.copy(this.pos);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
   }
 
   public update(deltaTime: number) {

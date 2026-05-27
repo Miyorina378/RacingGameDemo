@@ -73,12 +73,17 @@ export abstract class BaseMode implements GameMode {
     this.gridHelper1 = new THREE.GridHelper(800, 160, 0x00ffff, 0x1e1e4a);
     this.gridHelper1.position.set(0, 0, 0);
     
-    // Add a solid black ground plane below the grid to hide the sky background below the horizon
+    // Add a solid ground plane below the grid to hide the sky background and receive shadows
     const groundGeom = new THREE.PlaneGeometry(1600, 1600);
-    const groundMat = new THREE.MeshBasicMaterial({ color: 0x0a0a14 });
+    const groundMat = new THREE.MeshStandardMaterial({ 
+      color: 0x0a0a14,
+      roughness: 0.9,
+      metalness: 0.1
+    });
     const groundMesh = new THREE.Mesh(groundGeom, groundMat);
     groundMesh.rotation.x = -Math.PI / 2;
     groundMesh.position.y = -0.1;
+    groundMesh.receiveShadow = true;
     this.gridHelper1.add(groundMesh);
 
     this.environmentGroup.add(this.gridHelper1);
@@ -234,6 +239,7 @@ export abstract class BaseMode implements GameMode {
     });
 
     const roadMesh = new THREE.Mesh(roadGeom, roadMat);
+    roadMesh.receiveShadow = true;
     this.environmentGroup.add(roadMesh);
 
     // 5. Create White Edge lines
@@ -292,12 +298,14 @@ export abstract class BaseMode implements GameMode {
     leftLineGeom.setIndex(leftLineIndex);
     leftLineGeom.computeVertexNormals();
     const leftLineMesh = new THREE.Mesh(leftLineGeom, lineMat);
+    leftLineMesh.receiveShadow = true;
     this.environmentGroup.add(leftLineMesh);
 
     rightLineGeom.setAttribute('position', new THREE.BufferAttribute(rightLinePos, 3));
     rightLineGeom.setIndex(rightLineIndex);
     rightLineGeom.computeVertexNormals();
     const rightLineMesh = new THREE.Mesh(rightLineGeom, lineMat);
+    rightLineMesh.receiveShadow = true;
     this.environmentGroup.add(rightLineMesh);
 
     // 6. Create Yellow Dashed Center Line
@@ -346,6 +354,7 @@ export abstract class BaseMode implements GameMode {
       centerLineGeom.setIndex(centerLineIndex);
       centerLineGeom.computeVertexNormals();
       const centerLineMesh = new THREE.Mesh(centerLineGeom, yellowMat);
+      centerLineMesh.receiveShadow = true;
       this.environmentGroup.add(centerLineMesh);
     }
 
@@ -472,6 +481,7 @@ export abstract class BaseMode implements GameMode {
         redCurbGeom.setIndex(redCurbIndex);
         redCurbGeom.computeVertexNormals();
         const redCurbMesh = new THREE.Mesh(redCurbGeom, redCurbMat);
+        redCurbMesh.receiveShadow = true;
         this.environmentGroup.add(redCurbMesh);
       }
 
@@ -480,6 +490,7 @@ export abstract class BaseMode implements GameMode {
         whiteCurbGeom.setIndex(whiteCurbIndex);
         whiteCurbGeom.computeVertexNormals();
         const whiteCurbMesh = new THREE.Mesh(whiteCurbGeom, whiteCurbMat);
+        whiteCurbMesh.receiveShadow = true;
         this.environmentGroup.add(whiteCurbMesh);
       }
     }
@@ -567,6 +578,7 @@ export abstract class BaseMode implements GameMode {
       };
 
       const grassMesh = new THREE.Mesh(grassGeom, grassMat);
+      grassMesh.receiveShadow = true;
       this.environmentGroup.add(grassMesh);
 
       // Create 3D Grass Leaves/Blades growing out of the sloped ground
@@ -607,6 +619,7 @@ export abstract class BaseMode implements GameMode {
       const bladesPerSegment = 150;
       const totalInstances = samplePoints.length * bladesPerSegment * 2;
       const grassBladesMesh = new THREE.InstancedMesh(bladeGeom, leavesMat, totalInstances);
+      grassBladesMesh.receiveShadow = true;
 
       const leafColors = [
         new THREE.Color(0x2ecc71), // fresh spring green
@@ -773,10 +786,14 @@ export abstract class BaseMode implements GameMode {
       if (isSilverstone) {
         const leftConcreteSigns = Array(samplePoints.length).fill(1);
         const leftConcrete = createConcreteBlock(leftBoundPoints, leftConcreteSigns);
+        leftConcrete.castShadow = true;
+        leftConcrete.receiveShadow = true;
         this.environmentGroup.add(leftConcrete);
 
         const rightConcreteSigns = Array(samplePoints.length).fill(-1);
         const rightConcrete = createConcreteBlock(rightBoundPoints, rightConcreteSigns);
+        rightConcrete.castShadow = true;
+        rightConcrete.receiveShadow = true;
         this.environmentGroup.add(rightConcrete);
       }
 
@@ -808,6 +825,8 @@ export abstract class BaseMode implements GameMode {
         const postGeom = new THREE.BoxGeometry(0.12, 3.0, 0.12); // Tall 3.0 height posts
         const totalPosts = Math.ceil(samplePoints.length / 3) * 2;
         const instancedPosts = new THREE.InstancedMesh(postGeom, postMat, totalPosts);
+        instancedPosts.castShadow = true;
+        instancedPosts.receiveShadow = true;
 
         let postCount = 0;
         const tempObj = new THREE.Object3D();
@@ -896,12 +915,16 @@ export abstract class BaseMode implements GameMode {
         leftFenceGeom.setIndex(leftFenceIndex);
         leftFenceGeom.computeVertexNormals();
         const leftFenceMesh = new THREE.Mesh(leftFenceGeom, fenceMat);
+        leftFenceMesh.castShadow = true;
+        leftFenceMesh.receiveShadow = true;
         this.environmentGroup.add(leftFenceMesh);
 
         rightFenceGeom.setAttribute('position', new THREE.BufferAttribute(rightFencePos, 3));
         rightFenceGeom.setIndex(rightFenceIndex);
         rightFenceGeom.computeVertexNormals();
         const rightFenceMesh = new THREE.Mesh(rightFenceGeom, fenceMat);
+        rightFenceMesh.castShadow = true;
+        rightFenceMesh.receiveShadow = true;
         this.environmentGroup.add(rightFenceMesh);
 
         // 3. Draw horizontal cables (thin bands) running at y = concreteTop + 1.0, 2.0, 2.8
@@ -962,12 +985,16 @@ export abstract class BaseMode implements GameMode {
           leftCableGeom.setIndex(leftCableIndex);
           leftCableGeom.computeVertexNormals();
           const leftCableMesh = new THREE.Mesh(leftCableGeom, cableMat);
+          leftCableMesh.castShadow = true;
+          leftCableMesh.receiveShadow = true;
           this.environmentGroup.add(leftCableMesh);
 
           rightCableGeom.setAttribute('position', new THREE.BufferAttribute(rightCablePos, 3));
           rightCableGeom.setIndex(rightCableIndex);
           rightCableGeom.computeVertexNormals();
           const rightCableMesh = new THREE.Mesh(rightCableGeom, cableMat);
+          rightCableMesh.castShadow = true;
+          rightCableMesh.receiveShadow = true;
           this.environmentGroup.add(rightCableMesh);
         });
 
@@ -1037,18 +1064,24 @@ export abstract class BaseMode implements GameMode {
         leftRailGeom.setIndex(leftRailIndex);
         leftRailGeom.computeVertexNormals();
         const leftRailMesh = new THREE.Mesh(leftRailGeom, railMat);
+        leftRailMesh.castShadow = true;
+        leftRailMesh.receiveShadow = true;
         this.environmentGroup.add(leftRailMesh);
 
         rightRailGeom.setAttribute('position', new THREE.BufferAttribute(rightRailPos, 3));
         rightRailGeom.setIndex(rightRailIndex);
         rightRailGeom.computeVertexNormals();
         const rightRailMesh = new THREE.Mesh(rightRailGeom, railMat);
+        rightRailMesh.castShadow = true;
+        rightRailMesh.receiveShadow = true;
         this.environmentGroup.add(rightRailMesh);
 
         // Render Guardrail Posts using InstancedMesh for performance (placed every 3 segments)
         const postGeom = new THREE.BoxGeometry(0.16, 1.2, 0.16); // 1.2 units height
         const totalPosts = Math.ceil(samplePoints.length / 3) * 2;
         const instancedPosts = new THREE.InstancedMesh(postGeom, postMat, totalPosts);
+        instancedPosts.castShadow = true;
+        instancedPosts.receiveShadow = true;
 
         let postCount = 0;
         const tempObj = new THREE.Object3D();

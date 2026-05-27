@@ -47,6 +47,8 @@ export class Checkpoint {
     this.mesh = new THREE.Mesh(torusGeom, this.material);
     this.mesh.position.copy(this.pos);
     this.mesh.rotation.y = heading;
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
 
     // Floating arrow
     const coneHeight = isRace ? 2.0 : 1.8;
@@ -64,6 +66,8 @@ export class Checkpoint {
     });
     this.arrow = new THREE.Mesh(coneGeom, coneMat);
     this.arrow.position.set(0, isRace ? (radius * 1.25) : 4.5, 0); // Position arrow relative to ring height
+    this.arrow.castShadow = true;
+    this.arrow.receiveShadow = true;
     this.mesh.add(this.arrow);
   }
 
