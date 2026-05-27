@@ -7,7 +7,7 @@ export class LicenseMode extends BaseMode {
   public checkpoints: Checkpoint[] = [];
   public activeCheckpointIndex = 0;
 
-  private path: THREE.Vector3[] = [];
+  private pathVectors: THREE.Vector3[] = [];
   private startPos = new THREE.Vector3();
   private startYaw = 0;
 
@@ -24,11 +24,14 @@ export class LicenseMode extends BaseMode {
     if (!trackConfig) {
       throw new Error("License track config not found in TrackDatabase.");
     }
-    this.path = trackConfig.path;
+    this.pathVectors = trackConfig.path.map(p => {
+      if (p instanceof THREE.Vector3 || (p as any).isVector3) return p as THREE.Vector3;
+      return (p as any).pos as THREE.Vector3;
+    });
 
     // Position car at the first marker facing the second marker
-    const startPt = this.path[0];
-    const nextPt = this.path[1] || this.path[0];
+    const startPt = this.pathVectors[0];
+    const nextPt = this.pathVectors[1] || this.pathVectors[0];
     this.startPos.copy(startPt);
     this.startPos.y = 0.5; // car height on ground
     const diff = new THREE.Vector3().subVectors(nextPt, startPt);
@@ -42,9 +45,9 @@ export class LicenseMode extends BaseMode {
     this.checkpoints = [];
     
     // Checkpoints at indices 1 to N-1
-    for (let i = 1; i < this.path.length; i++) {
-      const pt = this.path[i];
-      const nextPt = this.path[i + 1] || this.path[0];
+    for (let i = 1; i < this.pathVectors.length; i++) {
+      const pt = this.pathVectors[i];
+      const nextPt = this.pathVectors[i + 1] || this.pathVectors[0];
       const checkpoint = new Checkpoint(
         pt, 
         i - 1, 
@@ -58,9 +61,9 @@ export class LicenseMode extends BaseMode {
 
     // Start/finish checkpoint at path[0] at the end of the race
     const finishCheckpoint = new Checkpoint(
-      this.path[0],
-      this.path.length - 1,
-      this.path[1],
+      this.pathVectors[0],
+      this.pathVectors.length - 1,
+      this.pathVectors[1],
       false, // starts inactive
       false  // is not a race track
     );
@@ -69,7 +72,8 @@ export class LicenseMode extends BaseMode {
     this.checkpoints.push(finishCheckpoint);
 
     // Create visual road mesh with curbs and fences
-    this.createRacetrackRoad(this.path, trackConfig.roadWidth, trackConfig.HaveCrub, trackConfig.HaveFence, trackConfig.FenceType || 'guardrail', trackConfig.HaveGrass, trackConfig.GrassWidth);
+    this.createRacetrackRoad(trackConfig);
+    this.createScenery(trackConfig.scenery);
 
     this.activeCheckpointIndex = 0;
     this.engine.callbacks.onCheckpointChange(0, this.checkpoints.length);

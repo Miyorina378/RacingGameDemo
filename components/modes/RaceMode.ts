@@ -70,9 +70,14 @@ export class RaceMode extends BaseMode {
     const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
     const path = trackConfig.path;
 
+    const pathVectors = path.map(p => {
+      if (p instanceof THREE.Vector3 || (p as any).isVector3) return p as THREE.Vector3;
+      return (p as any).pos as THREE.Vector3;
+    });
+
     // Position car at the first marker facing the second marker
-    const startPt = path[0];
-    const nextPt = path[1] || path[0];
+    const startPt = pathVectors[0];
+    const nextPt = pathVectors[1] || pathVectors[0];
     
     const diff = new THREE.Vector3().subVectors(nextPt, startPt);
     this.startYaw = Math.atan2(diff.x, diff.z);
@@ -81,7 +86,7 @@ export class RaceMode extends BaseMode {
     const rightVec = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.startYaw - Math.PI / 2).normalize();
 
     // Generate smooth dense path for AI tracking
-    const roadPoints = path.map(p => new THREE.Vector3(p.x, 0.5, p.z));
+    const roadPoints = pathVectors.map(p => new THREE.Vector3(p.x, 0.5, p.z));
     const aiCurve = new THREE.CatmullRomCurve3(roadPoints, true);
     this.densePath = aiCurve.getSpacedPoints(250);
 
@@ -144,11 +149,11 @@ export class RaceMode extends BaseMode {
     // Build checkpoint rings (only the start/finish checkpoint is created)
     this.checkpoints = [];
 
-    // Start/finish checkpoint at path[0] at the end of the race
+    // Start/finish checkpoint at pathVectors[0] at the end of the race
     const finishCheckpoint = new Checkpoint(
-      path[0],
+      pathVectors[0],
       0, // index 0 in checkpoints list
-      path[1],
+      pathVectors[1],
       false, // starts inactive
       true,  // is a race track
       trackConfig.roadWidth / 2 // Make it as big as the road
@@ -158,14 +163,15 @@ export class RaceMode extends BaseMode {
     this.checkpoints.push(finishCheckpoint);
 
     // Create visual road mesh with curbs and fences
-    this.createRacetrackRoad(path, trackConfig.roadWidth, trackConfig.HaveCrub, trackConfig.HaveFence, trackConfig.FenceType || 'guardrail', trackConfig.HaveGrass, trackConfig.GrassWidth);
+    this.createRacetrackRoad(trackConfig);
+    this.createScenery(trackConfig.scenery);
 
     // Sync guardrail, track info, and grass callbacks for all AI vehicles and their AI controllers
     const grassCallback = (x: number, z: number) => {
       if (!trackConfig.HaveGrass) return false;
       const info = this.getTrackInfo(x, z);
-      const grassStart = trackConfig.roadWidth / 2 + (trackConfig.HaveCrub ? this.curbWidth : 0);
-      return info.dist >= grassStart && info.dist < this.trackBoundary;
+      const grassStart = info.width / 2 + (trackConfig.HaveCrub ? this.curbWidth : 0);
+      return info.dist >= grassStart && info.dist < (info.width / 2 + (trackConfig.HaveCrub ? this.curbWidth : 0) + (trackConfig.GrassWidth ?? 5.0));
     };
     const trackInfoCallback = (x: number, z: number) => this.getTrackInfo(x, z);
 
@@ -189,8 +195,8 @@ export class RaceMode extends BaseMode {
     this.obstacles = [];
     if (trackConfig.hasObstacles) {
       for (let i = 0; i < path.length - 1; i++) {
-        const p1 = path[i];
-        const p2 = path[i+1];
+        const p1 = pathVectors[i];
+        const p2 = pathVectors[i+1];
         
         // Spawn mid-way between checkpoints, offset slightly randomly
         const midPoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
@@ -243,7 +249,7 @@ export class RaceMode extends BaseMode {
 
       // If playing or finished:
       const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
-      const path = trackConfig.path;
+      const path = trackConfig.path.map(p => ('isVector3' in p ? p : p.pos) as THREE.Vector3);
 
       // Has this AI finished?
       const hasFinished = ai.checkpointsPassed >= path.length * this.totalLaps;
@@ -353,7 +359,7 @@ export class RaceMode extends BaseMode {
     // Track player progress along track nodes and collide checkpoints
     if (isPlaying) {
       const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
-      const path = trackConfig.path;
+      const path = trackConfig.path.map(p => ('isVector3' in p ? p : p.pos) as THREE.Vector3);
 
       // Collide with finish checkpoint when player is targeting it (path[0])
       const finishCheckpoint = this.checkpoints[0];

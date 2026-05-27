@@ -1,5 +1,17 @@
 import * as THREE from 'three';
 
+export interface TrackNode {
+  pos: THREE.Vector3;
+  width?: number; // Override road width at this node
+}
+
+export interface TrackScenery {
+  type: 'tree' | 'hill';
+  position: THREE.Vector3;
+  scale?: number;
+  heightScale?: number;
+}
+
 export interface TrackConfig {
   id: string;
   name: string;
@@ -9,7 +21,10 @@ export interface TrackConfig {
   hasObstacles: boolean;
   requiresLicense: boolean;
   baseReward: number;
-  path: THREE.Vector3[];
+  path: (THREE.Vector3 | TrackNode)[];
+  curveType?: 'centripetal' | 'chordal' | 'catmullrom';
+  tension?: number;
+  scenery?: TrackScenery[];
   HaveCrub: boolean;
   HaveFence: boolean;
   FenceType?: 'guardrail' | 'silverstone';
@@ -173,21 +188,32 @@ export const TRACKS_DATABASE: TrackConfig[] = [
     hasObstacles: false,
     requiresLicense: true,
     baseReward: 5000,
+    curveType: 'catmullrom',
+    tension: 0.8, // Make curves tighter
     path: [
-      new THREE.Vector3(0, 2, -1200),
-      new THREE.Vector3(1780, 2, -2210),
-      new THREE.Vector3(2150, 2, -2140),
-      new THREE.Vector3(2160, 2, -1870),
-      new THREE.Vector3(280, 2, -640),
-      new THREE.Vector3(970, 2, -250),
-      new THREE.Vector3(960, 2, 330),
-      new THREE.Vector3(240, 2, 70),
-      new THREE.Vector3(-600, 2, 720),
-      new THREE.Vector3(-1160, 2, 760),
-      new THREE.Vector3(-880, 2, 270),
-      new THREE.Vector3(-1570, 2, -230),
-      new THREE.Vector3(-1520, 2, -890),
-      new THREE.Vector3(-630, 2, -830)
+      { pos: new THREE.Vector3(0, 2, -1200), width: 30 },
+      { pos: new THREE.Vector3(1780, 2, -2210), width: 45 }, // Widen corner
+      { pos: new THREE.Vector3(2150, 2, -2140), width: 40 },
+      { pos: new THREE.Vector3(2160, 2, -1870), width: 35 },
+      { pos: new THREE.Vector3(280, 2, -640), width: 25 }, // Narrow straight
+      { pos: new THREE.Vector3(970, 2, -250), width: 30 },
+      { pos: new THREE.Vector3(960, 2, 330), width: 30 },
+      { pos: new THREE.Vector3(240, 2, 70), width: 40 }, // Wide corner
+      { pos: new THREE.Vector3(-600, 2, 720), width: 30 },
+      { pos: new THREE.Vector3(-1160, 2, 760), width: 30 },
+      { pos: new THREE.Vector3(-880, 2, 270), width: 25 },
+      { pos: new THREE.Vector3(-1570, 2, -230), width: 30 },
+      { pos: new THREE.Vector3(-1520, 2, -890), width: 30 },
+      { pos: new THREE.Vector3(-630, 2, -830), width: 30 }
+    ],
+    scenery: [
+      { type: 'hill', position: new THREE.Vector3(1200, 0, -1500), scale: 8 },
+      { type: 'hill', position: new THREE.Vector3(400, 0, -100), scale: 6 },
+      { type: 'hill', position: new THREE.Vector3(-1000, 0, 0), scale: 10 },
+      { type: 'tree', position: new THREE.Vector3(100, 0, -1100), scale: 2 },
+      { type: 'tree', position: new THREE.Vector3(150, 0, -1150), scale: 1.5 },
+      { type: 'tree', position: new THREE.Vector3(200, 0, -1050), scale: 2.2 },
+      { type: 'tree', position: new THREE.Vector3(-400, 0, -500), scale: 1.8 }
     ],
     HaveCrub: true,
     HaveFence: true,

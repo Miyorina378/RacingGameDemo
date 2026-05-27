@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GameEngine } from './gameEngine';
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
-import { TRACKS_DATABASE, TrackConfig } from './config/TrackDatabase';
+import { TRACKS_DATABASE, TrackConfig, TrackNode, TrackScenery } from './config/TrackDatabase';
 import {
   Wrench,
   Coins,
@@ -352,7 +352,12 @@ export default function Game() {
 
   // Custom Map Editor States
   const [showEditor, setShowEditor] = useState<boolean>(false);
-  const [editorNodes, setEditorNodes] = useState<{ x: number; z: number }[]>([]);
+  const [livePreview, setLivePreview] = useState<boolean>(false);
+  const [editorNodes, setEditorNodes] = useState<{ x: number; z: number, width?: number }[]>([]);
+  const [editorScenery, setEditorScenery] = useState<{ type: 'tree' | 'hill'; x: number; z: number; scale: number; heightScale?: number }[]>([]);
+  const [editorTool, setEditorTool] = useState<'node' | 'tree' | 'hill'>('node');
+  const [selectedNodeIndex, setSelectedNodeIndex] = useState<number | null>(null);
+  const [selectedSceneryIndex, setSelectedSceneryIndex] = useState<number | null>(null);
   const [editorTrackName, setEditorTrackName] = useState<string>('Custom Gridway');
   const [editorRoadWidth, setEditorRoadWidth] = useState<number>(18);
   const [editorTimeLimit, setEditorTimeLimit] = useState<number>(45);
@@ -363,6 +368,7 @@ export default function Game() {
   const [editorScale, setEditorScale] = useState<number>(1.0);
   const [hoveredNodeIndex, setHoveredNodeIndex] = useState<number | null>(null);
   const [draggedNodeIndex, setDraggedNodeIndex] = useState<number | null>(null);
+  const [draggedSceneryIndex, setDraggedSceneryIndex] = useState<number | null>(null);
   const [editorGridLimit, setEditorGridLimit] = useState<number>(250);
   const editorCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -413,6 +419,7 @@ export default function Game() {
           if (parsed.hasObstacles !== undefined) setEditorHasObstacles(parsed.hasObstacles);
           if (parsed.HaveGrass !== undefined) setEditorHaveGrass(parsed.HaveGrass);
           if (parsed.GrassWidth !== undefined) setEditorGrassWidth(parsed.GrassWidth);
+          if (parsed.scenery) setEditorScenery(parsed.scenery);
         } catch (e) {
           console.error("Error loading custom track", e);
         }
@@ -805,14 +812,15 @@ export default function Game() {
   };
 
   const saveCustomTrack = (
-    nodes: { x: number; z: number }[],
+    nodes: { x: number; z: number; width?: number }[],
     name: string,
     width: number,
     time: number,
     obstacles: boolean,
     gridLimit: number,
     grass: boolean = editorHaveGrass,
-    grassWidth: number = editorGrassWidth
+    grassWidth: number = editorGrassWidth,
+    scenery: { type: 'tree' | 'hill'; x: number; z: number; scale: number }[] = editorScenery
   ) => {
     if (typeof window !== 'undefined') {
       const trackData = {
@@ -823,7 +831,8 @@ export default function Game() {
         nodes,
         gridLimit,
         HaveGrass: grass,
-        GrassWidth: grassWidth
+        GrassWidth: grassWidth,
+        scenery
       };
       localStorage.setItem('cyberdrive_custom_track', JSON.stringify(trackData));
     }
@@ -832,7 +841,7 @@ export default function Game() {
   const importTrack = (text: string) => {
     try {
       const vectorRegex = /(?:THREE\.)?Vector3\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*-?\d+(?:\.\d+)?\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/gi;
-      const nodes: { x: number; z: number }[] = [];
+      const nodes: { x: number; z: number; width?: number }[] = [];
       let match;
       while ((match = vectorRegex.exec(text)) !== null) {
         nodes.push({
@@ -887,23 +896,36 @@ export default function Game() {
     }
   };
 
-  const launchTestDrive = () => {
-    if (editorNodes.length < 3) return;
-
+  const syncCustomTrackToDatabase = (
+    nodes = editorNodes,
+    name = editorTrackName,
+    width = editorRoadWidth,
+    time = editorTimeLimit,
+    obstacles = editorHasObstacles,
+    grass = editorHaveGrass,
+    grassW = editorGrassWidth,
+    scenery = editorScenery
+  ) => {
     const customTrack: TrackConfig = {
       id: 'custom',
-      name: editorTrackName || 'Custom Gridway',
+      name: name || 'Custom Gridway',
       description: 'Your custom designed track.',
-      timeLimit: editorTimeLimit,
-      roadWidth: editorRoadWidth,
-      hasObstacles: editorHasObstacles,
+      timeLimit: time,
+      roadWidth: width,
+      hasObstacles: obstacles,
       requiresLicense: false,
       baseReward: 300,
-      path: editorNodes.map(n => new THREE.Vector3(n.x, 2, n.z)),
+      path: nodes.map(n => ({ pos: new THREE.Vector3(n.x, 2, n.z), width: n.width ?? width })),
+      scenery: scenery.map(s => ({
+        type: s.type,
+        position: new THREE.Vector3(s.x, 0, s.z),
+        scale: s.scale,
+        heightScale: s.heightScale
+      })),
       HaveCrub: true,
       HaveFence: true,
-      HaveGrass: editorHaveGrass,
-      GrassWidth: editorGrassWidth
+      HaveGrass: grass,
+      GrassWidth: grassW
     };
 
     const existingIdx = TRACKS_DATABASE.findIndex(t => t.id === 'custom');
@@ -912,15 +934,20 @@ export default function Game() {
     } else {
       TRACKS_DATABASE.push(customTrack);
     }
+  };
 
+  const launchTestDrive = () => {
+    if (editorNodes.length < 3) return;
+    syncCustomTrackToDatabase();
     startRace('custom');
     setShowEditor(false);
   };
 
   const handleClearAll = () => {
-    if (confirm("Are you sure you want to clear all nodes?")) {
+    if (confirm("Are you sure you want to clear all nodes and scenery?")) {
       setEditorNodes([]);
-      saveCustomTrack([], editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
+      setEditorScenery([]);
+      saveCustomTrack([], editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, []);
     }
   };
 
@@ -981,33 +1008,72 @@ export default function Game() {
     const gameX = (x - cx) / zoom;
     const gameZ = (y - cy) / zoom;
 
-    let foundIdx = -1;
+    let foundNodeIdx = -1;
     for (let i = 0; i < editorNodes.length; i++) {
       const node = editorNodes[i];
       const nodePixelX = cx + node.x * zoom;
       const nodePixelY = cy + node.z * zoom;
       const dist = Math.sqrt((x - nodePixelX) ** 2 + (y - nodePixelY) ** 2);
       if (dist < 12) {
-        foundIdx = i;
+        foundNodeIdx = i;
         break;
       }
     }
 
-    if (foundIdx !== -1) {
-      setDraggedNodeIndex(foundIdx);
-    } else {
-      let finalX = gameX;
-      let finalZ = gameZ;
-      if (snapToGrid > 0) {
-        finalX = Math.round(gameX / snapToGrid) * snapToGrid;
-        finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
+    let foundSceneryIdx = -1;
+    for (let i = 0; i < editorScenery.length; i++) {
+      const s = editorScenery[i];
+      const px = cx + s.x * zoom;
+      const py = cy + s.z * zoom;
+      const dist = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
+      if (dist < 12) {
+        foundSceneryIdx = i;
+        break;
       }
-      finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
-      finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
+    }
 
-      const newNodes = [...editorNodes, { x: finalX, z: finalZ }];
-      setEditorNodes(newNodes);
-      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
+    if (editorTool === 'node') {
+      if (foundNodeIdx !== -1) {
+        setDraggedNodeIndex(foundNodeIdx);
+        setSelectedNodeIndex(foundNodeIdx);
+        setSelectedSceneryIndex(null);
+      } else {
+        let finalX = gameX;
+        let finalZ = gameZ;
+        if (snapToGrid > 0) {
+          finalX = Math.round(gameX / snapToGrid) * snapToGrid;
+          finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
+        }
+        finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
+        finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
+
+        const newNodes = [...editorNodes, { x: finalX, z: finalZ, width: editorRoadWidth }];
+        setEditorNodes(newNodes);
+        setSelectedNodeIndex(newNodes.length - 1);
+        setSelectedSceneryIndex(null);
+        saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
+      }
+    } else { // tree or hill
+      if (foundSceneryIdx !== -1) {
+        setDraggedSceneryIndex(foundSceneryIdx);
+        setSelectedSceneryIndex(foundSceneryIdx);
+        setSelectedNodeIndex(null);
+      } else {
+        let finalX = gameX;
+        let finalZ = gameZ;
+        if (snapToGrid > 0) {
+          finalX = Math.round(gameX / snapToGrid) * snapToGrid;
+          finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
+        }
+        finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
+        finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
+
+        const newScenery = [...editorScenery, { type: editorTool, x: finalX, z: finalZ, scale: editorTool === 'tree' ? 2 : 8 }];
+        setEditorScenery(newScenery);
+        setSelectedSceneryIndex(newScenery.length - 1);
+        setSelectedNodeIndex(null);
+        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
+      }
     }
   };
 
@@ -1036,8 +1102,21 @@ export default function Game() {
       finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
 
       const newNodes = [...editorNodes];
-      newNodes[draggedNodeIndex] = { x: finalX, z: finalZ };
+      newNodes[draggedNodeIndex] = { ...newNodes[draggedNodeIndex], x: finalX, z: finalZ };
       setEditorNodes(newNodes);
+    } else if (draggedSceneryIndex !== null) {
+      let finalX = gameX;
+      let finalZ = gameZ;
+      if (snapToGrid > 0) {
+        finalX = Math.round(gameX / snapToGrid) * snapToGrid;
+        finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
+      }
+      finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
+      finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
+
+      const newScenery = [...editorScenery];
+      newScenery[draggedSceneryIndex] = { ...newScenery[draggedSceneryIndex], x: finalX, z: finalZ };
+      setEditorScenery(newScenery);
     } else {
       let hoveredIdx: number | null = null;
       for (let i = 0; i < editorNodes.length; i++) {
@@ -1059,6 +1138,10 @@ export default function Game() {
       saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
       setDraggedNodeIndex(null);
     }
+    if (draggedSceneryIndex !== null) {
+      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+      setDraggedSceneryIndex(null);
+    }
   };
 
   const handleCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1072,24 +1155,43 @@ export default function Game() {
     const cy = canvas.height / 2;
     const zoom = (canvas.width / (editorGridLimit * 2)) * editorScale;
 
-    let foundIdx = -1;
+    let foundNodeIdx = -1;
     for (let i = 0; i < editorNodes.length; i++) {
       const node = editorNodes[i];
       const nodePixelX = cx + node.x * zoom;
       const nodePixelY = cy + node.z * zoom;
       const dist = Math.sqrt((x - nodePixelX) ** 2 + (y - nodePixelY) ** 2);
       if (dist < 12) {
-        foundIdx = i;
+        foundNodeIdx = i;
         break;
       }
     }
 
-    if (foundIdx !== -1) {
-      const newNodes = editorNodes.filter((_, idx) => idx !== foundIdx);
+    let foundSceneryIdx = -1;
+    for (let i = 0; i < editorScenery.length; i++) {
+      const s = editorScenery[i];
+      const px = cx + s.x * zoom;
+      const py = cy + s.z * zoom;
+      const dist = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
+      if (dist < 12) {
+        foundSceneryIdx = i;
+        break;
+      }
+    }
+
+    if (foundNodeIdx !== -1) {
+      const newNodes = editorNodes.filter((_, idx) => idx !== foundNodeIdx);
       setEditorNodes(newNodes);
+      if (selectedNodeIndex === foundNodeIdx) setSelectedNodeIndex(null);
       setHoveredNodeIndex(null);
       setDraggedNodeIndex(null);
       saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
+    } else if (foundSceneryIdx !== -1) {
+      const newScenery = editorScenery.filter((_, idx) => idx !== foundSceneryIdx);
+      setEditorScenery(newScenery);
+      if (selectedSceneryIndex === foundSceneryIdx) setSelectedSceneryIndex(null);
+      setDraggedSceneryIndex(null);
+      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
     }
   };
 
@@ -1286,8 +1388,8 @@ export default function Game() {
           ctx.shadowColor = '#06b6d4';
         }
 
-        ctx.shadowBlur = isHovered ? 12 : 6;
-        ctx.lineWidth = 1.5;
+        ctx.shadowBlur = isHovered || selectedNodeIndex === idx ? 12 : 6;
+        ctx.lineWidth = selectedNodeIndex === idx ? 3 : 1.5;
         ctx.fill();
         ctx.stroke();
 
@@ -1298,10 +1400,37 @@ export default function Game() {
       });
     }
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.font = '10px monospace';
-    ctx.fillText('Click to add node | Drag to move | Double-click to delete', 15, height - 15);
-  }, [editorNodes, editorScale, hoveredNodeIndex, editorRoadWidth, showEditor]);
+    // 3. Draw Scenery
+    editorScenery.forEach((s, idx) => {
+      const pixel = gameToPixel({ x: s.x, z: s.z });
+      const isSelected = selectedSceneryIndex === idx;
+
+      ctx.beginPath();
+      const sRadius = s.type === 'tree' ? 5 : 8;
+      ctx.arc(pixel.x, pixel.y, sRadius, 0, Math.PI * 2);
+
+      if (s.type === 'tree') {
+        ctx.fillStyle = '#22c55e'; // Green
+        ctx.strokeStyle = '#166534';
+      } else {
+        ctx.fillStyle = '#a16207'; // Brown
+        ctx.strokeStyle = '#713f12';
+      }
+
+      ctx.lineWidth = isSelected ? 3 : 1.5;
+      if (isSelected) {
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 10;
+        ctx.strokeStyle = '#ffffff';
+      } else {
+        ctx.shadowBlur = 0;
+      }
+
+      ctx.fill();
+      ctx.stroke();
+    });
+
+  }, [editorNodes, editorScenery, editorScale, hoveredNodeIndex, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, showEditor]);
 
   useEffect(() => {
     if (showEditor) {
@@ -1338,6 +1467,37 @@ export default function Game() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [activeMode, gameStatus]);
+
+  // Keep custom track database configuration and active 3D preview in sync with editor state
+  useEffect(() => {
+    if (editorNodes.length >= 3) {
+      syncCustomTrackToDatabase(
+        editorNodes,
+        editorTrackName,
+        editorRoadWidth,
+        editorTimeLimit,
+        editorHasObstacles,
+        editorHaveGrass,
+        editorGrassWidth,
+        editorScenery
+      );
+
+      // Rebuild the 3D preview if it is currently active
+      if (livePreview && engineRef.current) {
+        engineRef.current.buildPreviewTrack('custom');
+      }
+    }
+  }, [
+    livePreview,
+    editorNodes,
+    editorTrackName,
+    editorRoadWidth,
+    editorTimeLimit,
+    editorHasObstacles,
+    editorHaveGrass,
+    editorGrassWidth,
+    editorScenery
+  ]);
 
   // Helper to dynamically darken a hex color for dot outliners
   const darkenColor = (hex: string, amount = 0.45) => {
@@ -1385,14 +1545,17 @@ export default function Game() {
       ctx.fillStyle = 'rgba(9, 13, 22, 0.45)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+      const getPos = (pt: THREE.Vector3 | TrackNode) => 'isVector3' in pt ? pt : pt.pos;
+
       // Find boundaries of the track to scale and center it
       let minX = Infinity, maxX = -Infinity;
       let minZ = Infinity, maxZ = -Infinity;
       path.forEach(pt => {
-        if (pt.x < minX) minX = pt.x;
-        if (pt.x > maxX) maxX = pt.x;
-        if (pt.z < minZ) minZ = pt.z;
-        if (pt.z > maxZ) maxZ = pt.z;
+        const pos = getPos(pt);
+        if (pos.x < minX) minX = pos.x;
+        if (pos.x > maxX) maxX = pos.x;
+        if (pos.z < minZ) minZ = pos.z;
+        if (pos.z > maxZ) maxZ = pos.z;
       });
       
       // Add padding to bounds
@@ -1414,9 +1577,9 @@ export default function Game() {
       
       // Draw road line
       ctx.beginPath();
-      ctx.moveTo(mapX(path[0].x), mapZ(path[0].z));
+      ctx.moveTo(mapX(getPos(path[0]).x), mapZ(getPos(path[0]).z));
       for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(mapX(path[i].x), mapZ(path[i].z));
+        ctx.lineTo(mapX(getPos(path[i]).x), mapZ(getPos(path[i]).z));
       }
       ctx.closePath();
       ctx.strokeStyle = 'rgba(6, 182, 212, 0.55)'; // cyan road line
@@ -1512,7 +1675,7 @@ export default function Game() {
       <div className="absolute top-6 inset-x-6 flex items-start justify-between pointer-events-none z-10">
         {/* Left Side: Game Logo, Credits, and Lap/Length in race mode */}
         <div className="flex flex-col gap-3 pointer-events-auto">
-          {activeMode === 'garage' && (
+          {activeMode === 'garage' && !showEditor && (
             <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
               <span className="text-xs font-black tracking-[0.25em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500 uppercase select-none italic font-sans pr-1">
                 CYBER DRIVE
@@ -1558,7 +1721,7 @@ export default function Game() {
                 {/* Track length */}
                 {(() => {
                   const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
-                  const trackLength = activeTrack ? getTrackLength(activeTrack.path) : 0;
+                  const trackLength = activeTrack ? getTrackLength(activeTrack.path.map(p => 'isVector3' in p ? p : p.pos)) : 0;
                   if (trackLength <= 0) return null;
                   return (
                     <div className="bg-slate-950/60 border border-slate-800/60 px-3 py-1 rounded-xl shadow-[0_0_10px_rgba(0,0,0,0.35)] flex items-center gap-2">
@@ -1617,7 +1780,7 @@ export default function Game() {
             )}
 
             {/* Hide reset, help, sound, exit in gameplay modes since they are in the ESC pause menu instead */}
-            {activeMode === 'garage' && (
+            {activeMode === 'garage' && !showEditor && (
               <>
                 <button
                   onClick={() => setShowHelp(!showHelp)}
@@ -1946,7 +2109,7 @@ export default function Game() {
       )}
 
       {/* MAIN GARAGE INTERFACE (When in Garage) */}
-      {activeMode === 'garage' && (
+      {activeMode === 'garage' && !showEditor && (
         <div className="absolute inset-y-0 right-0 w-full md:w-[420px] bg-slate-950/85 backdrop-blur-xl border-l border-slate-900 shadow-2xl p-6 flex flex-col justify-between z-10">
 
           {/* Garage Header */}
@@ -2118,7 +2281,7 @@ export default function Game() {
                   <div className="grid grid-cols-1 gap-3">
                     {TRACKS_DATABASE.filter(t => t.id !== 'license' && t.id !== 'custom').map((track) => {
                       const isLocked = track.requiresLicense && !hasLicense;
-                      const length = getTrackLength(track.path);
+                      const length = getTrackLength(track.path.map(p => 'isVector3' in p ? p : p.pos));
                       return (
                         <div key={track.id} className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex flex-col gap-2">
                           <div className="flex items-center justify-between">
@@ -2668,11 +2831,26 @@ export default function Game() {
 
       {/* CUSTOM MAP EDITOR OVERLAY */}
       {showEditor && (
-        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-xl z-30 flex items-center justify-center p-4 md:p-8 animate-fadeIn">
-          <div className="bg-slate-900/90 border border-purple-500/30 w-full max-w-6xl h-[90vh] rounded-3xl shadow-[0_0_60px_rgba(168,85,247,0.25)] flex flex-col md:flex-row overflow-hidden relative">
+        <div className={`absolute inset-0 ${livePreview ? 'pointer-events-none' : 'bg-slate-950/95 backdrop-blur-xl pointer-events-auto'} z-30 flex items-center justify-center p-4 md:p-8 animate-fadeIn transition-colors duration-500`}>
+          
+          {livePreview && (
+            <button
+              onClick={() => {
+                setLivePreview(false);
+                engineRef.current?.buildGarage();
+              }}
+              className="pointer-events-auto absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-red-600 hover:bg-red-500 border border-red-500 text-white font-bold py-3 px-8 rounded-full shadow-[0_0_20px_rgba(220,38,38,0.5)] z-50 cursor-pointer flex items-center gap-2"
+            >
+              <LogOut className="w-5 h-5" />
+              Close 3D Preview
+            </button>
+          )}
+
+          {!livePreview && (
+            <div className="bg-slate-900/90 border border-purple-500/30 w-full max-w-6xl h-[90vh] rounded-3xl shadow-[0_0_60px_rgba(168,85,247,0.25)] flex flex-col md:flex-row overflow-hidden relative transition-colors duration-500">
 
             {/* Left: Canvas Area */}
-            <div className="flex-1 bg-slate-950 p-6 flex flex-col items-center justify-center relative border-r border-slate-800/80">
+            <div className="flex-1 bg-slate-950 p-6 flex flex-col items-center justify-center relative border-r border-slate-800/80 transition-colors duration-500">
               {/* Header inside canvas area */}
               <div className="absolute top-4 left-6 flex flex-col">
                 <span className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Visual Grid Canvas</span>
@@ -2737,6 +2915,102 @@ export default function Game() {
             <div className="w-full md:w-[380px] bg-slate-900/60 p-6 flex flex-col justify-between overflow-y-auto">
               <div className="space-y-6">
                 <div>
+                  <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Editor Tools</h3>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <button
+                      onClick={() => setEditorTool('node')}
+                      className={`text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer ${editorTool === 'node' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:bg-slate-800 border border-slate-800'}`}
+                    >
+                      Track Node
+                    </button>
+                    <button
+                      onClick={() => setEditorTool('tree')}
+                      className={`text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer ${editorTool === 'tree' ? 'bg-green-600 text-white' : 'bg-slate-950 text-slate-400 hover:bg-slate-800 border border-slate-800'}`}
+                    >
+                      Add Tree
+                    </button>
+                    <button
+                      onClick={() => setEditorTool('hill')}
+                      className={`text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer ${editorTool === 'hill' ? 'bg-yellow-700 text-white' : 'bg-slate-950 text-slate-400 hover:bg-slate-800 border border-slate-800'}`}
+                    >
+                      Add Hill
+                    </button>
+                  </div>
+
+                  {selectedNodeIndex !== null && editorNodes[selectedNodeIndex] && (
+                    <div className="space-y-1.5 p-3 bg-slate-950/50 border border-purple-500/30 rounded-xl mb-4">
+                      <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase">
+                        <span>Node {selectedNodeIndex} Width</span>
+                        <span className="font-mono">{editorNodes[selectedNodeIndex].width ?? editorRoadWidth}m</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="10"
+                        max="60"
+                        step="1"
+                        value={editorNodes[selectedNodeIndex].width ?? editorRoadWidth}
+                        onChange={(e) => {
+                          const w = parseInt(e.target.value);
+                          const newNodes = [...editorNodes];
+                          newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], width: w };
+                          setEditorNodes(newNodes);
+                          saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                        }}
+                        className="w-full accent-purple-500 cursor-pointer"
+                      />
+                    </div>
+                  )}
+
+                  {selectedSceneryIndex !== null && editorScenery[selectedSceneryIndex] && (
+                    <div className="space-y-1.5 p-3 bg-slate-950/50 border border-green-500/30 rounded-xl mb-4">
+                      <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
+                        <span>{editorScenery[selectedSceneryIndex].type} Scale</span>
+                        <span className="font-mono">{editorScenery[selectedSceneryIndex].scale}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="20"
+                        step="0.5"
+                        value={editorScenery[selectedSceneryIndex].scale}
+                        onChange={(e) => {
+                          const scale = parseFloat(e.target.value);
+                          const newScenery = [...editorScenery];
+                          newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], scale };
+                          setEditorScenery(newScenery);
+                          saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
+                        }}
+                        className="w-full accent-green-500 cursor-pointer mb-2"
+                      />
+
+                      {editorScenery[selectedSceneryIndex].type === 'hill' && (
+                        <div className="mt-4 pt-2 border-t border-green-900/30">
+                          <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
+                            <span>Hill Height</span>
+                            <span className="font-mono">{editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}x</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="20"
+                            step="0.5"
+                            value={editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}
+                            onChange={(e) => {
+                              const heightScale = parseFloat(e.target.value);
+                              const newScenery = [...editorScenery];
+                              newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], heightScale };
+                              setEditorScenery(newScenery);
+                              saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
+                            }}
+                            className="w-full accent-green-500 cursor-pointer"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div>
                   <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Track Design & Setup</h3>
 
                   <div className="space-y-1.5">
@@ -2787,7 +3061,7 @@ export default function Game() {
                       onChange={(e) => {
                         const width = parseInt(e.target.value);
                         setEditorRoadWidth(width);
-                        saveCustomTrack(editorNodes, editorTrackName, width, editorTimeLimit, editorHasObstacles, editorGridLimit);
+                        saveCustomTrack(editorNodes, editorTrackName, width, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
                       }}
                       className="w-full accent-purple-500 cursor-pointer"
                     />
@@ -2807,7 +3081,7 @@ export default function Game() {
                       onChange={(e) => {
                         const time = parseInt(e.target.value);
                         setEditorTimeLimit(time);
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, time, editorHasObstacles, editorGridLimit);
+                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, time, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
                       }}
                       className="w-full accent-purple-500 cursor-pointer"
                     />
@@ -2823,7 +3097,7 @@ export default function Game() {
                       checked={editorHasObstacles}
                       onChange={(e) => {
                         setEditorHasObstacles(e.target.checked);
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, e.target.checked, editorGridLimit);
+                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, e.target.checked, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
                       }}
                       className="w-4 h-4 accent-purple-500 cursor-pointer"
                     />
@@ -2939,6 +3213,28 @@ export default function Game() {
                   {editorNodes.length >= 3 ? 'Test Drive Track' : 'Needs Min. 3 Nodes'}
                 </button>
 
+                <button
+                  disabled={editorNodes.length < 3}
+                  onClick={() => {
+                    if (editorNodes.length >= 3) {
+                      setLivePreview(!livePreview);
+                      if (!livePreview && engineRef.current) {
+                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                        engineRef.current.buildPreviewTrack('custom');
+                      } else if (livePreview && engineRef.current) {
+                        engineRef.current.buildGarage();
+                      }
+                    }
+                  }}
+                  className={`w-full py-2.5 rounded-xl text-xs font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-2 border cursor-pointer ${editorNodes.length >= 3
+                    ? (livePreview ? 'bg-green-600 hover:bg-green-500 border-green-500 text-white shadow-[0_0_15px_rgba(34,197,94,0.35)]' : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200')
+                    : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
+                    }`}
+                >
+                  <Map className="w-4 h-4" />
+                  {livePreview ? 'Stop Live Preview' : 'Live 3D Preview'}
+                </button>
+
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={handleClearAll}
@@ -2947,7 +3243,13 @@ export default function Game() {
                     Clear All
                   </button>
                   <button
-                    onClick={() => setShowEditor(false)}
+                    onClick={() => {
+                      setShowEditor(false);
+                      if (livePreview) {
+                        setLivePreview(false);
+                        engineRef.current?.buildGarage();
+                      }
+                    }}
                     className="bg-slate-800 hover:bg-slate-700 border border-slate-700 py-2 rounded-xl text-xs font-bold text-slate-250 transition-all cursor-pointer"
                   >
                     Close Editor
@@ -2957,6 +3259,7 @@ export default function Game() {
 
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

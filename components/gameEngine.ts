@@ -4,6 +4,7 @@ import { ParticleSystem } from './objects/ParticleSystem';
 import { GameMode } from './modes/BaseMode';
 import { GarageMode } from './modes/GarageMode';
 import { FreeRoamMode } from './modes/FreeRoamMode';
+import { PreviewMode } from './modes/PreviewMode';
 import { LicenseMode } from './modes/LicenseMode';
 import { RaceMode } from './modes/RaceMode';
 import { TutorialMode } from './modes/TutorialMode';
@@ -307,6 +308,22 @@ export class GameEngine {
     this.changeMode('tutorial', new TutorialMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
+  public buildPreviewTrack(trackId: string = 'custom') {
+    this.activeTrackId = trackId;
+    const trackConfig = TRACKS_DATABASE.find(t => t.id === trackId);
+    if (trackConfig && trackConfig.time) {
+      this.sky.updateTimeOfDay(trackConfig.time);
+    } else {
+      this.sky.updateTimeOfDay('afternoon');
+    }
+    if (this.currentModeInstance instanceof PreviewMode) {
+      PreviewMode.isRebuilding = true;
+    }
+    // We treat preview as 'garage' conceptually so it doesn't snap camera behind car, 
+    // but the PreviewMode will take over camera control anyway.
+    this.changeMode('garage', new PreviewMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, trackId));
+  }
+
   // --- FAÇADE HELPER UTILITIES ---
 
   public setActiveCar(carId: string, color: string, upgrades?: any) {
@@ -560,6 +577,9 @@ export class GameEngine {
   };
 
   private updateCameraChase(deltaTime: number) {
+    if (this.currentModeInstance instanceof PreviewMode) {
+      return;
+    }
     if (this.activeMode === 'garage') {
       const orbitSpeed = 0.0003;
       const orbitRadius = 9;
