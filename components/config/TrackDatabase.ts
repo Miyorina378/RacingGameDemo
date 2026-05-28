@@ -119,6 +119,46 @@ export const TRACKS_DATABASE: TrackConfig[] = [
     time: 'night'
   },
   {
+    id: 'fuji_speedway',
+    name: 'Swordfish Racing Course',
+    description: 'A Medium size map with many difficult corners to negotiate with. Perfect for trying to master cornering',
+    timeLimit: 55,
+    roadWidth: 30,
+    hasObstacles: false,
+    requiresLicense: true,
+    baseReward: 5000,
+    curveType: 'catmullrom',
+    tension: 0.8, // Make curves tighter
+    path: [
+      new THREE.Vector3(-10, 2, 0),
+      new THREE.Vector3(700, 2, 0),
+      new THREE.Vector3(610, 2, 110),
+      new THREE.Vector3(260, 2, 190),
+      new THREE.Vector3(180, 2, 390),
+      new THREE.Vector3(80, 2, 440),
+      new THREE.Vector3(0, 2, 400),
+      new THREE.Vector3(10, 2, 190),
+      new THREE.Vector3(-130, 2, 220),
+      new THREE.Vector3(-200, 2, 340),
+      new THREE.Vector3(-720, 2, 410),
+      new THREE.Vector3(-710, 2, 340),
+      new THREE.Vector3(-760, 2, 320),
+      new THREE.Vector3(-790, 2, 210),
+      new THREE.Vector3(-640, 2, 200),
+      new THREE.Vector3(-640, 2, 110),
+      new THREE.Vector3(-890, 2, 100),
+      new THREE.Vector3(-880, 2, 20),
+      new THREE.Vector3(-780, 2, -10)
+    ],
+    scenery: [
+    ],
+    HaveCrub: true,
+    HaveFence: true,
+    HaveGrass: true,
+    GrassWidth: 6.0,
+    time: 'afternoon'
+  },
+  {
     id: 'tokyo_megaloop',
     name: 'Tokyo Megaloop',
     description: 'A massive, extra-wide high-speed 3-lap loop highway. Ideal for testing top speeds. Requires A-License.',

@@ -26,6 +26,16 @@ import {
   Timer
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import {
+  HUDConfig,
+  DEFAULT_HUD_CONFIG,
+  loadHUDConfig,
+  saveHUDConfig,
+  loadMirrorInTPS,
+  saveMirrorInTPS,
+  loadSoundEnabled,
+  saveSoundEnabled
+} from './option';
 
 const PAINT_SWATCHES = [
   { name: 'Rose Red', hex: '#f43f5e' },
@@ -63,7 +73,8 @@ const DEFAULT_UPGRADES = {
     hasABS: false,
     hasESC: false,
     turbo: false
-  }
+  },
+  purchasedLevels: {} as { [key: string]: number }
 };
 
 const UPGRADES_CONFIG = [
@@ -295,6 +306,8 @@ const isTogglePurchased = (carUpgradesForCar: any, itemId: string) => {
   return false;
 };
 
+// HUDConfig is imported from root option.ts
+
 export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
@@ -317,6 +330,12 @@ export default function Game() {
   const [rpm, setRpm] = useState<number>(1000);
   const [gear, setGear] = useState<number>(1);
   const [isShifting, setIsShifting] = useState<boolean>(false);
+  const [throttleInput, setThrottleInput] = useState<number>(0);
+  const [brakeInput, setBrakeInput] = useState<number>(0);
+  const [cameraViewMode, setCameraViewMode] = useState<'chase' | 'driver'>('chase');
+  const [showMirrorInTPS, setShowMirrorInTPS] = useState<boolean>(false);
+  const [hudConfig, setHudConfig] = useState<HUDConfig>(DEFAULT_HUD_CONFIG);
+  const [showHUDCustomizer, setShowHUDCustomizer] = useState<boolean>(false);
   const [driftScore, setDriftScore] = useState<number>(0);
   const [driftMultiplier, setDriftMultiplier] = useState<number>(1);
   const [recentDriftGain, setRecentDriftGain] = useState<number>(0);
@@ -394,6 +413,10 @@ export default function Game() {
         } catch (e) { }
       }
 
+      setHudConfig(loadHUDConfig());
+      setShowMirrorInTPS(loadMirrorInTPS());
+      setSoundEnabled(loadSoundEnabled());
+
       const savedTrack = localStorage.getItem('cyberdrive_custom_track');
       if (savedTrack) {
         try {
@@ -438,6 +461,19 @@ export default function Game() {
     }
   }, []);
 
+  // Save options whenever they change
+  useEffect(() => {
+    saveHUDConfig(hudConfig);
+  }, [hudConfig]);
+
+  useEffect(() => {
+    saveMirrorInTPS(showMirrorInTPS);
+  }, [showMirrorInTPS]);
+
+  useEffect(() => {
+    saveSoundEnabled(soundEnabled);
+  }, [soundEnabled]);
+
   // Trigger shift animation on placement changes
   useEffect(() => {
     if (placement !== prevPlacement) {
@@ -478,11 +514,16 @@ export default function Game() {
           });
         }
       },
-      onVehicleStatsChange: (s: number, r: number, g: number, shifting: boolean) => {
+      onVehicleStatsChange: (s: number, r: number, g: number, shifting: boolean, throttle?: number, brake?: number) => {
         setSpeed(s);
         setRpm(r);
         setGear(g);
         setIsShifting(shifting);
+        if (throttle !== undefined) setThrottleInput(throttle);
+        if (brake !== undefined) setBrakeInput(brake);
+        if (engineRef.current) {
+          setCameraViewMode(engineRef.current.cameraViewMode);
+        }
       },
       onDriftScoreChange: (score: number, mult: number) => {
         setDriftScore(score);
@@ -642,6 +683,61 @@ export default function Game() {
     }
   };
 
+  const getPurchasedLevel = (carUpgradesForCar: any, item: any) => {
+    const currentCarUpgrades = carUpgradesForCar || DEFAULT_UPGRADES;
+    if (!currentCarUpgrades.purchasedLevels) {
+      let equippedVal: any = currentCarUpgrades;
+      for (let i = 0; i < item.path.length; i++) {
+        if (equippedVal !== undefined && equippedVal !== null) {
+          equippedVal = equippedVal[item.path[i]];
+        }
+      }
+      return equippedVal || 0;
+    }
+    return currentCarUpgrades.purchasedLevels[item.id] || 0;
+  };
+
+  const equipLevelUpgrade = (item: any, targetLevel: number) => {
+    const currentCarUpgrades = JSON.parse(JSON.stringify(getCarUpgrades(activeCarId)));
+
+    if (!currentCarUpgrades.purchasedLevels) {
+      currentCarUpgrades.purchasedLevels = {};
+      UPGRADES_CONFIG.forEach(group => {
+        group.items.forEach(it => {
+          if (it.type === 'level') {
+            let val: any = currentCarUpgrades;
+            for (let i = 0; i < it.path.length; i++) {
+              if (val !== undefined && val !== null) {
+                val = val[it.path[i]];
+              }
+            }
+            currentCarUpgrades.purchasedLevels[it.id] = val || 0;
+          }
+        });
+      });
+    }
+
+    const path = item.path;
+    let target = currentCarUpgrades;
+    for (let i = 0; i < path.length - 1; i++) {
+      target = target[path[i]];
+    }
+    const lastKey = path[path.length - 1];
+
+    target[lastKey] = targetLevel;
+
+    const newUpgrades = {
+      ...carUpgrades,
+      [activeCarId]: currentCarUpgrades
+    };
+    setCarUpgrades(newUpgrades);
+    localStorage.setItem('cyberdrive_upgrades', JSON.stringify(newUpgrades));
+
+    if (engineRef.current) {
+      engineRef.current.setActiveCar(activeCarId, selectedColor, currentCarUpgrades);
+    }
+  };
+
   const buyUpgrade = (item: any, cost: number) => {
     if (playerCredits < cost) {
       alert("Insufficient Credits!");
@@ -659,7 +755,26 @@ export default function Game() {
     const lastKey = path[path.length - 1];
 
     if (item.type === 'level') {
-      target[lastKey] = (target[lastKey] || 0) + 1;
+      if (!currentCarUpgrades.purchasedLevels) {
+        currentCarUpgrades.purchasedLevels = {};
+        UPGRADES_CONFIG.forEach(group => {
+          group.items.forEach(it => {
+            if (it.type === 'level') {
+              let val: any = currentCarUpgrades;
+              for (let i = 0; i < it.path.length; i++) {
+                if (val !== undefined && val !== null) {
+                  val = val[it.path[i]];
+                }
+              }
+              currentCarUpgrades.purchasedLevels[it.id] = val || 0;
+            }
+          });
+        });
+      }
+
+      const nextLvl = (currentCarUpgrades.purchasedLevels[item.id] || 0) + 1;
+      currentCarUpgrades.purchasedLevels[item.id] = nextLvl;
+      target[lastKey] = nextLvl;
     } else {
       // Toggle type - Mark as purchased in purchasedToggles
       if (!currentCarUpgrades.purchasedToggles) {
@@ -1641,33 +1756,46 @@ export default function Game() {
       {/* 3D Canvas */}
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
-      {/* Top Middle HUD Timer */}
-      {(activeMode === 'license') && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-auto z-20">
-          <div className={`bg-slate-950/80 border backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[120px] transition-colors ${timeRemaining <= 7 ? 'border-rose-600 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-pulse' : 'border-slate-800'
-            }`}>
-            <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-              Time Limit
-            </span>
-            <span className={`text-3xl font-black font-mono tracking-wider ${timeRemaining <= 7 ? 'text-rose-500' : 'text-white'
-              }`}>
-              {formatTime(timeRemaining)}
-            </span>
-          </div>
-        </div>
-      )}
+      {/* Top Center: Rear View Mirror & Timers */}
+      {activeMode !== 'garage' && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-auto z-20 flex flex-col items-center gap-3">
+          {/* Interior Rear View Mirror (TPS Toggle and Master Customize Switch) */}
+          {(cameraViewMode === 'driver' || showMirrorInTPS) && hudConfig.showMirror && (
+            <div 
+              id="rear-view-mirror-hud" 
+              className="w-[280px] h-[75px] bg-slate-950/40 border-[5px] border-slate-950 rounded-2xl relative overflow-hidden select-none"
+            >
+              {/* Glass sheen reflection overlay */}
+              <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/15 pointer-events-none rounded-xl" />
+              
+              {/* Subtle grid lines for high tech mirror HUD feel */}
+              <div className="absolute inset-0 border border-cyan-500/10 pointer-events-none rounded-xl" />
+            </div>
+          )}
 
-      {/* Top Middle HUD Timer for Race Mode (Current Lap Timer) */}
-      {activeMode === 'race' && (gameStatus === 'playing' || gameStatus === 'success') && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-auto z-20">
-          <div className="bg-slate-950/80 border border-slate-800 backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[120px]">
-            <span className="text-slate-400 text-[9px] font-extrabold uppercase tracking-widest text-slate-500 mb-0.5">
-              LAP TIMER
-            </span>
-            <span className="text-3xl font-black font-mono tracking-wider text-white">
-              {formatTime(currentLapTime)}
-            </span>
-          </div>
+          {/* Time Limit Timer (for License mode) */}
+          {activeMode === 'license' && hudConfig.showLapTimer && (
+            <div className={`bg-slate-950/80 border backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[120px] transition-colors ${timeRemaining <= 7 ? 'border-rose-600 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-pulse' : 'border-slate-800'}`}>
+              <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                Time Limit
+              </span>
+              <span className={`text-3xl font-black font-mono tracking-wider ${timeRemaining <= 7 ? 'text-rose-500' : 'text-white'}`}>
+                {formatTime(timeRemaining)}
+              </span>
+            </div>
+          )}
+
+          {/* Current Lap Timer (for Race mode) */}
+          {activeMode === 'race' && (gameStatus === 'playing' || gameStatus === 'success') && hudConfig.showLapTimer && (
+            <div className="bg-slate-950/80 border border-slate-800 backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[120px]">
+              <span className="text-slate-400 text-[9px] font-extrabold uppercase tracking-widest text-slate-500 mb-0.5">
+                LAP TIMER
+              </span>
+              <span className="text-3xl font-black font-mono tracking-wider text-white">
+                {formatTime(currentLapTime)}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -1706,20 +1834,22 @@ export default function Game() {
             <div className="flex flex-col gap-3.5">
               <div className="flex items-center gap-4">
                 {/* Checkpoint counters */}
-                <div className="flex items-baseline gap-1 select-none">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-2 leading-none">
-                    {activeMode === 'race' ? 'LAP' : 'GATE'}
-                  </span>
-                  <span className="text-4xl font-black text-white font-mono leading-none tracking-tight">
-                    {checkpointIndex}
-                  </span>
-                  <span className="text-slate-500 text-sm font-bold font-mono leading-none">
-                    /{totalCheckpoints}
-                  </span>
-                </div>
+                {hudConfig.showLap && (
+                  <div className="flex items-baseline gap-1 select-none">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-2 leading-none">
+                      {activeMode === 'race' ? 'LAP' : 'GATE'}
+                    </span>
+                    <span className="text-4xl font-black text-white font-mono leading-none tracking-tight">
+                      {checkpointIndex}
+                    </span>
+                    <span className="text-slate-500 text-sm font-bold font-mono leading-none">
+                      /{totalCheckpoints}
+                    </span>
+                  </div>
+                )}
 
                 {/* Track length */}
-                {(() => {
+                {hudConfig.showLength && (() => {
                   const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
                   const trackLength = activeTrack ? getTrackLength(activeTrack.path.map(p => 'isVector3' in p ? p : p.pos)) : 0;
                   if (trackLength <= 0) return null;
@@ -1735,14 +1865,16 @@ export default function Game() {
               </div>
 
               {/* Minimap canvas rendering directly below */}
-              <div className="w-40 h-40 bg-slate-950/40 backdrop-blur-md rounded-2xl overflow-hidden border border-slate-800/80 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-                <canvas 
-                  ref={minimapCanvasRef} 
-                  width={160} 
-                  height={160} 
-                  className="w-full h-full"
-                />
-              </div>
+              {hudConfig.showMap && (
+                <div className="w-40 h-40 bg-slate-950/40 backdrop-blur-md rounded-2xl overflow-hidden border border-slate-800/80 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+                  <canvas 
+                    ref={minimapCanvasRef} 
+                    width={160} 
+                    height={160} 
+                    className="w-full h-full"
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1750,7 +1882,7 @@ export default function Game() {
         {/* Right Side: Options / Reset */}
         <div className="flex flex-col items-end gap-2.5 pointer-events-auto">
           <div className="flex items-center gap-3">
-            {activeMode === 'race' && (
+            {activeMode === 'race' && hudConfig.showPosition && (
               <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-2.5 shadow-[0_0_15px_rgba(0,0,0,0.5)] select-none overflow-hidden relative">
                 <Trophy className="w-4 h-4 text-yellow-400 shrink-0" />
                 <div className="flex flex-col">
@@ -1800,7 +1932,7 @@ export default function Game() {
           </div>
 
           {/* Time & Best Lap stats block directly below/next to POS in driving mode */}
-          {activeMode !== 'garage' && (
+          {activeMode !== 'garage' && hudConfig.showStats && (
             <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex flex-col gap-2 shadow-[0_0_15px_rgba(0,0,0,0.5)] min-w-[150px] select-none">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-1.5">
@@ -1888,8 +2020,30 @@ export default function Game() {
           {/* Bottom HUD: Speed, Timer, Checkpoint Progress */}
           <div className="w-full flex items-end justify-between">
             {/* Speedometer & Transmission HUD */}
-            <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 p-5 rounded-2xl shadow-[0_0_25px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[180px] pointer-events-auto">
+            {hudConfig.showSpeedometer && (
+              <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 p-5 rounded-2xl shadow-[0_0_25px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[180px] pointer-events-auto">
               <div className="flex items-center gap-4 mt-1">
+                {/* GT4 Style Throttle (Engine Up) & Brake (Brake Down) Input Indicators */}
+                <div className="flex gap-1.5 h-10 items-stretch select-none">
+                  {/* Brake indicator (fills down) */}
+                  <div className="w-1.5 bg-slate-900 border border-slate-800 rounded-sm relative overflow-hidden" title="Brake Input">
+                    <div 
+                      className="absolute top-0 inset-x-0 bg-rose-500 transition-all duration-75 shadow-[0_0_8px_rgba(239,68,68,0.5)]" 
+                      style={{ height: `${brakeInput * 100}%` }}
+                    />
+                  </div>
+                  {/* Throttle indicator (fills up) */}
+                  <div className="w-1.5 bg-slate-900 border border-slate-800 rounded-sm relative overflow-hidden" title="Throttle Input">
+                    <div 
+                      className="absolute bottom-0 inset-x-0 bg-cyan-400 transition-all duration-75 shadow-[0_0_8px_rgba(34,211,238,0.5)]" 
+                      style={{ height: `${throttleInput * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Divider between input bars and gear section */}
+                <div className="h-10 w-px bg-slate-800" />
+
                 <div className="flex flex-col items-center min-w-[36px]">
                   <span className="text-slate-400 text-[9px] font-bold uppercase tracking-wider">Gear</span>
                   <span className={`text-3xl font-black font-mono mt-1 transition-all duration-150 ${isShifting ? 'text-slate-600 scale-95' : 'text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.3)]'}`}>
@@ -1924,6 +2078,7 @@ export default function Game() {
                 />
               </div>
             </div>
+            )}
 
 
           </div>
@@ -2523,53 +2678,69 @@ export default function Game() {
                         if (item.type === 'level') {
                           const maxLvl = item.maxLevel || 3;
                           const costs = item.costs || [100, 200, 300];
+                          const purchasedLvl = getPurchasedLevel(currentCarUpgrades, item);
                           const currentLvl = currentVal || 0;
-                          const isMaxed = currentLvl >= maxLvl;
-                          const cost = isMaxed ? 0 : (costs[currentLvl] || 0);
+                          const isMaxed = purchasedLvl >= maxLvl;
+                          const cost = isMaxed ? 0 : (costs[purchasedLvl] || 0);
                           const canAfford = playerCredits >= cost;
 
                           return (
                             <div
                               key={item.id}
-                              className="bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700/80 transition-all"
+                              className="bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-slate-700/80 transition-all"
                             >
                               <div className="flex-1">
                                 <h4 className="font-bold text-slate-100 text-sm">{item.name}</h4>
                                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">{item.description}</p>
 
-                                {/* Level indicator dots */}
-                                <div className="flex gap-1.5 mt-2.5">
-                                  {Array.from({ length: maxLvl }).map((_, idx) => {
-                                    const isOwned = idx < currentLvl;
+                                {/* Equipped Stage Selector */}
+                                <div className="flex flex-wrap gap-1.5 mt-3">
+                                  <button
+                                    onClick={() => equipLevelUpgrade(item, 0)}
+                                    className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all border cursor-pointer ${
+                                      currentLvl === 0
+                                        ? 'bg-cyan-600 border-cyan-500 text-white shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                                        : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-350'
+                                    }`}
+                                  >
+                                    Stock
+                                  </button>
+                                  {Array.from({ length: purchasedLvl }).map((_, idx) => {
+                                    const lvl = idx + 1;
+                                    const isEquipped = currentLvl === lvl;
                                     return (
-                                      <div
-                                        key={idx}
-                                        className={`w-6 h-1.5 rounded-sm transition-all duration-300 ${isOwned
-                                          ? 'bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]'
-                                          : 'bg-slate-800 border border-slate-750'
-                                          }`}
-                                      />
+                                      <button
+                                        key={lvl}
+                                        onClick={() => equipLevelUpgrade(item, lvl)}
+                                        className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all border cursor-pointer ${
+                                          isEquipped
+                                            ? 'bg-cyan-600 border-cyan-500 text-white shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                                            : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:text-slate-200'
+                                        }`}
+                                      >
+                                        Stage {lvl}
+                                      </button>
                                     );
                                   })}
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-2 self-end sm:self-center">
+                              <div className="flex items-center gap-2.5 shrink-0 self-end md:self-center">
                                 {isMaxed ? (
-                                  <span className="text-[10px] font-bold text-pink-400 bg-pink-950/40 border border-pink-900/50 px-3 py-1.5 rounded-lg uppercase tracking-wider">
-                                    Maxed
+                                  <span className="text-[10px] font-bold text-pink-400 bg-pink-950/30 border border-pink-900/40 px-2.5 py-1.5 rounded-lg uppercase tracking-wider">
+                                    Fully Upgraded
                                   </span>
                                 ) : (
                                   <button
                                     onClick={() => buyUpgrade(item, cost)}
                                     disabled={!canAfford}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 border border-pink-500/80 ${canAfford
-                                      ? 'bg-pink-600 hover:bg-pink-500 border-pink-500 text-white shadow-[0_0_10px_rgba(236,72,153,0.2)] shadow-pink-600/30'
+                                    className={`px-3 py-2 rounded-xl text-xs font-bold font-mono transition-all flex items-center gap-1.5 border border-pink-500/80 ${canAfford
+                                      ? 'bg-pink-600 hover:bg-pink-500 border-pink-500 text-white shadow-[0_0_12px_rgba(236,72,153,0.25)] hover:scale-[1.02]'
                                       : 'bg-slate-800 border-slate-750 text-slate-500 cursor-not-allowed'
                                       }`}
                                   >
                                     <Coins className="w-3.5 h-3.5" />
-                                    <span>{cost} Cr</span>
+                                    <span>Buy Stg {purchasedLvl + 1}: {cost} Cr</span>
                                   </button>
                                 )}
                               </div>
@@ -2787,12 +2958,78 @@ export default function Game() {
                 Reset Car Position (R)
               </button>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* Customize HUD Layout Button */}
+              <button
+                onClick={() => setShowHUDCustomizer(true)}
+                className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-400 font-bold py-3 px-6 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(34,211,238,0.1)]"
+              >
+                <Wrench className="w-4 h-4 text-cyan-400" />
+                Customize HUD Layout
+              </button>
+
+              {/* Dedicated Settings Section */}
+              <div className="bg-slate-950/60 border border-slate-800/60 rounded-2xl p-4 flex flex-col gap-3.5 text-left select-none">
+                <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase leading-none block mb-1">
+                  SETTINGS
+                </span>
+                
+                {/* TPS Rear Mirror Toggle */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">TPS Rear Mirror</span>
+                    <span className="text-[9px] text-slate-500">Show mirror overlay in third-person view</span>
+                  </div>
+                  <button
+                    onClick={() => setShowMirrorInTPS(!showMirrorInTPS)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${showMirrorInTPS
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                      }`}
+                  >
+                    {showMirrorInTPS ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                </div>
+
+                <div className="h-px bg-slate-800/60" />
+
+                {/* Sound Toggle */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Game Audio</span>
+                    <span className="text-[9px] text-slate-500">Toggle retro synth engine sound effects</span>
+                  </div>
+                  <button
+                    onClick={() => setSoundEnabled(!soundEnabled)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${soundEnabled
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                      }`}
+                  >
+                    {soundEnabled ? 'ENABLED' : 'MUTED'}
+                  </button>
+                </div>
+
+                <div className="h-px bg-slate-800/60" />
+
+                {/* More settings placeholder */}
+                <div className="flex items-center justify-between gap-4 opacity-40">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-400">Simulation Settings</span>
+                    <span className="text-[9px] text-slate-600">Graphics quality and keybindings</span>
+                  </div>
+                  <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider bg-slate-900 border border-slate-800 px-2 py-1 rounded">
+                    More to come...
+                  </span>
+                </div>
+              </div>
+
+              {/* Bottom Actions Row */}
+              <div className="grid grid-cols-2 gap-3 mt-1">
                 <button
                   onClick={() => setShowHelp(!showHelp)}
                   className={`py-3 px-4 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-2 cursor-pointer ${showHelp
                       ? 'bg-cyan-950/60 border-cyan-800/80 text-cyan-400'
-                      : 'bg-slate-800/60 border-slate-750 text-slate-300 hover:text-white'
+                      : 'bg-slate-800/60 border-slate-750 text-slate-350 hover:text-white'
                     }`}
                 >
                   <HelpCircle className="w-4 h-4" />
@@ -2800,31 +3037,365 @@ export default function Game() {
                 </button>
 
                 <button
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className="bg-slate-800/60 border border-slate-750 text-slate-350 hover:text-white py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  onClick={exitToGarage}
+                  className="bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 hover:text-white py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer hover:shadow-[0_0_15px_rgba(244,63,94,0.15)]"
                 >
-                  {soundEnabled ? (
-                    <>
-                      <Volume2 className="w-4 h-4 text-cyan-400" />
-                      Sound On
-                    </>
-                  ) : (
-                    <>
-                      <VolumeX className="w-4 h-4 text-slate-500" />
-                      Sound Muted
-                    </>
-                  )}
+                  <LogOut className="w-4 h-4" />
+                  Abort Session
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
 
+      {/* HUD LAYOUT CUSTOMIZER OVERLAY */}
+      {showHUDCustomizer && (
+        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-xl z-[60] flex items-center justify-center p-4 md:p-8 animate-fadeIn">
+          <div className="bg-slate-900/95 border border-slate-800/85 rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-[0_0_50px_rgba(6,182,212,0.2)] flex flex-col p-6 md:p-8 animate-scaleIn">
+            
+            {/* Header */}
+            <div className="flex justify-between items-start pb-4 border-b border-slate-800">
+              <div>
+                <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase">
+                  Interface Designer
+                </span>
+                <h2 className="text-2xl font-black italic bg-gradient-to-r from-cyan-400 via-indigo-400 to-pink-500 bg-clip-text text-transparent uppercase tracking-wider mt-1">
+                  HUD Layout Customizer
+                </h2>
+                <p className="text-slate-400 text-xs mt-1">
+                  Click on the HUD element blocks in the screen mockup or use the checklist to customize your racetrack overlay interface.
+                </p>
+              </div>
               <button
-                onClick={exitToGarage}
-                className="w-full bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 hover:text-white py-3 px-6 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2 cursor-pointer hover:shadow-[0_0_15px_rgba(244,63,94,0.15)] mt-2"
+                onClick={() => setShowHUDCustomizer(false)}
+                className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
               >
-                <LogOut className="w-4 h-4" />
-                Abort Session & Exit
+                Save & Close
               </button>
             </div>
+
+            {/* Content grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-6">
+              
+              {/* Left Column: Visual Mockup (3 cols) */}
+              <div className="lg:col-span-3 flex flex-col justify-center items-center">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2.5">
+                  Visual Layout Mockup (16:9 Screen)
+                </span>
+                
+                {/* Visual Mockup Container */}
+                <div className="w-full aspect-video bg-[#05070c] border-2 border-slate-805 rounded-2xl relative overflow-hidden flex flex-col justify-between p-4 shadow-inner">
+                  {/* Subtle Scanlines/grid background for tech vibe */}
+                  <div className="absolute inset-0 bg-[linear-gradient(rgba(18,24,38,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(18,24,38,0.2)_1px,transparent_1px)] bg-[size:10px_10px] pointer-events-none" />
+                  
+                  {/* Backdrop car preview (drawn with styling block or simulated path) */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10">
+                    <div className="w-4/5 h-2/3 border border-slate-800/40 rounded-full blur-xl bg-cyan-500/20" />
+                    <div className="absolute bottom-6 w-32 h-16 border-t-2 border-slate-800/40 rounded-t-3xl" />
+                  </div>
+
+                  {/* Top-Center Group: Mirror & Timers */}
+                  <div className="absolute top-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 z-10 w-[180px]">
+                    {/* Mirror Block */}
+                    <button
+                      onClick={() => setHudConfig(prev => ({ ...prev, showMirror: !prev.showMirror }))}
+                      className={`w-full h-8 rounded-lg flex items-center justify-center text-[8px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                        hudConfig.showMirror
+                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" style={{ display: hudConfig.showMirror ? 'block' : 'none' }} />
+                        REAR MIRROR
+                      </div>
+                    </button>
+
+                    {/* Timer Block */}
+                    <button
+                      onClick={() => setHudConfig(prev => ({ ...prev, showLapTimer: !prev.showLapTimer }))}
+                      className={`w-20 h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                        hudConfig.showLapTimer
+                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                      }`}
+                    >
+                      LAP TIMER
+                    </button>
+                  </div>
+
+                  {/* Top-Left Group: Lap, Length, Map */}
+                  <div className="absolute top-3 left-3 flex flex-col items-start gap-1.5 z-10 w-[95px]">
+                    {/* Lap Counter & Length Box */}
+                    <div className="flex gap-1 w-full">
+                      <button
+                        onClick={() => setHudConfig(prev => ({ ...prev, showLap: !prev.showLap }))}
+                        className={`flex-1 h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                          hudConfig.showLap
+                            ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                            : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                        }`}
+                      >
+                        LAP
+                      </button>
+                      <button
+                        onClick={() => setHudConfig(prev => ({ ...prev, showLength: !prev.showLength }))}
+                        className={`flex-1 h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                          hudConfig.showLength
+                            ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                            : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                        }`}
+                      >
+                        LEN
+                      </button>
+                    </div>
+
+                    {/* Minimap */}
+                    <button
+                      onClick={() => setHudConfig(prev => ({ ...prev, showMap: !prev.showMap }))}
+                      className={`w-full aspect-square max-h-[64px] rounded-lg flex flex-col items-center justify-center text-[8px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                        hudConfig.showMap
+                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                      }`}
+                    >
+                      <Map className="w-3.5 h-3.5 mb-1 text-cyan-400 animate-pulse" style={{ display: hudConfig.showMap ? 'block' : 'none' }} />
+                      MINIMAP
+                    </button>
+                  </div>
+
+                  {/* Top-Right Group: Position, Race Stats */}
+                  <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5 z-10 w-[95px]">
+                    {/* Position */}
+                    <button
+                      onClick={() => setHudConfig(prev => ({ ...prev, showPosition: !prev.showPosition }))}
+                      className={`w-full h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                        hudConfig.showPosition
+                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                      }`}
+                    >
+                      POSITION
+                    </button>
+
+                    {/* Race Stats (Best/Total Time) */}
+                    <button
+                      onClick={() => setHudConfig(prev => ({ ...prev, showStats: !prev.showStats }))}
+                      className={`w-full h-11 rounded-lg flex flex-col items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                        hudConfig.showStats
+                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                      }`}
+                    >
+                      <Timer className="w-3 h-3 mb-0.5 text-cyan-400" style={{ display: hudConfig.showStats ? 'block' : 'none' }} />
+                      RACE STATS
+                    </button>
+                  </div>
+
+                  {/* Bottom-Left Group: Speedometer & Transmission */}
+                  <div className="absolute bottom-3 left-3 z-10 w-[110px]">
+                    <button
+                      onClick={() => setHudConfig(prev => ({ ...prev, showSpeedometer: !prev.showSpeedometer }))}
+                      className={`w-full h-12 rounded-lg flex flex-col items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
+                        hudConfig.showSpeedometer
+                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
+                      }`}
+                    >
+                      <span className="font-mono text-[9px] mb-0.5 text-cyan-400" style={{ display: hudConfig.showSpeedometer ? 'block' : 'none' }}>240 KM/H</span>
+                      SPEEDOMETER
+                    </button>
+                  </div>
+
+                  {/* Interactive Status Indicator Overlay */}
+                  <div className="absolute bottom-3 right-3 text-[8px] font-mono text-slate-500 bg-slate-950/80 px-2 py-1 rounded border border-slate-800">
+                    CLICK TO TOGGLE BLOCKS
+                  </div>
+                </div>
+                
+                <div className="mt-4 flex items-center justify-between w-full">
+                  <div className="text-[10px] font-mono text-slate-400">
+                    Active Elements: {Object.values(hudConfig).filter(Boolean).length} / 8
+                  </div>
+                  <button
+                    onClick={() => {
+                      setHudConfig(DEFAULT_HUD_CONFIG);
+                      setShowMirrorInTPS(false);
+                    }}
+                    className="flex items-center gap-1 text-[10px] text-pink-500 hover:text-pink-400 font-bold bg-transparent border-0 cursor-pointer transition-colors"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Reset to Default Layout
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Toggle Checklist (2 cols) */}
+              <div className="lg:col-span-2 flex flex-col gap-3 max-h-[45vh] lg:max-h-[50vh] overflow-y-auto pr-1">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                  HUD Elements Checklist
+                </span>
+
+                {/* Lap Counter */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Lap / Gate Counter</span>
+                    <span className="text-[9px] text-slate-500">Shows current gate or lap progress</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showLap: !prev.showLap }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showLap
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
+                    }`}
+                  >
+                    {hudConfig.showLap ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Track Length */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Track Length</span>
+                    <span className="text-[9px] text-slate-500">Displays total track circuit length</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showLength: !prev.showLength }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showLength
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-355'
+                    }`}
+                  >
+                    {hudConfig.showLength ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Minimap */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Minimap Canvas</span>
+                    <span className="text-[9px] text-slate-500">Renders racetrack shape and player position</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showMap: !prev.showMap }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showMap
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
+                    }`}
+                  >
+                    {hudConfig.showMap ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Rear Mirror */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Rear View Mirror</span>
+                    <span className="text-[9px] text-slate-500">Centered secondary camera viewport</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showMirror: !prev.showMirror }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showMirror
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
+                    }`}
+                  >
+                    {hudConfig.showMirror ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Lap Timer */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Lap Timer</span>
+                    <span className="text-[9px] text-slate-500">Live time limit or current lap timer</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showLapTimer: !prev.showLapTimer }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showLapTimer
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
+                    }`}
+                  >
+                    {hudConfig.showLapTimer ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Race Position */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Race Position</span>
+                    <span className="text-[9px] text-slate-500">Placement rankings tracker vs AI</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showPosition: !prev.showPosition }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showPosition
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
+                    }`}
+                  >
+                    {hudConfig.showPosition ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Best & Total Stats */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Time Stats Panel</span>
+                    <span className="text-[9px] text-slate-500">Top-right best lap and total race timers</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showStats: !prev.showStats }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showStats
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-355'
+                    }`}
+                  >
+                    {hudConfig.showStats ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Gear & Speedometer */}
+                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-200">Gear & Speed Box</span>
+                    <span className="text-[9px] text-slate-500">Speed, RPM, throttle and brake inputs</span>
+                  </div>
+                  <button
+                    onClick={() => setHudConfig(prev => ({ ...prev, showSpeedometer: !prev.showSpeedometer }))}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                      hudConfig.showSpeedometer
+                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
+                    }`}
+                  >
+                    {hudConfig.showSpeedometer ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Modal Actions */}
+            <div className="mt-8 pt-4 border-t border-slate-800 flex justify-end gap-3">
+              <button
+                onClick={() => setShowHUDCustomizer(false)}
+                className="bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 text-white font-bold py-2.5 px-6 rounded-xl text-xs tracking-wider transition-all shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:scale-[1.02] cursor-pointer flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                Apply Interface Settings
+              </button>
+            </div>
+
           </div>
         </div>
       )}

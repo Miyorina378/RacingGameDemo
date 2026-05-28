@@ -34,7 +34,16 @@ export class Vehicle {
   public driftAngle = 0; // Derived: angle between heading and velocity vector
   public steerAngle = 0; // Smoothly interpolated steering angle for physics and visuals
   public getGroundHeight?: (x: number, z: number) => number;
-  public getTrackInfo?: (x: number, z: number) => { dist: number, closestPt: THREE.Vector3 };
+  public getTrackInfo?: (x: number, z: number) => {
+    dist: number;
+    closestPt: THREE.Vector3;
+    closestIdx?: number;
+    width?: number;
+    leftScale?: number;
+    rightScale?: number;
+    sideSign?: number;
+    trackBoundary?: number;
+  };
   public onFenceCollision?: (contactPt: THREE.Vector3) => void;
   public haveFence = false;
   public trackBoundary = 0;
@@ -64,6 +73,8 @@ export class Vehicle {
   public isSpinning = false;        // True when car has entered unrecoverable spin
   public spinTimer = 0;             // Time remaining in spin animation
   public prevThrottleValue = 0;     // Previous frame throttle for lift-off oversteer detection
+  public throttleInput = 0;
+  public brakeInput = 0;
 
   // GT4-style per-car physics character (loaded from CarDatabase)
   public character = {
@@ -1161,8 +1172,9 @@ export class Vehicle {
       
       // Apply simcade acceleration boost based on the car's built-in accelerationRate.
       // This bridges the gap between realistic torque and the fast arcade feel of the old physics.
-      // Mass is NOT included here so that weight reduction upgrades correctly improve acceleration (a=F/m).
-      const arcadeMultiplier = this.accelerationRate * 28.0;
+      // We scale this multiplier using a balanced formula (accelerationRate + 1.33) to keep
+      // starter cars snappy and hypercars fast, but prevents uncontrollable 14g rocket acceleration.
+      const arcadeMultiplier = this.accelerationRate + 1.33;
       driveForce *= arcadeMultiplier;
 
       driveForce *= throttleValue;
@@ -1177,8 +1189,8 @@ export class Vehicle {
     // Braking force
     let brakeForce = 0;
     if (reverseValue > 0.01 && local.forward > 0.5) {
-      // Forward braking (scaled up to match arcade-style 48m/s^2 deceleration)
-      brakeForce = -this.brakingRate * 60.0 * this.mass * reverseValue;
+      // Forward braking (scaled to match realistic ~16m/s^2 deceleration)
+      brakeForce = -this.brakingRate * 20.0 * this.mass * reverseValue;
     } else if (reverseValue > 0.01 && local.forward <= 0.5) {
       // Reversing (toned down to 15.0 instead of 60.0 for realistic reverse speeds)
       if (local.forward > -12.0) { // Limit reverse speed to ~43 km/h
@@ -1187,7 +1199,7 @@ export class Vehicle {
     }
     if (throttleValue > 0.01 && local.forward < -0.5) {
       // Brake from reverse
-      brakeForce = this.brakingRate * 60.0 * this.mass * throttleValue;
+      brakeForce = this.brakingRate * 20.0 * this.mass * throttleValue;
     }
 
     // Handbrake braking force: locks the rear wheels, applying heavy braking force
@@ -1195,7 +1207,7 @@ export class Vehicle {
     if (handbrake) {
       const speedSign = Math.sign(local.forward) || 1;
       const lowSpeedScale = Math.min(1.0, absForward / 0.5);
-      handbrakeBrakeForce = -this.brakingRate * 60.0 * this.mass * speedSign * lowSpeedScale;
+      handbrakeBrakeForce = -this.brakingRate * 20.0 * this.mass * speedSign * lowSpeedScale;
     }
 
     // Drag + rolling resistance
@@ -1245,19 +1257,33 @@ export class Vehicle {
     const rearBrake = brakeForce * 0.4 + handbrakeBrakeForce;
 
     // Longitudinal contact patch forces for combined grip circle
-    const frontLongForce = frontDrive + frontBrake + frontEngineBrake;
-    const rearLongForce = rearDrive + rearBrake + rearEngineBrake;
+    let frontLongForce = frontDrive + frontBrake + frontEngineBrake;
+    let rearLongForce = rearDrive + rearBrake + rearEngineBrake;
+
+    const frontMaxGrip = frontGrip * frontWeight;
+    const rearMaxGrip = rearGrip * rearWeight;
+
+    // ABS and non-ABS lock-up emulation to allow steering while braking
+    if (reverseValue > 0.01 && local.forward > 0.5) {
+      if (this.upgrades.brake.hasABS) {
+        // ABS keeps the longitudinal force modulated, leaving plenty of room for steering
+        frontLongForce = Math.sign(frontLongForce) * Math.min(Math.abs(frontLongForce), frontMaxGrip * 0.65);
+        rearLongForce = Math.sign(rearLongForce) * Math.min(Math.abs(rearLongForce), rearMaxGrip * 0.65);
+      } else {
+        // Without ABS, the wheels lock up, consuming most of the grip circle, but leaving some steering
+        frontLongForce = Math.sign(frontLongForce) * Math.min(Math.abs(frontLongForce), frontMaxGrip * 0.88);
+        rearLongForce = Math.sign(rearLongForce) * Math.min(Math.abs(rearLongForce), rearMaxGrip * 0.88);
+      }
+    }
 
     // Total forward force acting on the vehicle chassis
     const totalForwardForce = driveForce + brakeForce + dragForce + rollingResistance + engineBraking + handbrakeBrakeForce;
 
     // --- COMBINED GRIP CIRCLE for front and rear axles ---
     // Ensure drive/braking force + lateral force don't exceed tire friction circle
-    const frontMaxGrip = frontGrip * frontWeight;
     const frontCombined = combinedGripCircle(frontLatForce, frontLongForce, frontMaxGrip);
     frontLatForce = frontCombined.lateral;
 
-    const rearMaxGrip = rearGrip * rearWeight;
     const rearCombined = combinedGripCircle(rearLatForce, rearLongForce, rearMaxGrip);
     rearLatForce = rearCombined.lateral;
 
@@ -1499,6 +1525,20 @@ export class Vehicle {
 
     const speedBeforeFrame = this.speed;
     const { throttleValue, reverseValue, turnInput, handbrake } = this.parseInputs(keys);
+
+    // Track active inputs for telemetry HUD
+    this.throttleInput = throttleValue;
+    const localVel = this.getLocalVelocity();
+    let activeBrake = 0;
+    if (reverseValue > 0.01 && localVel.forward > 0.5) {
+      activeBrake = reverseValue;
+    } else if (throttleValue > 0.01 && localVel.forward < -0.5) {
+      activeBrake = throttleValue;
+    }
+    if (handbrake) {
+      activeBrake = Math.max(activeBrake, 1.0);
+    }
+    this.brakeInput = activeBrake;
 
     this.processEngineRpm(deltaTime, throttleValue);
 

@@ -9,7 +9,8 @@ export function enforceFenceBoundary(vehicle: Vehicle, deltaTime: number): void 
   if (!vehicle.haveFence || vehicle.trackBoundary <= 0 || !vehicle.getTrackInfo) return;
 
   const info = vehicle.getTrackInfo(vehicle.pos.x, vehicle.pos.z);
-  const maxAllowedDist = vehicle.trackBoundary - 1.2; // half car width
+  const activeBoundary = (info as any).trackBoundary ?? vehicle.trackBoundary;
+  const maxAllowedDist = activeBoundary - 1.2; // half car width
   if (info.dist > maxAllowedDist) {
     // Compute wall normal (pointing from track center toward car)
     const pushDir = new THREE.Vector3().subVectors(vehicle.pos, info.closestPt);

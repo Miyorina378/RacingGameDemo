@@ -24,7 +24,16 @@ export class RacingAI {
   private lateralOffset: number;    // Lane offset in track-normal units
 
   // --- Track awareness callbacks (set externally by RaceMode) ---
-  public getTrackInfo?: (x: number, z: number) => { dist: number; closestPt: THREE.Vector3 };
+  public getTrackInfo?: (x: number, z: number) => {
+    dist: number;
+    closestPt: THREE.Vector3;
+    closestIdx?: number;
+    width?: number;
+    leftScale?: number;
+    rightScale?: number;
+    sideSign?: number;
+    trackBoundary?: number;
+  };
   public isOnGrass?: (x: number, z: number) => boolean;
   public trackBoundary: number = 0;
   public obstacles: Obstacle[] = [];
@@ -236,7 +245,8 @@ export class RacingAI {
     // =============================================
     if (this.trackBoundary > 0 && this.getTrackInfo) {
       const info = this.getTrackInfo(pos.x, pos.z);
-      const wallProximity = info.dist / this.trackBoundary; // 0 = center, 1 = at wall
+      const activeBoundary = info.trackBoundary ?? this.trackBoundary;
+      const wallProximity = info.dist / activeBoundary; // 0 = center, 1 = at wall
 
       if (wallProximity > 0.80) {
         // Close to wall — steer back toward track center

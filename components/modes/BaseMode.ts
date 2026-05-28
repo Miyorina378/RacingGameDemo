@@ -25,12 +25,15 @@ export abstract class BaseMode implements GameMode {
 
   protected roadSamplePoints: THREE.Vector3[] = [];
   protected roadSampleWidths: number[] = [];
+  protected roadSampleLeftScale: number[] = [];
+  protected roadSampleRightScale: number[] = [];
   protected roadWidth: number = 14;
   protected curbWidth: number = 1.5;
   protected curbHeight: number = 0.15;
   protected grassWidth: number = 5.0;
   protected haveGrass: boolean = false;
   protected haveFence: boolean = false;
+  protected haveCurb: boolean = false;
   protected trackBoundary: number = 0;
   protected grassUniforms = { uTime: { value: 0 } };
 
@@ -138,6 +141,7 @@ export abstract class BaseMode implements GameMode {
     this.haveFence = config.HaveFence;
     this.haveGrass = config.HaveGrass ?? false;
     this.grassWidth = config.GrassWidth ?? 5.0;
+    this.haveCurb = config.HaveCrub ?? false;
     
     // We will dynamically calculate trackBoundary in getTrackInfo for variable width, 
     // but keep a max trackBoundary for fallback if needed.
@@ -154,7 +158,7 @@ export abstract class BaseMode implements GameMode {
     });
 
     this.roadWidth = config.roadWidth;
-    this.trackBoundary = maxRoadWidth / 2 + (config.HaveCrub ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0);
+    this.trackBoundary = maxRoadWidth / 2 + (this.haveCurb ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0);
 
     // Sync values to the player vehicle
     this.vehicle.haveFence = this.haveFence;
@@ -162,8 +166,10 @@ export abstract class BaseMode implements GameMode {
     this.vehicle.isOnGrass = (x: number, z: number) => {
       if (!this.haveGrass) return false;
       const info = this.getTrackInfo(x, z);
-      const grassStart = info.width / 2 + (config.HaveCrub ? this.curbWidth : 0);
-      return info.dist >= grassStart && info.dist < (info.width / 2 + (config.HaveCrub ? this.curbWidth : 0) + this.grassWidth);
+      const scale = info.sideSign === 1 ? (info.leftScale ?? 1.0) : (info.rightScale ?? 1.0);
+      const grassStart = (info.width / 2 + (this.haveCurb ? this.curbWidth : 0)) * scale;
+      const grassEnd = grassStart + this.grassWidth * scale;
+      return info.dist >= grassStart && info.dist < grassEnd;
     };
 
     // 1. Project points flat to ground height y = 0.01
@@ -196,11 +202,6 @@ export abstract class BaseMode implements GameMode {
     }
     this.roadSampleWidths = sampleWidths;
 
-    // 4. Create flat road surface geometry using a custom 2D ribbon mesh
-    const roadGeom = new THREE.BufferGeometry();
-    const roadPosArray = new Float32Array(samplePoints.length * 2 * 3);
-    const roadIndexArray: number[] = [];
-
     const leftPoints: THREE.Vector3[] = [];
     const rightPoints: THREE.Vector3[] = [];
     const normals: THREE.Vector3[] = [];
@@ -227,11 +228,98 @@ export abstract class BaseMode implements GameMode {
         normal.normalize();
       }
       normals.push(normal);
+    }
 
+    // Compute left and right scale factors to prevent self-intersection at sharp corners
+    const leftScale = new Array(samplePoints.length).fill(1.0);
+    const rightScale = new Array(samplePoints.length).fill(1.0);
+    
+    const getWMax = (idx: number) => {
+      const w = sampleWidths[idx] / 2;
+      const curb = this.haveCurb ? this.curbWidth : 0;
+      const grass = this.haveGrass ? this.grassWidth : 0;
+      return w + curb + grass;
+    };
+
+    const safety = 0.85;
+
+    for (let i = 0; i < samplePoints.length; i++) {
+      const next_i = (i + 1) % samplePoints.length;
+      
+      const P_i = samplePoints[i];
+      const P_next = samplePoints[next_i];
+      const N_i = normals[i];
+      const N_next = normals[next_i];
+      
+      const dx = P_next.x - P_i.x;
+      const dz = P_next.z - P_i.z;
+      
+      const det = N_next.x * N_i.z - N_i.x * N_next.z;
+      if (Math.abs(det) > 1e-5) {
+        const s = (dz * N_next.x - dx * N_next.z) / det;
+        const t = (N_i.x * dz - dx * N_i.z) / det;
+        
+        if (s > 0 && t > 0) {
+          const limit_i = s * safety;
+          const limit_next = t * safety;
+          
+          const maxW_i = getWMax(i);
+          const maxW_next = getWMax(next_i);
+          
+          if (maxW_i > limit_i) {
+            leftScale[i] = Math.min(leftScale[i], limit_i / maxW_i);
+          }
+          if (maxW_next > limit_next) {
+            leftScale[next_i] = Math.min(leftScale[next_i], limit_next / maxW_next);
+          }
+        } else if (s < 0 && t < 0) {
+          const limit_i = -s * safety;
+          const limit_next = -t * safety;
+          
+          const maxW_i = getWMax(i);
+          const maxW_next = getWMax(next_i);
+          
+          if (maxW_i > limit_i) {
+            rightScale[i] = Math.min(rightScale[i], limit_i / maxW_i);
+          }
+          if (maxW_next > limit_next) {
+            rightScale[next_i] = Math.min(rightScale[next_i], limit_next / maxW_next);
+          }
+        }
+      }
+    }
+
+    // Smooth the scale factors to make the transition very smooth
+    const smoothScale = (arr: number[]) => {
+      const smoothed = [...arr];
+      for (let pass = 0; pass < 2; pass++) {
+        const temp = [...smoothed];
+        for (let i = 0; i < temp.length; i++) {
+          const prev = temp[(i - 1 + temp.length) % temp.length];
+          const next = temp[(i + 1) % temp.length];
+          smoothed[i] = 0.25 * prev + 0.5 * temp[i] + 0.25 * next;
+        }
+      }
+      return smoothed;
+    };
+    this.roadSampleLeftScale = smoothScale(leftScale);
+    this.roadSampleRightScale = smoothScale(rightScale);
+
+    // 4. Create flat road surface geometry using a custom 2D ribbon mesh
+    const roadGeom = new THREE.BufferGeometry();
+    const roadPosArray = new Float32Array(samplePoints.length * 2 * 3);
+    const roadIndexArray: number[] = [];
+
+    for (let i = 0; i < samplePoints.length; i++) {
+      const pt = samplePoints[i];
+      const normal = normals[i];
       const w = sampleWidths[i] / 2;
+      const lScale = this.roadSampleLeftScale[i];
+      const rScale = this.roadSampleRightScale[i];
+
       // Save points for boundaries and lines
-      const left = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, w);
-      const right = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, -w);
+      const left = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, w * lScale);
+      const right = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, -w * rScale);
       leftPoints.push(left);
       rightPoints.push(right);
 
@@ -291,11 +379,13 @@ export abstract class BaseMode implements GameMode {
     for (let i = 0; i < samplePoints.length; i++) {
       const pt = samplePoints[i];
       const normal = normals[i];
-
       const w = sampleWidths[i] / 2;
+      const lScale = this.roadSampleLeftScale[i];
+      const rScale = this.roadSampleRightScale[i];
+
       // Left edge line
-      const l1 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, w - 0.4);
-      const l2 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, w - 0.4 - lineWidth);
+      const l1 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (w - 0.4) * lScale);
+      const l2 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (w - 0.4 - lineWidth) * lScale);
       leftLinePos[i * 6] = l1.x;
       leftLinePos[i * 6 + 1] = l1.y;
       leftLinePos[i * 6 + 2] = l1.z;
@@ -304,8 +394,8 @@ export abstract class BaseMode implements GameMode {
       leftLinePos[i * 6 + 5] = l2.z;
 
       // Right edge line
-      const r1 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, -w + 0.4);
-      const r2 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, -w + 0.4 + lineWidth);
+      const r1 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (-w + 0.4) * rScale);
+      const r2 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (-w + 0.4 + lineWidth) * rScale);
       rightLinePos[i * 6] = r1.x;
       rightLinePos[i * 6 + 1] = r1.y;
       rightLinePos[i * 6 + 2] = r1.z;
@@ -351,15 +441,16 @@ export abstract class BaseMode implements GameMode {
     for (let i = 0; i < samplePoints.length - 1; i++) {
       // Draw dashes: 3 segments visible, 3 segments blank
       if (Math.floor(i / 4) % 2 === 0) {
-        const pt = samplePoints[i];
-        const ptNext = samplePoints[i + 1];
+        const ptCenter = new THREE.Vector3().addVectors(leftPoints[i], rightPoints[i]).multiplyScalar(0.5);
+        const ptCenterNext = new THREE.Vector3().addVectors(leftPoints[i + 1], rightPoints[i + 1]).multiplyScalar(0.5);
         const normal = normals[i];
         const normalNext = normals[i + 1];
 
-        const c1 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, 0.1);
-        const c2 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, -0.1);
-        const c1Next = new THREE.Vector3(ptNext.x, 0.052, ptNext.z).addScaledVector(normalNext, 0.1);
-        const c2Next = new THREE.Vector3(ptNext.x, 0.052, ptNext.z).addScaledVector(normalNext, -0.1);
+        // Elevate center line slightly to prevent z-fighting
+        const c1 = new THREE.Vector3(ptCenter.x, 0.052, ptCenter.z).addScaledVector(normal, 0.1);
+        const c2 = new THREE.Vector3(ptCenter.x, 0.052, ptCenter.z).addScaledVector(normal, -0.1);
+        const c1Next = new THREE.Vector3(ptCenterNext.x, 0.052, ptCenterNext.z).addScaledVector(normalNext, 0.1);
+        const c2Next = new THREE.Vector3(ptCenterNext.x, 0.052, ptCenterNext.z).addScaledVector(normalNext, -0.1);
 
         centerLinePos.push(c1.x, c1.y, c1.z);
         centerLinePos.push(c2.x, c2.y, c2.z);
@@ -387,8 +478,7 @@ export abstract class BaseMode implements GameMode {
       this.environmentGroup.add(centerLineMesh);
     }
 
-    const HaveCrub = config.HaveCrub;
-    if (HaveCrub) {
+    if (this.haveCurb) {
       // 7. Create Alternating Red & White Curbs
       const redCurbGeom = new THREE.BufferGeometry();
       const whiteCurbGeom = new THREE.BufferGeometry();
@@ -443,23 +533,28 @@ export abstract class BaseMode implements GameMode {
         const normal = normals[i];
         const normalNext = normals[next_i];
 
+        const lScale = this.roadSampleLeftScale[i];
+        const lScaleNext = this.roadSampleLeftScale[next_i];
+        const rScale = this.roadSampleRightScale[i];
+        const rScaleNext = this.roadSampleRightScale[next_i];
+
         // Add Left side curbs
         const l_inner_bottom = leftPoints[i];
         const l_inner_top = new THREE.Vector3(l_inner_bottom.x, 0.05 + curbHeight, l_inner_bottom.z);
-        const l_outer_top = new THREE.Vector3().copy(l_inner_top).addScaledVector(normal, curbWidth);
+        const l_outer_top = new THREE.Vector3().copy(l_inner_top).addScaledVector(normal, curbWidth * lScale);
 
         const l_inner_bottom_next = leftPoints[next_i];
         const l_inner_top_next = new THREE.Vector3(l_inner_bottom_next.x, 0.05 + curbHeight, l_inner_bottom_next.z);
-        const l_outer_top_next = new THREE.Vector3().copy(l_inner_top_next).addScaledVector(normalNext, curbWidth);
+        const l_outer_top_next = new THREE.Vector3().copy(l_inner_top_next).addScaledVector(normalNext, curbWidth * lScaleNext);
 
         // Add Right side curbs
         const r_inner_bottom = rightPoints[i];
         const r_inner_top = new THREE.Vector3(r_inner_bottom.x, 0.05 + curbHeight, r_inner_bottom.z);
-        const r_outer_top = new THREE.Vector3().copy(r_inner_top).addScaledVector(normal, -curbWidth);
+        const r_outer_top = new THREE.Vector3().copy(r_inner_top).addScaledVector(normal, -curbWidth * rScale);
 
         const r_inner_bottom_next = rightPoints[next_i];
         const r_inner_top_next = new THREE.Vector3(r_inner_bottom_next.x, 0.05 + curbHeight, r_inner_bottom_next.z);
-        const r_outer_top_next = new THREE.Vector3().copy(r_inner_top_next).addScaledVector(normalNext, -curbWidth);
+        const r_outer_top_next = new THREE.Vector3().copy(r_inner_top_next).addScaledVector(normalNext, -curbWidth * rScaleNext);
 
         if (isRed) {
           // Update red indexes sequentially for both left and right curbs
@@ -539,27 +634,37 @@ export abstract class BaseMode implements GameMode {
         const normal = normals[i];
         const normalNext = normals[next_i];
 
-        const innerOffset = this.roadSampleWidths[i] / 2 + (config.HaveCrub ? this.curbWidth : 0);
-        const innerOffsetNext = this.roadSampleWidths[next_i] / 2 + (config.HaveCrub ? this.curbWidth : 0);
-        const outerOffset = innerOffset + this.grassWidth;
-        const outerOffsetNext = innerOffsetNext + this.grassWidth;
+        const lScale = this.roadSampleLeftScale[i];
+        const lScaleNext = this.roadSampleLeftScale[next_i];
+        const rScale = this.roadSampleRightScale[i];
+        const rScaleNext = this.roadSampleRightScale[next_i];
 
-        const innerHeight = 0.05 + (config.HaveCrub ? this.curbHeight : 0);
+        const l_innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * lScale;
+        const l_innerOffsetNext = (this.roadSampleWidths[next_i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * lScaleNext;
+        const l_outerOffset = l_innerOffset + this.grassWidth * lScale;
+        const l_outerOffsetNext = l_innerOffsetNext + this.grassWidth * lScaleNext;
+
+        const r_innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * rScale;
+        const r_innerOffsetNext = (this.roadSampleWidths[next_i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * rScaleNext;
+        const r_outerOffset = r_innerOffset + this.grassWidth * rScale;
+        const r_outerOffsetNext = r_innerOffsetNext + this.grassWidth * rScaleNext;
+
+        const innerHeight = 0.05 + (this.haveCurb ? this.curbHeight : 0);
         const outerHeight = 0.02;
 
         // Left grass vertices (sloped from innerHeight down to outerHeight)
-        const l_in = new THREE.Vector3(pt.x, innerHeight, pt.z).addScaledVector(normal, innerOffset);
-        const l_out = new THREE.Vector3(pt.x, outerHeight, pt.z).addScaledVector(normal, outerOffset);
+        const l_in = new THREE.Vector3(pt.x, innerHeight, pt.z).addScaledVector(normal, l_innerOffset);
+        const l_out = new THREE.Vector3(pt.x, outerHeight, pt.z).addScaledVector(normal, l_outerOffset);
         
-        const l_in_next = new THREE.Vector3(ptNext.x, innerHeight, ptNext.z).addScaledVector(normalNext, innerOffsetNext);
-        const l_out_next = new THREE.Vector3(ptNext.x, outerHeight, ptNext.z).addScaledVector(normalNext, outerOffsetNext);
+        const l_in_next = new THREE.Vector3(ptNext.x, innerHeight, ptNext.z).addScaledVector(normalNext, l_innerOffsetNext);
+        const l_out_next = new THREE.Vector3(ptNext.x, outerHeight, ptNext.z).addScaledVector(normalNext, l_outerOffsetNext);
 
         // Right grass vertices
-        const r_in = new THREE.Vector3(pt.x, innerHeight, pt.z).addScaledVector(normal, -innerOffset);
-        const r_out = new THREE.Vector3(pt.x, outerHeight, pt.z).addScaledVector(normal, -outerOffset);
+        const r_in = new THREE.Vector3(pt.x, innerHeight, pt.z).addScaledVector(normal, -r_innerOffset);
+        const r_out = new THREE.Vector3(pt.x, outerHeight, pt.z).addScaledVector(normal, -r_outerOffset);
         
-        const r_in_next = new THREE.Vector3(ptNext.x, innerHeight, ptNext.z).addScaledVector(normalNext, -innerOffsetNext);
-        const r_out_next = new THREE.Vector3(ptNext.x, outerHeight, ptNext.z).addScaledVector(normalNext, -outerOffsetNext);
+        const r_in_next = new THREE.Vector3(ptNext.x, innerHeight, ptNext.z).addScaledVector(normalNext, -r_innerOffsetNext);
+        const r_out_next = new THREE.Vector3(ptNext.x, outerHeight, ptNext.z).addScaledVector(normalNext, -r_outerOffsetNext);
 
         // Left side grass ground
         grassPos.push(l_in.x, l_in.y, l_in.z);
@@ -678,16 +783,18 @@ export abstract class BaseMode implements GameMode {
           tangent.subVectors(samplePoints[1], samplePoints[0]).normalize();
         }
 
-        const innerOffset = this.roadSampleWidths[i] / 2 + (config.HaveCrub ? this.curbWidth : 0);
-        const innerHeight = 0.05 + (config.HaveCrub ? this.curbHeight : 0);
+        const innerHeight = 0.05 + (this.haveCurb ? this.curbHeight : 0);
         const outerHeight = 0.02;
 
         for (let side = 0; side < 2; side++) {
           const sideSign = side === 0 ? 1 : -1;
+          const scale = side === 0 ? this.roadSampleLeftScale[i] : this.roadSampleRightScale[i];
+
+          const innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * scale;
 
           for (let b = 0; b < bladesPerSegment; b++) {
             // Scatter randomly within the grass strip
-            const randomNormOffset = innerOffset + Math.random() * this.grassWidth;
+            const randomNormOffset = innerOffset + Math.random() * this.grassWidth * scale;
             const randomTangOffset = (Math.random() - 0.5) * 4.0;
 
             const bladePos = new THREE.Vector3()
@@ -696,7 +803,7 @@ export abstract class BaseMode implements GameMode {
               .addScaledVector(tangent, randomTangOffset);
 
             // Interpolate height on the slope
-            const t = (randomNormOffset - innerOffset) / this.grassWidth;
+            const t = (randomNormOffset - innerOffset) / (this.grassWidth * (scale > 0.0001 ? scale : 1));
             bladePos.y = THREE.MathUtils.lerp(innerHeight, outerHeight, t);
 
             dummy.position.copy(bladePos);
@@ -734,12 +841,17 @@ export abstract class BaseMode implements GameMode {
         const pt = samplePoints[i];
         const normal = normals[i];
         const halfWidth = this.roadSampleWidths[i] / 2;
-        const totalOffset = halfWidth + (config.HaveCrub ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0);
+        const lScale = this.roadSampleLeftScale[i];
+        const rScale = this.roadSampleRightScale[i];
+        const baseOffset = halfWidth + (this.haveCurb ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0);
+
+        const totalOffsetL = baseOffset * lScale;
+        const totalOffsetR = baseOffset * rScale;
 
         // Left boundary point
-        const leftBound = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, totalOffset);
+        const leftBound = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, totalOffsetL);
         // Right boundary point
-        const rightBound = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, -totalOffset);
+        const rightBound = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, -totalOffsetR);
 
         leftBoundPoints.push(leftBound);
         rightBoundPoints.push(rightBound);
@@ -1146,9 +1258,18 @@ export abstract class BaseMode implements GameMode {
     }
   }
 
-  public getTrackInfo(x: number, z: number): { dist: number; closestPt: THREE.Vector3; closestIdx: number; width: number } {
+  public getTrackInfo(x: number, z: number): {
+    dist: number;
+    closestPt: THREE.Vector3;
+    closestIdx: number;
+    width: number;
+    leftScale?: number;
+    rightScale?: number;
+    sideSign?: number;
+    trackBoundary?: number;
+  } {
     if (this.roadSamplePoints.length === 0) {
-      return { dist: 0, closestPt: new THREE.Vector3(x, 0, z), closestIdx: 0, width: this.roadWidth };
+      return { dist: 0, closestPt: new THREE.Vector3(x, 0, z), closestIdx: 0, width: this.roadWidth, leftScale: 1.0, rightScale: 1.0, sideSign: 1, trackBoundary: this.trackBoundary };
     }
 
     let minDistSq = Infinity;
@@ -1183,11 +1304,40 @@ export abstract class BaseMode implements GameMode {
       }
     }
 
+    const closestPt = this.roadSamplePoints[closestIdx];
+    const width = this.roadSampleWidths[closestIdx] ?? this.roadWidth;
+    const lScale = this.roadSampleLeftScale[closestIdx] ?? 1.0;
+    const rScale = this.roadSampleRightScale[closestIdx] ?? 1.0;
+
+    // Compute sideSign (1 = left, -1 = right)
+    const tangent = new THREE.Vector3();
+    if (closestIdx < len - 1) {
+      tangent.subVectors(this.roadSamplePoints[closestIdx + 1], closestPt);
+    } else {
+      tangent.subVectors(this.roadSamplePoints[1], this.roadSamplePoints[0]);
+    }
+    tangent.y = 0;
+    tangent.normalize();
+    const normal = new THREE.Vector3(0, 1, 0).cross(tangent).normalize();
+
+    const toCar = new THREE.Vector3(px - closestPt.x, 0, pz - closestPt.z);
+    const dot = toCar.dot(normal);
+    const sideSign = dot >= 0 ? 1 : -1;
+    const activeScale = sideSign === 1 ? lScale : rScale;
+
+    // Calculate dynamic track boundary on this side
+    const halfWidth = width / 2;
+    const trackBoundary = (halfWidth + (this.haveCurb ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0)) * activeScale;
+
     return {
       dist: Math.sqrt(minDistSq),
-      closestPt: this.roadSamplePoints[closestIdx].clone(),
+      closestPt: closestPt.clone(),
       closestIdx: closestIdx,
-      width: this.roadSampleWidths[closestIdx] ?? this.roadWidth
+      width: width,
+      leftScale: lScale,
+      rightScale: rScale,
+      sideSign: sideSign,
+      trackBoundary: trackBoundary
     };
   }
 
@@ -1237,16 +1387,13 @@ export abstract class BaseMode implements GameMode {
 
   public getGroundHeight(x: number, z: number): number {
     if (this.roadSamplePoints.length === 0) return 0;
-    if (!this.haveFence) {
-      // If we don't have a fence, wait, we might still have a curb!
-      // But actually, we only check ground height if HaveCrub is true
-    }
 
     const info = this.getTrackInfo(x, z);
-    const halfWidth = info.width / 2;
+    const scale = info.sideSign === 1 ? (info.leftScale ?? 1.0) : (info.rightScale ?? 1.0);
+    const halfWidth = (info.width / 2) * scale;
 
     // If we are beyond the asphalt road but within the curb width, return curbHeight
-    if (info.dist >= halfWidth && info.dist <= halfWidth + this.curbWidth) {
+    if (info.dist >= halfWidth && info.dist <= halfWidth + this.curbWidth * scale) {
       return this.curbHeight;
     }
 

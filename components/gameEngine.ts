@@ -23,7 +23,7 @@ export interface EngineCallbacks {
   onGameStatus: (status: 'idle' | 'countdown' | 'playing' | 'success' | 'failed', message?: string, results?: any[]) => void;
   onDriftCompleted: (earnedCredits: number) => void;
   onPlacementChange?: (placement: number, totalParticipants: number) => void;
-  onVehicleStatsChange?: (speed: number, rpm: number, gear: number, isShifting: boolean) => void;
+  onVehicleStatsChange?: (speed: number, rpm: number, gear: number, isShifting: boolean, throttle: number, brake: number) => void;
   onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
 }
 
@@ -31,8 +31,10 @@ export class GameEngine {
   private canvas: HTMLCanvasElement;
   public scene!: THREE.Scene;
   public camera!: THREE.PerspectiveCamera;
+  public rearCamera!: THREE.PerspectiveCamera;
   public renderer!: THREE.WebGLRenderer;
   public dirLight!: THREE.DirectionalLight;
+  public ambientLight!: THREE.AmbientLight;
 
   // Shared across modes
   public environmentGroup!: THREE.Group;
@@ -100,6 +102,7 @@ export class GameEngine {
     this.scene = new THREE.Scene();
 
     this.camera = new THREE.PerspectiveCamera(65, width / height, 0.1, 4000);
+    this.rearCamera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -112,8 +115,8 @@ export class GameEngine {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0x24244d, 1.0);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x24244d, 1.0);
+    this.scene.add(this.ambientLight);
 
     this.dirLight = new THREE.DirectionalLight(0xffffff, 1.2); // White directional light for realistic road colors
     this.dirLight.position.set(0, 100, -100);
@@ -136,7 +139,7 @@ export class GameEngine {
     this.scene.add(this.dirLight.target);
 
     // Initialize Sky
-    this.sky = new Sky(this.scene, this.renderer, ambientLight, this.dirLight);
+    this.sky = new Sky(this.scene, this.renderer, this.ambientLight, this.dirLight);
 
     // Setup environments group
     this.environmentGroup = new THREE.Group();
@@ -556,7 +559,9 @@ export class GameEngine {
         displaySpeed,
         Math.round(this.vehicle.rpm),
         this.vehicle.currentGear,
-        this.vehicle.isShifting
+        this.vehicle.isShifting,
+        this.vehicle.throttleInput,
+        this.vehicle.brakeInput
       );
     }
 
@@ -573,7 +578,60 @@ export class GameEngine {
     }
 
     // 4. Render
+    const width = this.canvas.clientWidth;
+    const height = this.canvas.clientHeight;
+
+    this.renderer.setViewport(0, 0, width, height);
+    this.renderer.setScissor(0, 0, width, height);
+    this.renderer.setScissorTest(false);
     this.renderer.render(this.scene, this.camera);
+
+    if (this.activeMode !== 'garage' && this.rearCamera) {
+      const mirrorElem = document.getElementById('rear-view-mirror-hud');
+      if (mirrorElem) {
+        const rect = mirrorElem.getBoundingClientRect();
+        const canvasRect = this.canvas.getBoundingClientRect();
+
+        const x = rect.left - canvasRect.left;
+        const y = canvasRect.bottom - rect.bottom;
+        const w = rect.width;
+        const h = rect.height;
+
+        if (w > 0 && h > 0) {
+          this.rearCamera.aspect = w / h;
+          this.rearCamera.updateProjectionMatrix();
+          this.rearCamera.projectionMatrix.elements[0] *= -1;
+
+          this.renderer.setViewport(x, y, w, h);
+          this.renderer.setScissor(x, y, w, h);
+          this.renderer.setScissorTest(true);
+
+          this.renderer.clearDepth();
+
+          const gl = this.renderer.getContext();
+          gl.frontFace(gl.CW);
+
+          // Hide own vehicle mesh and temporarily boost ambient light
+          const originalVehicleVisible = this.vehicle.mesh.visible;
+          this.vehicle.mesh.visible = false;
+
+          const originalAmbientColor = this.ambientLight.color.getHex();
+          const originalAmbientIntensity = this.ambientLight.intensity;
+          this.ambientLight.color.setHex(0xffffff);
+          this.ambientLight.intensity = 2.0;
+
+          this.renderer.render(this.scene, this.rearCamera);
+
+          // Restore states
+          this.vehicle.mesh.visible = originalVehicleVisible;
+          this.ambientLight.color.setHex(originalAmbientColor);
+          this.ambientLight.intensity = originalAmbientIntensity;
+
+          gl.frontFace(gl.CCW);
+          this.renderer.setScissorTest(false);
+        }
+      }
+    }
   };
 
   private updateCameraChase(deltaTime: number) {
@@ -632,6 +690,23 @@ export class GameEngine {
 
         this.camera.lookAt(lookTarget);
       }
+    }
+
+    // Update rear view camera
+    if (this.activeMode !== 'garage' && this.rearCamera && this.vehicle) {
+      this.vehicle.mesh.updateMatrixWorld(true);
+      
+      const localRearCamPos = new THREE.Vector3(0, 1.15, -0.2);
+      const worldRearCamPos = localRearCamPos.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
+      this.rearCamera.position.copy(worldRearCamPos);
+      
+      const localRearLookDir = new THREE.Vector3(0, 1.15, -20.0);
+      const worldRearLookTarget = localRearLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
+      this.rearCamera.lookAt(worldRearLookTarget);
+      
+      const localUp = new THREE.Vector3(0, 1, 0);
+      const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
+      this.rearCamera.up.copy(worldUp);
     }
   }
 
