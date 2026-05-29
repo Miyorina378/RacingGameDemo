@@ -85,6 +85,9 @@ export class LicenseMode extends BaseMode {
   public update(deltaTime: number) {
     this.updateScrollingFloor();
     this.updateGrass(deltaTime);
+    
+    // Update checkpoint rings (hologram scrolls and float animations)
+    this.checkpoints.forEach(cp => cp.update(deltaTime));
 
     // Movement: Freeze movement during countdown phase
     const isCountdown = this.engine.gameStatus === 'countdown';
@@ -114,6 +117,7 @@ export class LicenseMode extends BaseMode {
       if (currentCheckpoint && currentCheckpoint.checkCollection(this.vehicle.pos)) {
         // Explode checkpoint activation sparks
         this.particles.emitSparks(12, currentCheckpoint.pos, 0x00ffff);
+        this.engine.triggerCheckpointFlash();
         
         this.activeCheckpointIndex++;
         

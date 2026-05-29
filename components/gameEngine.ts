@@ -10,6 +10,7 @@ import { RaceMode } from './modes/RaceMode';
 import { TutorialMode } from './modes/TutorialMode';
 import { TRACKS_DATABASE } from './config/TrackDatabase';
 import { Sky } from './objects/Sky';
+import { PostProcessing } from './PostProcessing';
 
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
 export type { CarConfig };
@@ -35,6 +36,8 @@ export class GameEngine {
   public renderer!: THREE.WebGLRenderer;
   public dirLight!: THREE.DirectionalLight;
   public ambientLight!: THREE.AmbientLight;
+  public postProcessing!: PostProcessing;
+  public checkpointFlash = 0.0;
 
   // Shared across modes
   public environmentGroup!: THREE.Group;
@@ -44,7 +47,28 @@ export class GameEngine {
   public keys: { [key: string]: boolean } = {};
 
   // Gameplay State
-  public activeMode: 'garage' | 'free_roam' | 'license' | 'race' | 'tutorial' = 'garage';
+  public activeMode: 'garage' | 'free_roam' | 'license' | 'race' | 'tutorial' | 'editor' = 'garage';
+  
+  // Editor State
+  public editorState = {
+    nodes: [] as { x: number; z: number; y?: number; width?: number }[],
+    scenery: [] as { type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium' | 'tree'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[],
+    tool: 'node' as string,
+    snapToGrid: 10,
+    cornerHeight: 2,
+    selectedNodeIndex: null as number | null,
+    selectedSceneryIndex: null as number | null,
+    roadWidth: 18,
+    activeMode: 'garage' as string,
+    onUpdateNodes: null as ((nodes: any[]) => void) | null,
+    onUpdateScenery: null as ((scenery: any[]) => void) | null,
+    onSelectNode: null as ((idx: number | null) => void) | null,
+    onSelectScenery: null as ((idx: number | null) => void) | null,
+    onDragNodeStart: null as ((idx: number) => void) | null,
+    onDragNodeEnd: null as (() => void) | null,
+    onDragSceneryStart: null as ((idx: number) => void) | null,
+    onDragSceneryEnd: null as (() => void) | null,
+  };
   public currentModeInstance: GameMode | null = null;
   public gameStatus: 'idle' | 'countdown' | 'playing' | 'success' | 'failed' = 'idle';
   public gameTimer = 0;
@@ -113,6 +137,11 @@ export class GameEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    
+    // Set up HDR Tone Mapping and Color Space for visual consistency
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     // Lights
     this.ambientLight = new THREE.AmbientLight(0x24244d, 1.0);
@@ -141,6 +170,9 @@ export class GameEngine {
     // Initialize Sky
     this.sky = new Sky(this.scene, this.renderer, this.ambientLight, this.dirLight);
 
+    // Initialize PostProcessing
+    this.postProcessing = new PostProcessing(this.renderer, this.scene, this.camera);
+
     // Setup environments group
     this.environmentGroup = new THREE.Group();
     this.scene.add(this.environmentGroup);
@@ -156,6 +188,9 @@ export class GameEngine {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
+    if (this.postProcessing) {
+      this.postProcessing.setSize(width, height);
+    }
   };
 
   private setupInputs() {
@@ -456,6 +491,10 @@ export class GameEngine {
     this.callbacks.onGameStatus('failed', message);
   }
 
+  public triggerCheckpointFlash() {
+    this.checkpointFlash = 1.0;
+  }
+
   private resetGameplayTimer() {
     this.gameStatus = 'idle';
     if (this.modeTimerInterval) {
@@ -512,6 +551,9 @@ export class GameEngine {
     this.timer.update(timestamp);
     // target 60fps limit, cap to 0.05 to avoid huge jumps
     const deltaTime = Math.min(this.timer.getDelta(), 0.05);
+
+    // Decay checkpoint flash intensity
+    this.checkpointFlash = Math.max(0.0, this.checkpointFlash - deltaTime * 2.2);
 
     if (!this.isPaused) {
       // 1. Delegate tick to active mode instance
@@ -577,6 +619,15 @@ export class GameEngine {
       this.updateCameraChase(deltaTime);
     }
 
+    // Update Post-processing uniforms
+    if (this.postProcessing) {
+      const isDrifting = this.vehicle ? this.vehicle.isDrifting : false;
+      const driftPoints = this.driftAccumulatedPoints;
+      // Boost flame visual is active if accelerating (throttle > 0.5) and speed is above 35 km/h
+      const isBoosting = this.vehicle ? (this.keys['w'] || this.keys['arrowup']) && displaySpeed > 35 : false;
+      this.postProcessing.update(deltaTime, displaySpeed, isDrifting, driftPoints, isBoosting, this.checkpointFlash);
+    }
+
     // 4. Render
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
@@ -584,7 +635,12 @@ export class GameEngine {
     this.renderer.setViewport(0, 0, width, height);
     this.renderer.setScissor(0, 0, width, height);
     this.renderer.setScissorTest(false);
-    this.renderer.render(this.scene, this.camera);
+    
+    if (this.postProcessing) {
+      this.postProcessing.render(deltaTime);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
 
     if (this.activeMode !== 'garage' && this.rearCamera) {
       const mirrorElem = document.getElementById('rear-view-mirror-hud');

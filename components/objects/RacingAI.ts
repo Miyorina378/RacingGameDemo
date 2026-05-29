@@ -33,6 +33,7 @@ export class RacingAI {
     rightScale?: number;
     sideSign?: number;
     trackBoundary?: number;
+    banking?: number;
   };
   public isOnGrass?: (x: number, z: number) => boolean;
   public trackBoundary: number = 0;

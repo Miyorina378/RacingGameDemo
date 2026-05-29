@@ -3,13 +3,15 @@ import * as THREE from 'three';
 export interface TrackNode {
   pos: THREE.Vector3;
   width?: number; // Override road width at this node
+  banking?: number; // Bank angle in degrees
 }
 
 export interface TrackScenery {
-  type: 'tree' | 'hill';
+  type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium';
   position: THREE.Vector3;
   scale?: number;
   heightScale?: number;
+  rotation?: number;
 }
 
 export interface TrackConfig {

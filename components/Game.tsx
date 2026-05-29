@@ -69,6 +69,8 @@ const DEFAULT_UPGRADES = {
   },
   suspensionLevel: 0,
   bodyControlModuleLevel: 0,
+  tireLevel: 0,
+  tireCompound: 'economy',
   purchasedToggles: {
     hasABS: false,
     hasESC: false,
@@ -222,6 +224,15 @@ const UPGRADES_CONFIG = [
         maxLevel: 3,
         costs: [500, 1000, 2000],
         path: ['bodyControlModuleLevel']
+      },
+      {
+        id: 'tireLevel',
+        name: 'Racing Tires',
+        description: 'Upgrades tire compounds from economy to racing super soft for extreme grip.',
+        type: 'level',
+        maxLevel: 5,
+        costs: [400, 800, 1200, 1800, 2600],
+        path: ['tireLevel']
       }
     ]
   }
@@ -284,11 +295,20 @@ const getUpgradedStats = (car: CarConfig, upgrades: any) => {
     (propLvl * 0.1) +
     (weightLvl * 0.3);
 
+  const tireCompound = upgrades.tireCompound || 'economy';
+  let tireHandlingBoost = 0;
+  if (tireCompound === 'super_hard') tireHandlingBoost = 0.35;
+  else if (tireCompound === 'hard') tireHandlingBoost = 0.7;
+  else if (tireCompound === 'normal') tireHandlingBoost = 1.1;
+  else if (tireCompound === 'soft') tireHandlingBoost = 1.5;
+  else if (tireCompound === 'super_soft') tireHandlingBoost = 2.0;
+
   // Handling increases with suspension, weight reduction (lighter is more nimble), and stabilizer levels
   const upgradedHandling = car.handling +
     (suspensionLvl * 0.5) +
     (weightLvl * 0.2) +
-    (upgrades.brake?.level * 0.1 || 0);
+    (upgrades.brake?.level * 0.1 || 0) +
+    tireHandlingBoost;
 
   return {
     speed: Math.min(15, upgradedSpeed),
@@ -308,13 +328,90 @@ const isTogglePurchased = (carUpgradesForCar: any, itemId: string) => {
 
 // HUDConfig is imported from root option.ts
 
+const renderToolIcon = (tool: string, isActive: boolean) => {
+  switch (tool) {
+    case 'node':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke={isActive ? "#d946ef" : "#a855f7"} strokeWidth="6" strokeLinecap="round"/>
+          <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke="#ffffff" strokeWidth="1.5" strokeDasharray="3,3" strokeLinecap="round"/>
+          <circle cx="30" cy="18" r="4" fill="#06b6d4" />
+        </svg>
+      );
+    case 'tree1':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="22" y="32" width="4" height="10" rx="1" fill="#78350f"/>
+          <path d="M 24,6 L 12,22 L 36,22 Z" fill={isActive ? "#22c55e" : "#16a34a"}/>
+          <path d="M 24,14 L 8,30 L 40,30 Z" fill={isActive ? "#16a34a" : "#15803d"}/>
+        </svg>
+      );
+    case 'tree2':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="21" y="30" width="6" height="12" rx="1.5" fill="#78350f"/>
+          <circle cx="24" cy="20" r="12" fill={isActive ? "#16a34a" : "#15803d"}/>
+          <circle cx="20" cy="16" r="7" fill={isActive ? "#4ade80" : "#22c55e"} style={{ opacity: 0.85 }}/>
+        </svg>
+      );
+    case 'tree3':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 24,42 Q 22,28 24,18" stroke="#a16207" strokeWidth="3" strokeLinecap="round"/>
+          <path d="M 24,18 Q 14,14 10,22" stroke={isActive ? "#4ade80" : "#22c55e"} strokeWidth="3" strokeLinecap="round"/>
+          <path d="M 24,18 Q 34,14 38,22" stroke={isActive ? "#4ade80" : "#22c55e"} strokeWidth="3" strokeLinecap="round"/>
+          <path d="M 24,18 Q 16,10 20,6" stroke={isActive ? "#86efac" : "#4ade80"} strokeWidth="3" strokeLinecap="round"/>
+          <path d="M 24,18 Q 32,10 28,6" stroke={isActive ? "#86efac" : "#4ade80"} strokeWidth="3" strokeLinecap="round"/>
+        </svg>
+      );
+    case 'rock':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 24,8 L 38,20 L 32,38 L 16,38 L 10,20 Z" fill={isActive ? "#a8a29e" : "#78716c"} stroke="#57534e" strokeWidth="2"/>
+          <path d="M 24,8 L 24,24 L 10,20" stroke="#44403c" strokeWidth="1.5"/>
+          <path d="M 24,24 L 38,20" stroke="#44403c" strokeWidth="1.5"/>
+          <path d="M 24,24 L 32,38" stroke="#44403c" strokeWidth="1.5"/>
+          <path d="M 24,24 L 16,38" stroke="#44403c" strokeWidth="1.5"/>
+        </svg>
+      );
+    case 'mountain':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 24,8 L 6,38 L 42,38 Z" fill={isActive ? "#71717a" : "#3f3f46"}/>
+          <path d="M 24,8 L 18,18 L 24,16 L 30,18 Z" fill="#ffffff"/>
+          <path d="M 24,8 L 24,38" stroke="#18181b" strokeWidth="1.5"/>
+        </svg>
+      );
+    case 'hill':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 4,38 Q 24,12 44,38 Z" fill={isActive ? "#d97706" : "#b45309"}/>
+          <path d="M 8,38 Q 24,16 40,38 Z" fill={isActive ? "#22c55e" : "#15803d"} style={{ opacity: 0.85 }}/>
+        </svg>
+      );
+    case 'podium':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 8,36 L 40,36 L 40,24 L 28,24 L 28,16 L 8,16 Z" fill={isActive ? "#475569" : "#334155"} stroke="#1e293b" strokeWidth="1.5"/>
+          <line x1="8" y1="28" x2="40" y2="28" stroke="#06b6d4" strokeWidth="2"/>
+          <line x1="8" y1="20" x2="28" y2="20" stroke="#06b6d4" strokeWidth="2"/>
+          <line x1="10" y1="16" x2="10" y2="8" stroke="#64748b" strokeWidth="2"/>
+          <line x1="38" y1="24" x2="38" y2="8" stroke="#64748b" strokeWidth="2"/>
+          <path d="M 6,10 L 42,6 L 38,10 L 10,12 Z" fill={isActive ? "#f43f5e" : "#d946ef"}/>
+        </svg>
+      );
+    default:
+      return null;
+  }
+};
+
 export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Synced States with Engine
-  const [activeMode, setActiveMode] = useState<'garage' | 'free_roam' | 'license' | 'race' | 'tutorial'>('garage');
+  const [activeMode, setActiveMode] = useState<'garage' | 'free_roam' | 'license' | 'race' | 'tutorial' | 'editor'>('garage');
   const [tutorialStep, setTutorialStep] = useState<number>(0);
   const [activeCarId, setActiveCarId] = useState<string>('starter');
   const [playerCredits, setPlayerCredits] = useState<number>(500);
@@ -359,6 +456,38 @@ export default function Game() {
   // Sound toggle (visual only for retro feel)
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
+  // Graphics Quality State
+  const [graphicsQuality, setGraphicsQuality] = useState<'low' | 'medium' | 'high'>(() => {
+    if (typeof window !== 'undefined') {
+      const q = localStorage.getItem('cyberdrive_graphics_quality');
+      if (q === 'low' || q === 'medium' || q === 'high') return q;
+    }
+    return 'high';
+  });
+
+  const changeGraphicsQuality = (quality: 'low' | 'medium' | 'high') => {
+    setGraphicsQuality(quality);
+    if (engineRef.current && engineRef.current.postProcessing) {
+      engineRef.current.postProcessing.setQuality(quality);
+    }
+  };
+
+  // Bloom Intensity State
+  const [bloomIntensity, setBloomIntensity] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const b = localStorage.getItem('cyberdrive_bloom_intensity');
+      return b !== null ? parseFloat(b) : 1.1;
+    }
+    return 1.1;
+  });
+
+  const changeBloomIntensity = (intensity: number) => {
+    setBloomIntensity(intensity);
+    if (engineRef.current && engineRef.current.postProcessing) {
+      engineRef.current.postProcessing.setBloomIntensity(intensity);
+    }
+  };
+
   // UI Upgrades State
   const [carUpgrades, setCarUpgrades] = useState<{ [carId: string]: any }>({});
 
@@ -370,11 +499,11 @@ export default function Game() {
   const [showHelp, setShowHelp] = useState<boolean>(false);
 
   // Custom Map Editor States
-  const [showEditor, setShowEditor] = useState<boolean>(false);
   const [livePreview, setLivePreview] = useState<boolean>(false);
-  const [editorNodes, setEditorNodes] = useState<{ x: number; z: number, width?: number }[]>([]);
-  const [editorScenery, setEditorScenery] = useState<{ type: 'tree' | 'hill'; x: number; z: number; scale: number; heightScale?: number }[]>([]);
-  const [editorTool, setEditorTool] = useState<'node' | 'tree' | 'hill'>('node');
+  const [editorNodes, setEditorNodes] = useState<{ x: number; z: number; y?: number; width?: number; banking?: number }[]>([]);
+  const [editorScenery, setEditorScenery] = useState<{ type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[]>([]);
+  const [editorTool, setEditorTool] = useState<'node' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium'>('node');
+  const [editorCornerHeight, setEditorCornerHeight] = useState<number>(2);
   const [selectedNodeIndex, setSelectedNodeIndex] = useState<number | null>(null);
   const [selectedSceneryIndex, setSelectedSceneryIndex] = useState<number | null>(null);
   const [editorTrackName, setEditorTrackName] = useState<string>('Custom Gridway');
@@ -384,12 +513,9 @@ export default function Game() {
   const [editorHaveGrass, setEditorHaveGrass] = useState<boolean>(true);
   const [editorGrassWidth, setEditorGrassWidth] = useState<number>(6);
   const [snapToGrid, setSnapToGrid] = useState<number>(10);
-  const [editorScale, setEditorScale] = useState<number>(1.0);
-  const [hoveredNodeIndex, setHoveredNodeIndex] = useState<number | null>(null);
   const [draggedNodeIndex, setDraggedNodeIndex] = useState<number | null>(null);
   const [draggedSceneryIndex, setDraggedSceneryIndex] = useState<number | null>(null);
   const [editorGridLimit, setEditorGridLimit] = useState<number>(250);
-  const editorCanvasRef = useRef<HTMLCanvasElement>(null);
 
   // Load persistent user data from localStorage on mount
   useEffect(() => {
@@ -726,6 +852,11 @@ export default function Game() {
 
     target[lastKey] = targetLevel;
 
+    if (item.id === 'tireLevel') {
+      const compounds = ['economy', 'super_hard', 'hard', 'normal', 'soft', 'super_soft'];
+      currentCarUpgrades.tireCompound = compounds[targetLevel] || 'economy';
+    }
+
     const newUpgrades = {
       ...carUpgrades,
       [activeCarId]: currentCarUpgrades
@@ -775,6 +906,11 @@ export default function Game() {
       const nextLvl = (currentCarUpgrades.purchasedLevels[item.id] || 0) + 1;
       currentCarUpgrades.purchasedLevels[item.id] = nextLvl;
       target[lastKey] = nextLvl;
+
+      if (item.id === 'tireLevel') {
+        const compounds = ['economy', 'super_hard', 'hard', 'normal', 'soft', 'super_soft'];
+        currentCarUpgrades.tireCompound = compounds[nextLvl] || 'economy';
+      }
     } else {
       // Toggle type - Mark as purchased in purchasedToggles
       if (!currentCarUpgrades.purchasedToggles) {
@@ -927,7 +1063,7 @@ export default function Game() {
   };
 
   const saveCustomTrack = (
-    nodes: { x: number; z: number; width?: number }[],
+    nodes: { x: number; z: number; y?: number; width?: number; banking?: number }[],
     name: string,
     width: number,
     time: number,
@@ -935,7 +1071,7 @@ export default function Game() {
     gridLimit: number,
     grass: boolean = editorHaveGrass,
     grassWidth: number = editorGrassWidth,
-    scenery: { type: 'tree' | 'hill'; x: number; z: number; scale: number }[] = editorScenery
+    scenery: { type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium' | 'tree'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[] = editorScenery
   ) => {
     if (typeof window !== 'undefined') {
       const trackData = {
@@ -955,13 +1091,14 @@ export default function Game() {
 
   const importTrack = (text: string) => {
     try {
-      const vectorRegex = /(?:THREE\.)?Vector3\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*-?\d+(?:\.\d+)?\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/gi;
-      const nodes: { x: number; z: number; width?: number }[] = [];
+      const vectorRegex = /(?:THREE\.)?Vector3\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/gi;
+      const nodes: { x: number; z: number; y?: number; width?: number; banking?: number }[] = [];
       let match;
       while ((match = vectorRegex.exec(text)) !== null) {
         nodes.push({
           x: parseFloat(match[1]),
-          z: parseFloat(match[2])
+          y: parseFloat(match[2]),
+          z: parseFloat(match[3])
         });
       }
 
@@ -990,10 +1127,21 @@ export default function Game() {
         try {
           const parsed = JSON.parse(text);
           if (Array.isArray(parsed)) {
-            const jsonNodes = parsed.map(n => ({
-              x: Number(n.x !== undefined ? n.x : n[0]),
-              z: Number(n.z !== undefined ? n.z : n[1])
-            }));
+            const jsonNodes = parsed.map(n => {
+              if (Array.isArray(n)) {
+                return {
+                  x: Number(n[0]),
+                  y: n.length >= 3 ? Number(n[1]) : 2,
+                  z: n.length >= 3 ? Number(n[2]) : Number(n[1])
+                };
+              } else {
+                return {
+                  x: Number(n.x),
+                  y: n.y !== undefined ? Number(n.y) : 2,
+                  z: Number(n.z)
+                };
+              }
+            });
             if (jsonNodes.length >= 3 && !jsonNodes.some(n => isNaN(n.x) || isNaN(n.z))) {
               const gridL = detectLimit(jsonNodes);
               setEditorGridLimit(gridL);
@@ -1030,12 +1178,13 @@ export default function Game() {
       hasObstacles: obstacles,
       requiresLicense: false,
       baseReward: 300,
-      path: nodes.map(n => ({ pos: new THREE.Vector3(n.x, 2, n.z), width: n.width ?? width })),
+      path: nodes.map(n => ({ pos: new THREE.Vector3(n.x, n.y ?? 2, n.z), width: n.width ?? width, banking: n.banking ?? 0 })),
       scenery: scenery.map(s => ({
         type: s.type,
         position: new THREE.Vector3(s.x, 0, s.z),
         scale: s.scale,
-        heightScale: s.heightScale
+        heightScale: s.heightScale,
+        rotation: s.rotation
       })),
       HaveCrub: true,
       HaveFence: true,
@@ -1055,7 +1204,6 @@ export default function Game() {
     if (editorNodes.length < 3) return;
     syncCustomTrackToDatabase();
     startRace('custom');
-    setShowEditor(false);
   };
 
   const handleClearAll = () => {
@@ -1109,452 +1257,33 @@ export default function Game() {
     saveCustomTrack(nodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
   };
 
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!editorCanvasRef.current) return;
-    const canvas = editorCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    const zoom = (canvas.width / (editorGridLimit * 2)) * editorScale;
-
-    const gameX = (x - cx) / zoom;
-    const gameZ = (y - cy) / zoom;
-
-    let foundNodeIdx = -1;
-    for (let i = 0; i < editorNodes.length; i++) {
-      const node = editorNodes[i];
-      const nodePixelX = cx + node.x * zoom;
-      const nodePixelY = cy + node.z * zoom;
-      const dist = Math.sqrt((x - nodePixelX) ** 2 + (y - nodePixelY) ** 2);
-      if (dist < 12) {
-        foundNodeIdx = i;
-        break;
-      }
-    }
-
-    let foundSceneryIdx = -1;
-    for (let i = 0; i < editorScenery.length; i++) {
-      const s = editorScenery[i];
-      const px = cx + s.x * zoom;
-      const py = cy + s.z * zoom;
-      const dist = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
-      if (dist < 12) {
-        foundSceneryIdx = i;
-        break;
-      }
-    }
-
-    if (editorTool === 'node') {
-      if (foundNodeIdx !== -1) {
-        setDraggedNodeIndex(foundNodeIdx);
-        setSelectedNodeIndex(foundNodeIdx);
-        setSelectedSceneryIndex(null);
-      } else {
-        let finalX = gameX;
-        let finalZ = gameZ;
-        if (snapToGrid > 0) {
-          finalX = Math.round(gameX / snapToGrid) * snapToGrid;
-          finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
-        }
-        finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
-        finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
-
-        const newNodes = [...editorNodes, { x: finalX, z: finalZ, width: editorRoadWidth }];
-        setEditorNodes(newNodes);
-        setSelectedNodeIndex(newNodes.length - 1);
-        setSelectedSceneryIndex(null);
-        saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
-      }
-    } else { // tree or hill
-      if (foundSceneryIdx !== -1) {
-        setDraggedSceneryIndex(foundSceneryIdx);
-        setSelectedSceneryIndex(foundSceneryIdx);
-        setSelectedNodeIndex(null);
-      } else {
-        let finalX = gameX;
-        let finalZ = gameZ;
-        if (snapToGrid > 0) {
-          finalX = Math.round(gameX / snapToGrid) * snapToGrid;
-          finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
-        }
-        finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
-        finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
-
-        const newScenery = [...editorScenery, { type: editorTool, x: finalX, z: finalZ, scale: editorTool === 'tree' ? 2 : 8 }];
-        setEditorScenery(newScenery);
-        setSelectedSceneryIndex(newScenery.length - 1);
-        setSelectedNodeIndex(null);
-        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
-      }
-    }
+  const getDefaultScale = (tool: string) => {
+    if (tool.startsWith('tree')) return 2;
+    if (tool === 'hill') return 8;
+    if (tool === 'mountain') return 1.0;
+    if (tool === 'podium') return 1.0;
+    if (tool === 'rock') return 2;
+    return 1;
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!editorCanvasRef.current) return;
-    const canvas = editorCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
 
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    const zoom = (canvas.width / (editorGridLimit * 2)) * editorScale;
-
-    const gameX = (x - cx) / zoom;
-    const gameZ = (y - cy) / zoom;
-
-    if (draggedNodeIndex !== null) {
-      let finalX = gameX;
-      let finalZ = gameZ;
-      if (snapToGrid > 0) {
-        finalX = Math.round(gameX / snapToGrid) * snapToGrid;
-        finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
-      }
-      finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
-      finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
-
-      const newNodes = [...editorNodes];
-      newNodes[draggedNodeIndex] = { ...newNodes[draggedNodeIndex], x: finalX, z: finalZ };
-      setEditorNodes(newNodes);
-    } else if (draggedSceneryIndex !== null) {
-      let finalX = gameX;
-      let finalZ = gameZ;
-      if (snapToGrid > 0) {
-        finalX = Math.round(gameX / snapToGrid) * snapToGrid;
-        finalZ = Math.round(gameZ / snapToGrid) * snapToGrid;
-      }
-      finalX = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalX));
-      finalZ = Math.max(-editorGridLimit, Math.min(editorGridLimit, finalZ));
-
-      const newScenery = [...editorScenery];
-      newScenery[draggedSceneryIndex] = { ...newScenery[draggedSceneryIndex], x: finalX, z: finalZ };
-      setEditorScenery(newScenery);
-    } else {
-      let hoveredIdx: number | null = null;
-      for (let i = 0; i < editorNodes.length; i++) {
-        const node = editorNodes[i];
-        const nodePixelX = cx + node.x * zoom;
-        const nodePixelY = cy + node.z * zoom;
-        const dist = Math.sqrt((x - nodePixelX) ** 2 + (y - nodePixelY) ** 2);
-        if (dist < 12) {
-          hoveredIdx = i;
-          break;
-        }
-      }
-      setHoveredNodeIndex(hoveredIdx);
-    }
-  };
-
-  const handleCanvasMouseUp = () => {
-    if (draggedNodeIndex !== null) {
-      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
-      setDraggedNodeIndex(null);
-    }
-    if (draggedSceneryIndex !== null) {
-      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-      setDraggedSceneryIndex(null);
-    }
-  };
-
-  const handleCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!editorCanvasRef.current) return;
-    const canvas = editorCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    const zoom = (canvas.width / (editorGridLimit * 2)) * editorScale;
-
-    let foundNodeIdx = -1;
-    for (let i = 0; i < editorNodes.length; i++) {
-      const node = editorNodes[i];
-      const nodePixelX = cx + node.x * zoom;
-      const nodePixelY = cy + node.z * zoom;
-      const dist = Math.sqrt((x - nodePixelX) ** 2 + (y - nodePixelY) ** 2);
-      if (dist < 12) {
-        foundNodeIdx = i;
-        break;
-      }
-    }
-
-    let foundSceneryIdx = -1;
-    for (let i = 0; i < editorScenery.length; i++) {
-      const s = editorScenery[i];
-      const px = cx + s.x * zoom;
-      const py = cy + s.z * zoom;
-      const dist = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
-      if (dist < 12) {
-        foundSceneryIdx = i;
-        break;
-      }
-    }
-
-    if (foundNodeIdx !== -1) {
-      const newNodes = editorNodes.filter((_, idx) => idx !== foundNodeIdx);
-      setEditorNodes(newNodes);
-      if (selectedNodeIndex === foundNodeIdx) setSelectedNodeIndex(null);
-      setHoveredNodeIndex(null);
-      setDraggedNodeIndex(null);
-      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
-    } else if (foundSceneryIdx !== -1) {
-      const newScenery = editorScenery.filter((_, idx) => idx !== foundSceneryIdx);
-      setEditorScenery(newScenery);
-      if (selectedSceneryIndex === foundSceneryIdx) setSelectedSceneryIndex(null);
-      setDraggedSceneryIndex(null);
-      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
-    }
-  };
-
-  // Canvas drawing effect
-  useEffect(() => {
-    if (!showEditor || !editorCanvasRef.current) return;
-    const canvas = editorCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-    ctx.clearRect(0, 0, width, height);
-
-    ctx.fillStyle = '#090d16';
-    ctx.fillRect(0, 0, width, height);
-
-    const cx = width / 2;
-    const cy = height / 2;
-    const zoom = (width / (editorGridLimit * 2)) * editorScale;
-
-    const gameToPixel = (pt: { x: number, z: number }) => ({
-      x: cx + pt.x * zoom,
-      y: cy + pt.z * zoom
-    });
-
-    // 1. Draw Grid Lines
-    ctx.strokeStyle = 'rgba(168, 85, 247, 0.05)';
-    ctx.lineWidth = 1;
-    const maxGameCoord = editorGridLimit / editorScale;
-
-    const gridSpacing = editorGridLimit === 3000 ? 300 : (editorGridLimit === 2000 ? 200 : (editorGridLimit === 1000 ? 100 : (editorGridLimit === 500 ? 50 : 25)));
-    const labelSpacing = gridSpacing * 2;
-
-    for (let g = -Math.floor(maxGameCoord); g <= Math.floor(maxGameCoord); g += gridSpacing) {
-      const p1 = gameToPixel({ x: g, z: -maxGameCoord });
-      const p2 = gameToPixel({ x: g, z: maxGameCoord });
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
-
-      const h1 = gameToPixel({ x: -maxGameCoord, z: g });
-      const h2 = gameToPixel({ x: maxGameCoord, z: g });
-      ctx.beginPath();
-      ctx.moveTo(h1.x, h1.y);
-      ctx.lineTo(h2.x, h2.y);
-      ctx.stroke();
-
-      if (g % labelSpacing === 0 && g !== 0) {
-        ctx.fillStyle = 'rgba(148, 163, 184, 0.4)';
-        ctx.font = '9px monospace';
-
-        const xPos = gameToPixel({ x: g, z: 5 / editorScale });
-        ctx.fillText(`${g}m`, xPos.x - 10, xPos.y);
-
-        const zPos = gameToPixel({ x: 5 / editorScale, z: g });
-        ctx.fillText(`${g}m`, zPos.x, zPos.y + 3);
-      }
-    }
-
-    ctx.strokeStyle = 'rgba(168, 85, 247, 0.2)';
-    ctx.lineWidth = 1.5;
-
-    const ax1 = gameToPixel({ x: -maxGameCoord, z: 0 });
-    const ax2 = gameToPixel({ x: maxGameCoord, z: 0 });
-    ctx.beginPath();
-    ctx.moveTo(ax1.x, ax1.y);
-    ctx.lineTo(ax2.x, ax2.y);
-    ctx.stroke();
-
-    const az1 = gameToPixel({ x: 0, z: -maxGameCoord });
-    const az2 = gameToPixel({ x: 0, z: maxGameCoord });
-    ctx.beginPath();
-    ctx.moveTo(az1.x, az1.y);
-    ctx.lineTo(az2.x, az2.y);
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(168, 85, 247, 0.5)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 2. Draw road path (Closed loop connect lines)
-    if (editorNodes.length > 0) {
-      ctx.beginPath();
-      const p0 = gameToPixel(editorNodes[0]);
-      ctx.moveTo(p0.x, p0.y);
-      for (let i = 1; i < editorNodes.length; i++) {
-        const pi = gameToPixel(editorNodes[i]);
-        ctx.lineTo(pi.x, pi.y);
-      }
-      ctx.closePath();
-
-      ctx.shadowColor = '#06b6d4';
-      ctx.shadowBlur = 8;
-      ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = '#e2f8ff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      ctx.fillStyle = '#06b6d4';
-      for (let i = 0; i < editorNodes.length; i++) {
-        const current = editorNodes[i];
-        const next = editorNodes[(i + 1) % editorNodes.length];
-
-        const midX = (current.x + next.x) / 2;
-        const midZ = (current.z + next.z) / 2;
-        const midPixel = gameToPixel({ x: midX, z: midZ });
-
-        const angle = Math.atan2(next.z - current.z, next.x - current.x);
-
-        ctx.save();
-        ctx.translate(midPixel.x, midPixel.y);
-        ctx.rotate(angle);
-        ctx.beginPath();
-        ctx.moveTo(-6, -4);
-        ctx.lineTo(6, 0);
-        ctx.lineTo(-6, 4);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
-
-      if (editorNodes.length > 1) {
-        const startPt = editorNodes[0];
-        const nextPt = editorNodes[1];
-        const startPixel = gameToPixel(startPt);
-
-        const dx = nextPt.x - startPt.x;
-        const dz = nextPt.z - startPt.z;
-        const len = Math.sqrt(dx * dx + dz * dz);
-        if (len > 0.001) {
-          const tx = dx / len;
-          const tz = dz / len;
-          const nx = -tz;
-          const nz = tx;
-
-          const rWidthPixel = (editorRoadWidth / 2) * zoom;
-          const leftLine = { x: startPixel.x + nx * rWidthPixel, y: startPixel.y + nz * rWidthPixel };
-          const rightLine = { x: startPixel.x - nx * rWidthPixel, y: startPixel.y - nz * rWidthPixel };
-
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(leftLine.x, leftLine.y);
-          ctx.lineTo(rightLine.x, rightLine.y);
-          ctx.stroke();
-
-          ctx.save();
-          ctx.translate(startPixel.x, startPixel.y);
-          ctx.rotate(Math.atan2(dz, dx));
-          ctx.fillStyle = '#10b981';
-          ctx.shadowColor = '#10b981';
-          ctx.shadowBlur = 10;
-          ctx.beginPath();
-          ctx.moveTo(12, 0);
-          ctx.lineTo(2, -6);
-          ctx.lineTo(2, -2);
-          ctx.lineTo(-12, -2);
-          ctx.lineTo(-12, 2);
-          ctx.lineTo(2, 2);
-          ctx.lineTo(2, 6);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-        }
-      }
-
-      editorNodes.forEach((node, idx) => {
-        const pixel = gameToPixel(node);
-        const isHovered = hoveredNodeIndex === idx;
-        const isStart = idx === 0;
-
-        ctx.beginPath();
-        const nodeRadius = isHovered ? 8 : 6;
-        ctx.arc(pixel.x, pixel.y, nodeRadius, 0, Math.PI * 2);
-
-        if (isStart) {
-          ctx.fillStyle = '#10b981';
-          ctx.strokeStyle = '#e6fffa';
-          ctx.shadowColor = '#10b981';
-        } else if (isHovered) {
-          ctx.fillStyle = '#d946ef';
-          ctx.strokeStyle = '#ffffff';
-          ctx.shadowColor = '#d946ef';
-        } else {
-          ctx.fillStyle = '#06b6d4';
-          ctx.strokeStyle = '#bffffc';
-          ctx.shadowColor = '#06b6d4';
-        }
-
-        ctx.shadowBlur = isHovered || selectedNodeIndex === idx ? 12 : 6;
-        ctx.lineWidth = selectedNodeIndex === idx ? 3 : 1.5;
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.fillText(idx.toString(), pixel.x - 3, pixel.y - 10);
-      });
-    }
-
-    // 3. Draw Scenery
-    editorScenery.forEach((s, idx) => {
-      const pixel = gameToPixel({ x: s.x, z: s.z });
-      const isSelected = selectedSceneryIndex === idx;
-
-      ctx.beginPath();
-      const sRadius = s.type === 'tree' ? 5 : 8;
-      ctx.arc(pixel.x, pixel.y, sRadius, 0, Math.PI * 2);
-
-      if (s.type === 'tree') {
-        ctx.fillStyle = '#22c55e'; // Green
-        ctx.strokeStyle = '#166534';
-      } else {
-        ctx.fillStyle = '#a16207'; // Brown
-        ctx.strokeStyle = '#713f12';
-      }
-
-      ctx.lineWidth = isSelected ? 3 : 1.5;
-      if (isSelected) {
-        ctx.shadowColor = '#ffffff';
-        ctx.shadowBlur = 10;
-        ctx.strokeStyle = '#ffffff';
-      } else {
-        ctx.shadowBlur = 0;
-      }
-
-      ctx.fill();
-      ctx.stroke();
-    });
-
-  }, [editorNodes, editorScenery, editorScale, hoveredNodeIndex, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, showEditor]);
 
   useEffect(() => {
-    if (showEditor) {
+    if (activeMode === 'editor') {
       const txtarea = document.getElementById('import-export-textarea') as HTMLTextAreaElement;
       if (txtarea) {
-        txtarea.value = editorNodes.map(n => `new THREE.Vector3(${Math.round(n.x)}, 2, ${Math.round(n.z)})`).join(',\n');
+        txtarea.value = editorNodes.map(n => `new THREE.Vector3(${Math.round(n.x)}, ${n.y !== undefined ? Math.round(n.y) : 2}, ${Math.round(n.z)})`).join(',\n');
       }
     }
-  }, [editorNodes, showEditor]);
+  }, [editorNodes, activeMode]);
+
+  // Rebuild 3D preview in real-time when track data changes, skipping when dragging for performance
+  useEffect(() => {
+    if (activeMode === 'editor' && livePreview && engineRef.current && draggedNodeIndex === null && draggedSceneryIndex === null) {
+      syncCustomTrackToDatabase();
+      engineRef.current.buildPreviewTrack('custom');
+    }
+  }, [editorNodes, editorScenery, livePreview, activeMode, draggedNodeIndex, draggedSceneryIndex, editorRoadWidth, editorHaveGrass, editorGrassWidth, editorHasObstacles]);
 
   // Escape key handler to toggle pause overlay
   useEffect(() => {
@@ -1583,36 +1312,63 @@ export default function Game() {
     };
   }, [activeMode, gameStatus]);
 
-  // Keep custom track database configuration and active 3D preview in sync with editor state
+  // Bind engine editorState callbacks to React state setters
   useEffect(() => {
-    if (editorNodes.length >= 3) {
-      syncCustomTrackToDatabase(
-        editorNodes,
-        editorTrackName,
-        editorRoadWidth,
-        editorTimeLimit,
-        editorHasObstacles,
-        editorHaveGrass,
-        editorGrassWidth,
-        editorScenery
-      );
-
-      // Rebuild the 3D preview if it is currently active
-      if (livePreview && engineRef.current) {
-        engineRef.current.buildPreviewTrack('custom');
-      }
+    if (engineRef.current) {
+      engineRef.current.editorState.onUpdateNodes = (nodes) => {
+        setEditorNodes(nodes);
+      };
+      engineRef.current.editorState.onUpdateScenery = (scenery) => {
+        setEditorScenery(scenery);
+      };
+      engineRef.current.editorState.onSelectNode = (idx) => {
+        setSelectedNodeIndex(idx);
+        setSelectedSceneryIndex(null);
+      };
+      engineRef.current.editorState.onSelectScenery = (idx) => {
+        setSelectedSceneryIndex(idx);
+        setSelectedNodeIndex(null);
+      };
+      engineRef.current.editorState.onDragNodeStart = (idx) => {
+        setDraggedNodeIndex(idx);
+      };
+      engineRef.current.editorState.onDragNodeEnd = () => {
+        setDraggedNodeIndex(null);
+      };
+      engineRef.current.editorState.onDragSceneryStart = (idx) => {
+        setDraggedSceneryIndex(idx);
+      };
+      engineRef.current.editorState.onDragSceneryEnd = () => {
+        setDraggedSceneryIndex(null);
+      };
     }
-  }, [
-    livePreview,
-    editorNodes,
-    editorTrackName,
-    editorRoadWidth,
-    editorTimeLimit,
-    editorHasObstacles,
-    editorHaveGrass,
-    editorGrassWidth,
-    editorScenery
-  ]);
+  }, [activeMode]);
+
+  // Sync React states to engine.editorState
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.editorState.nodes = editorNodes;
+      engineRef.current.editorState.scenery = editorScenery;
+      engineRef.current.editorState.tool = editorTool;
+      engineRef.current.editorState.snapToGrid = snapToGrid;
+      engineRef.current.editorState.cornerHeight = editorCornerHeight;
+      engineRef.current.editorState.selectedNodeIndex = selectedNodeIndex;
+      engineRef.current.editorState.selectedSceneryIndex = selectedSceneryIndex;
+      engineRef.current.editorState.roadWidth = editorRoadWidth;
+      engineRef.current.editorState.activeMode = activeMode;
+    }
+  }, [editorNodes, editorScenery, editorTool, snapToGrid, editorCornerHeight, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, activeMode]);
+
+  // Automatically start 3D preview mode when entering editor
+  useEffect(() => {
+    if (activeMode === 'editor' && engineRef.current) {
+      setLivePreview(true);
+      syncCustomTrackToDatabase();
+      engineRef.current.buildPreviewTrack('custom');
+    } else if (activeMode !== 'editor' && livePreview) {
+      setLivePreview(false);
+    }
+  }, [activeMode]);
 
   // Helper to dynamically darken a hex color for dot outliners
   const darkenColor = (hex: string, amount = 0.45) => {
@@ -1803,7 +1559,7 @@ export default function Game() {
       <div className="absolute top-6 inset-x-6 flex items-start justify-between pointer-events-none z-10">
         {/* Left Side: Game Logo, Credits, and Lap/Length in race mode */}
         <div className="flex flex-col gap-3 pointer-events-auto">
-          {activeMode === 'garage' && !showEditor && (
+          {activeMode === 'garage' && (
             <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
               <span className="text-xs font-black tracking-[0.25em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500 uppercase select-none italic font-sans pr-1">
                 CYBER DRIVE
@@ -1912,7 +1668,7 @@ export default function Game() {
             )}
 
             {/* Hide reset, help, sound, exit in gameplay modes since they are in the ESC pause menu instead */}
-            {activeMode === 'garage' && !showEditor && (
+            {activeMode === 'garage' && (
               <>
                 <button
                   onClick={() => setShowHelp(!showHelp)}
@@ -2264,7 +2020,7 @@ export default function Game() {
       )}
 
       {/* MAIN GARAGE INTERFACE (When in Garage) */}
-      {activeMode === 'garage' && !showEditor && (
+      {activeMode === 'garage' && (
         <div className="absolute inset-y-0 right-0 w-full md:w-[420px] bg-slate-950/85 backdrop-blur-xl border-l border-slate-900 shadow-2xl p-6 flex flex-col justify-between z-10">
 
           {/* Garage Header */}
@@ -2422,7 +2178,7 @@ export default function Game() {
                     Visually design custom racetracks. Place/drag nodes, adjust road width, add obstacles, and test-drive instantly with AI!
                   </p>
                   <button
-                    onClick={() => setShowEditor(true)}
+                    onClick={() => setActiveMode('editor')}
                     className="w-full bg-purple-600 hover:bg-purple-500 border border-purple-500 py-2.5 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(168,85,247,0.2)] hover:shadow-[0_0_20px_rgba(168,85,247,0.4)] transition-all mt-2 cursor-pointer"
                   >
                     Open Map Editor
@@ -2693,7 +2449,7 @@ export default function Game() {
                                 <h4 className="font-bold text-slate-100 text-sm">{item.name}</h4>
                                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">{item.description}</p>
 
-                                {/* Equipped Stage Selector */}
+                                 {/* Equipped Stage Selector */}
                                 <div className="flex flex-wrap gap-1.5 mt-3">
                                   <button
                                     onClick={() => equipLevelUpgrade(item, 0)}
@@ -2703,11 +2459,16 @@ export default function Game() {
                                         : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-350'
                                     }`}
                                   >
-                                    Stock
+                                    {item.id === 'tireLevel' ? 'Economy' : 'Stock'}
                                   </button>
                                   {Array.from({ length: purchasedLvl }).map((_, idx) => {
                                     const lvl = idx + 1;
                                     const isEquipped = currentLvl === lvl;
+                                    let btnLabel = `Stage ${lvl}`;
+                                    if (item.id === 'tireLevel') {
+                                      const compounds = ['', 'Super Hard', 'Hard', 'Medium', 'Soft', 'Super Soft'];
+                                      btnLabel = compounds[lvl] || btnLabel;
+                                    }
                                     return (
                                       <button
                                         key={lvl}
@@ -2718,7 +2479,7 @@ export default function Game() {
                                             : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:text-slate-200'
                                         }`}
                                       >
-                                        Stage {lvl}
+                                        {btnLabel}
                                       </button>
                                     );
                                   })}
@@ -2740,7 +2501,12 @@ export default function Game() {
                                       }`}
                                   >
                                     <Coins className="w-3.5 h-3.5" />
-                                    <span>Buy Stg {purchasedLvl + 1}: {cost} Cr</span>
+                                    <span>
+                                      {item.id === 'tireLevel'
+                                        ? `Buy ${['', 'Super Hard', 'Hard', 'Medium', 'Soft', 'Super Soft'][purchasedLvl + 1] || 'Upgrade'}: ${cost} Cr`
+                                        : `Buy Stg ${purchasedLvl + 1}: ${cost} Cr`
+                                      }
+                                    </span>
                                   </button>
                                 )}
                               </div>
@@ -3011,16 +2777,55 @@ export default function Game() {
 
                 <div className="h-px bg-slate-800/60" />
 
-                {/* More settings placeholder */}
-                <div className="flex items-center justify-between gap-4 opacity-40">
+                {/* Graphics Quality Settings */}
+                <div className="flex items-center justify-between gap-4">
                   <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-400">Simulation Settings</span>
-                    <span className="text-[9px] text-slate-600">Graphics quality and keybindings</span>
+                    <span className="text-xs font-bold text-slate-200">Graphics Quality</span>
+                    <span className="text-[9px] text-slate-500">Bloom, anti-aliasing, and speed shaders</span>
                   </div>
-                  <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider bg-slate-900 border border-slate-800 px-2 py-1 rounded">
-                    More to come...
-                  </span>
+                  <div className="flex gap-1.5">
+                    {(['low', 'medium', 'high'] as const).map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => changeGraphicsQuality(q)}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all border uppercase cursor-pointer ${
+                          graphicsQuality === q
+                            ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400 font-extrabold shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                        }`}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {graphicsQuality !== 'low' && (
+                  <>
+                    <div className="h-px bg-slate-800/60" />
+                    {/* Bloom Intensity Slider */}
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-slate-200">Bloom Glow Intensity</span>
+                          <span className="text-[9px] text-slate-500">Adjust the neon glow brightness</span>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-cyan-400">
+                          {bloomIntensity.toFixed(2)}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.0"
+                        max="2.0"
+                        step="0.05"
+                        value={bloomIntensity}
+                        onChange={(e) => changeBloomIntensity(parseFloat(e.target.value))}
+                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400 outline-none"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Bottom Actions Row */}
@@ -3401,436 +3206,560 @@ export default function Game() {
       )}
 
       {/* CUSTOM MAP EDITOR OVERLAY */}
-      {showEditor && (
-        <div className={`absolute inset-0 ${livePreview ? 'pointer-events-none' : 'bg-slate-950/95 backdrop-blur-xl pointer-events-auto'} z-30 flex items-center justify-center p-4 md:p-8 animate-fadeIn transition-colors duration-500`}>
+      {activeMode === 'editor' && (
+        <div className="absolute inset-0 pointer-events-none z-30 animate-fadeIn select-none">
           
-          {livePreview && (
-            <button
-              onClick={() => {
-                setLivePreview(false);
-                engineRef.current?.buildGarage();
-              }}
-              className="pointer-events-auto absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-red-600 hover:bg-red-500 border border-red-500 text-white font-bold py-3 px-8 rounded-full shadow-[0_0_20px_rgba(220,38,38,0.5)] z-50 cursor-pointer flex items-center gap-2"
-            >
-              <LogOut className="w-5 h-5" />
-              Close 3D Preview
-            </button>
-          )}
-
-          {!livePreview && (
-            <div className="bg-slate-900/90 border border-purple-500/30 w-full max-w-6xl h-[90vh] rounded-3xl shadow-[0_0_60px_rgba(168,85,247,0.25)] flex flex-col md:flex-row overflow-hidden relative transition-colors duration-500">
-
-            {/* Left: Canvas Area */}
-            <div className="flex-1 bg-slate-950 p-6 flex flex-col items-center justify-center relative border-r border-slate-800/80 transition-colors duration-500">
-              {/* Header inside canvas area */}
-              <div className="absolute top-4 left-6 flex flex-col">
-                <span className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Visual Grid Canvas</span>
-                <h2 className="text-xl font-black text-slate-100 tracking-wider flex items-center gap-2">
-                  {editorTrackName || 'Untitled Track'}
-                </h2>
+          {/* Floating Left Header */}
+          <div className="absolute top-6 left-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col gap-1 text-slate-100">
+            <span className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Interactive 3D Editor</span>
+            <h2 className="text-xl font-black text-slate-100 tracking-wider">
+              {editorTrackName || 'Untitled Track'}
+            </h2>
+            <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-col gap-2 text-xs text-slate-400 font-mono">
+              <div className="flex justify-between">
+                <span>Nodes:</span>
+                <span className="text-purple-400 font-bold">{editorNodes.length} / 30</span>
               </div>
+              <div className="flex justify-between">
+                <span>Min Nodes Needed:</span>
+                <span className="text-slate-300">3</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Track Length:</span>
+                <span className="text-purple-400 font-bold">{formatDistance(getTrackLength(editorNodes.map(n => new THREE.Vector3(n.x, 0, n.z))))}</span>
+              </div>
+            </div>
+          </div>
 
-              {/* Canvas controls (Zoom / Snap) */}
-              <div className="absolute top-4 right-6 flex items-center gap-4 bg-slate-900/85 border border-slate-800 px-3 py-1.5 rounded-xl text-xs z-10">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Snap:</span>
-                  <select
-                    value={snapToGrid}
-                    onChange={(e) => setSnapToGrid(parseInt(e.target.value))}
-                    className="bg-slate-950 border border-slate-800 text-slate-200 text-[11px] rounded px-1.5 py-0.5 outline-none cursor-pointer"
+          {/* Floating Left 3D Controls Legend */}
+          <div className="absolute top-[210px] left-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] text-[11px] text-slate-300 leading-relaxed font-mono">
+            <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase mb-2">3D Editor Controls</div>
+            <div className="space-y-1.5 text-[11px]">
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Left Click:</span>
+                <span className="text-right">Place / Select</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Left Drag:</span>
+                <span className="text-right">Move selected item</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Right Drag:</span>
+                <span className="text-right">Rotate 3D Camera</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">WASD keys:</span>
+                <span className="text-right">Fly Camera</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Space / Q:</span>
+                <span className="text-right">Fly Up</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">E:</span>
+                <span className="text-right">Fly Down</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Shift (hold):</span>
+                <span className="text-right">Fast Fly speed</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Double Click:</span>
+                <span className="text-right text-red-400">Delete item</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Floating Property Sidebar */}
+          <div className="w-[380px] absolute right-6 inset-y-6 pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-3xl p-6 flex flex-col justify-between overflow-y-auto shadow-[0_0_40px_rgba(0,0,0,0.6)]">
+            <div className="space-y-6">
+              {selectedNodeIndex !== null && editorNodes[selectedNodeIndex] && (
+                <div className="space-y-1.5 p-3 bg-slate-950/50 border border-purple-500/30 rounded-xl mb-4">
+                  <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase">
+                    <span>Node {selectedNodeIndex} Width</span>
+                    <span className="font-mono">{editorNodes[selectedNodeIndex].width ?? editorRoadWidth}m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="60"
+                    step="1"
+                    value={editorNodes[selectedNodeIndex].width ?? editorRoadWidth}
+                    onChange={(e) => {
+                      const w = parseInt(e.target.value);
+                      const newNodes = [...editorNodes];
+                      newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], width: w };
+                      setEditorNodes(newNodes);
+                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                    }}
+                    className="w-full accent-purple-500 cursor-pointer"
+                  />
+
+                  <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase mt-3">
+                    <span>Node {selectedNodeIndex} Elevation</span>
+                    <span className="font-mono">{editorNodes[selectedNodeIndex].y ?? 2}m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="2"
+                    max="35"
+                    step="1"
+                    value={editorNodes[selectedNodeIndex].y ?? 2}
+                    onChange={(e) => {
+                      const yVal = parseInt(e.target.value);
+                      const newNodes = [...editorNodes];
+                      newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], y: yVal };
+                      setEditorNodes(newNodes);
+                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                    }}
+                    className="w-full accent-purple-500 cursor-pointer"
+                  />
+
+                  <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase mt-3">
+                    <span>Node {selectedNodeIndex} Banking</span>
+                    <span className="font-mono">{editorNodes[selectedNodeIndex].banking ?? 0}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-45"
+                    max="45"
+                    step="1"
+                    value={editorNodes[selectedNodeIndex].banking ?? 0}
+                    onChange={(e) => {
+                      const bankVal = parseInt(e.target.value);
+                      const newNodes = [...editorNodes];
+                      newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], banking: bankVal };
+                      setEditorNodes(newNodes);
+                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                    }}
+                    className="w-full accent-purple-500 cursor-pointer"
+                  />
+
+                  <button
+                    onClick={() => {
+                      const newNodes = editorNodes.filter((_, idx) => idx !== selectedNodeIndex);
+                      setEditorNodes(newNodes);
+                      setSelectedNodeIndex(null);
+                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                    }}
+                    className="w-full mt-3 bg-red-950/60 hover:bg-red-900 border border-red-800/80 hover:border-red-650 text-red-300 hover:text-white py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
                   >
-                    <option value={0}>Off</option>
-                    <option value={5}>5m</option>
-                    <option value={10}>10m</option>
-                    <option value={20}>20m</option>
-                  </select>
+                    Delete Selected Node
+                  </button>
                 </div>
+              )}
 
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Zoom:</span>
+              {selectedSceneryIndex !== null && editorScenery[selectedSceneryIndex] && (
+                <div className="space-y-1.5 p-3 bg-slate-950/50 border border-green-500/30 rounded-xl mb-4">
+                  <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
+                    <span>{editorScenery[selectedSceneryIndex].type} Scale</span>
+                    <span className="font-mono">{editorScenery[selectedSceneryIndex].scale}x</span>
+                  </div>
                   <input
                     type="range"
                     min="0.5"
-                    max="2.0"
-                    step="0.1"
-                    value={editorScale}
-                    onChange={(e) => setEditorScale(parseFloat(e.target.value))}
-                    className="w-16 accent-purple-500 cursor-pointer"
+                    max="20"
+                    step="0.5"
+                    value={editorScenery[selectedSceneryIndex].scale}
+                    onChange={(e) => {
+                      const scale = parseFloat(e.target.value);
+                      const newScenery = [...editorScenery];
+                      newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], scale };
+                      setEditorScenery(newScenery);
+                      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
+                    }}
+                    className="w-full accent-green-500 cursor-pointer mb-2"
                   />
-                  <span className="text-[10px] font-mono text-slate-400">{Math.round(editorScale * 100)}%</span>
-                </div>
-              </div>
 
-              {/* Canvas element */}
-              <div className="relative border border-slate-800/80 rounded-2xl overflow-hidden shadow-inner bg-[#090d16] flex items-center justify-center">
-                <canvas
-                  ref={editorCanvasRef}
-                  width={600}
-                  height={600}
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={handleCanvasMouseMove}
-                  onMouseUp={handleCanvasMouseUp}
-                  onMouseLeave={handleCanvasMouseUp}
-                  onDoubleClick={handleCanvasDoubleClick}
-                  className="cursor-crosshair block"
-                />
-              </div>
-
-              <div className="mt-3 text-[10px] font-mono text-slate-500 flex justify-between w-full max-w-[600px] px-1">
-                <span>Nodes: {editorNodes.length} / Max 30 (Min 3 required)</span>
-                <span>Length: {formatDistance(getTrackLength(editorNodes.map(n => new THREE.Vector3(n.x, 0, n.z))))}</span>
-              </div>
-            </div>
-
-            {/* Right: Controls & Parameters panel */}
-            <div className="w-full md:w-[380px] bg-slate-900/60 p-6 flex flex-col justify-between overflow-y-auto">
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Editor Tools</h3>
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    <button
-                      onClick={() => setEditorTool('node')}
-                      className={`text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer ${editorTool === 'node' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:bg-slate-800 border border-slate-800'}`}
-                    >
-                      Track Node
-                    </button>
-                    <button
-                      onClick={() => setEditorTool('tree')}
-                      className={`text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer ${editorTool === 'tree' ? 'bg-green-600 text-white' : 'bg-slate-950 text-slate-400 hover:bg-slate-800 border border-slate-800'}`}
-                    >
-                      Add Tree
-                    </button>
-                    <button
-                      onClick={() => setEditorTool('hill')}
-                      className={`text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer ${editorTool === 'hill' ? 'bg-yellow-700 text-white' : 'bg-slate-950 text-slate-400 hover:bg-slate-800 border border-slate-800'}`}
-                    >
-                      Add Hill
-                    </button>
-                  </div>
-
-                  {selectedNodeIndex !== null && editorNodes[selectedNodeIndex] && (
-                    <div className="space-y-1.5 p-3 bg-slate-950/50 border border-purple-500/30 rounded-xl mb-4">
-                      <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase">
-                        <span>Node {selectedNodeIndex} Width</span>
-                        <span className="font-mono">{editorNodes[selectedNodeIndex].width ?? editorRoadWidth}m</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="10"
-                        max="60"
-                        step="1"
-                        value={editorNodes[selectedNodeIndex].width ?? editorRoadWidth}
-                        onChange={(e) => {
-                          const w = parseInt(e.target.value);
-                          const newNodes = [...editorNodes];
-                          newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], width: w };
-                          setEditorNodes(newNodes);
-                          saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                        }}
-                        className="w-full accent-purple-500 cursor-pointer"
-                      />
-                    </div>
-                  )}
-
-                  {selectedSceneryIndex !== null && editorScenery[selectedSceneryIndex] && (
-                    <div className="space-y-1.5 p-3 bg-slate-950/50 border border-green-500/30 rounded-xl mb-4">
+                  {(editorScenery[selectedSceneryIndex].type === 'hill' || editorScenery[selectedSceneryIndex].type === 'mountain') && (
+                    <div className="mt-4 pt-2 border-t border-green-900/30">
                       <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
-                        <span>{editorScenery[selectedSceneryIndex].type} Scale</span>
-                        <span className="font-mono">{editorScenery[selectedSceneryIndex].scale}x</span>
+                        <span>Height Scale</span>
+                        <span className="font-mono">{editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}x</span>
                       </div>
                       <input
                         type="range"
                         min="0.5"
                         max="20"
                         step="0.5"
-                        value={editorScenery[selectedSceneryIndex].scale}
+                        value={editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}
                         onChange={(e) => {
-                          const scale = parseFloat(e.target.value);
+                          const heightScale = parseFloat(e.target.value);
                           const newScenery = [...editorScenery];
-                          newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], scale };
+                          newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], heightScale };
                           setEditorScenery(newScenery);
                           saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
                         }}
-                        className="w-full accent-green-500 cursor-pointer mb-2"
+                        className="w-full accent-green-500 cursor-pointer"
                       />
-
-                      {editorScenery[selectedSceneryIndex].type === 'hill' && (
-                        <div className="mt-4 pt-2 border-t border-green-900/30">
-                          <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
-                            <span>Hill Height</span>
-                            <span className="font-mono">{editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}x</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="0.5"
-                            max="20"
-                            step="0.5"
-                            value={editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}
-                            onChange={(e) => {
-                              const heightScale = parseFloat(e.target.value);
-                              const newScenery = [...editorScenery];
-                              newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], heightScale };
-                              setEditorScenery(newScenery);
-                              saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
-                            }}
-                            className="w-full accent-green-500 cursor-pointer"
-                          />
-                        </div>
-                      )}
                     </div>
                   )}
-                </div>
 
-                <div>
-                  <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Track Design & Setup</h3>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Track Name</label>
-                    <input
-                      type="text"
-                      value={editorTrackName}
-                      onChange={(e) => {
-                        setEditorTrackName(e.target.value);
-                        saveCustomTrack(editorNodes, e.target.value, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
-                      }}
-                      placeholder="My Custom Track"
-                      maxLength={24}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 mt-4">
-                    <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Grid Size (Map Scale)</label>
-                    <select
-                      value={editorGridLimit}
-                      onChange={(e) => {
-                        const newLimit = parseInt(e.target.value);
-                        setEditorGridLimit(newLimit);
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, newLimit);
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors cursor-pointer"
-                    >
-                      <option value={250}>250m (Total 500m area)</option>
-                      <option value={500}>500m (Total 1.0km area)</option>
-                      <option value={1000}>1000m (Total 2.0km area)</option>
-                      <option value={2000}>2000m (Total 4.0km area)</option>
-                      <option value={3000}>3000m (Total 6.0km area)</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5 mt-4">
-                    <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                      <span>Road Width</span>
-                      <span className="text-purple-400 font-mono">{editorRoadWidth}m</span>
+                  <div className="mt-4 pt-2 border-t border-green-900/30">
+                    <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
+                      <span>Rotation</span>
+                      <span className="font-mono">{Math.round((editorScenery[selectedSceneryIndex].rotation ?? 0) * (180 / Math.PI))}°</span>
                     </div>
                     <input
                       type="range"
-                      min="12"
-                      max="40"
-                      step="2"
-                      value={editorRoadWidth}
-                      onChange={(e) => {
-                        const width = parseInt(e.target.value);
-                        setEditorRoadWidth(width);
-                        saveCustomTrack(editorNodes, editorTrackName, width, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                      }}
-                      className="w-full accent-purple-500 cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 mt-4">
-                    <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                      <span>Time Limit (Lap)</span>
-                      <span className="text-purple-400 font-mono">{editorTimeLimit}s</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="10"
-                      max="120"
+                      min="0"
+                      max="360"
                       step="5"
-                      value={editorTimeLimit}
+                      value={Math.round((editorScenery[selectedSceneryIndex].rotation ?? 0) * (180 / Math.PI))}
                       onChange={(e) => {
-                        const time = parseInt(e.target.value);
-                        setEditorTimeLimit(time);
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, time, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                        const rad = parseFloat(e.target.value) * (Math.PI / 180);
+                        const newScenery = [...editorScenery];
+                        newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], rotation: rad };
+                        setEditorScenery(newScenery);
+                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
                       }}
-                      className="w-full accent-purple-500 cursor-pointer"
+                      className="w-full accent-green-500 cursor-pointer"
                     />
                   </div>
-
-                  <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
-                    <div className="flex flex-col">
-                      <span className="text-[11px] font-bold text-slate-355">Active Obstacles</span>
-                      <span className="text-[9px] text-slate-500">Spawns barrier cones along paths</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={editorHasObstacles}
-                      onChange={(e) => {
-                        setEditorHasObstacles(e.target.checked);
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, e.target.checked, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                      }}
-                      className="w-4 h-4 accent-purple-500 cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
-                    <div className="flex flex-col">
-                      <span className="text-[11px] font-bold text-slate-355">Trackside Grass</span>
-                      <span className="text-[9px] text-slate-500">Renders grass strips along the curbs</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={editorHaveGrass}
-                      onChange={(e) => {
-                        setEditorHaveGrass(e.target.checked);
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, e.target.checked);
-                      }}
-                      className="w-4 h-4 accent-purple-500 cursor-pointer"
-                    />
-                  </div>
-
-                  {editorHaveGrass && (
-                    <div className="space-y-1.5 mt-4">
-                      <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                        <span>Grass Field Width (Length)</span>
-                        <span className="text-purple-400 font-mono">{editorGrassWidth}m</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="2"
-                        max="12"
-                        step="1"
-                        value={editorGrassWidth}
-                        onChange={(e) => {
-                          const width = parseInt(e.target.value);
-                          setEditorGrassWidth(width);
-                          saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, width);
-                        }}
-                        className="w-full accent-purple-500 cursor-pointer"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-2">Track Presets</h3>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => handleApplyTemplate('oval')}
-                      className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
-                    >
-                      Oval Loop
-                    </button>
-                    <button
-                      onClick={() => handleApplyTemplate('scurve')}
-                      className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
-                    >
-                      S-Curves
-                    </button>
-                    <button
-                      onClick={() => handleApplyTemplate('figure8')}
-                      className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
-                    >
-                      Figure 8
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider">Vector3 Code Tools</h3>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(
-                          editorNodes.map(n => `new THREE.Vector3(${Math.round(n.x)}, 2, ${Math.round(n.z)})`).join(',\n')
-                        );
-                        alert("Vector3 coordinate code copied to clipboard!");
-                      }}
-                      className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer bg-transparent border-0 font-bold"
-                    >
-                      <Copy className="w-3 h-3" /> Copy Code
-                    </button>
-                  </div>
-
-                  <textarea
-                    placeholder="Paste new THREE.Vector3(x, 2, z) lines here and click 'Import Code' to load a custom track path..."
-                    id="import-export-textarea"
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-[10px] font-mono text-slate-400 outline-none transition-colors h-24 resize-none leading-relaxed"
-                  />
 
                   <button
                     onClick={() => {
-                      const txtarea = document.getElementById('import-export-textarea') as HTMLTextAreaElement;
-                      if (txtarea) importTrack(txtarea.value);
+                      const newScenery = editorScenery.filter((_, idx) => idx !== selectedSceneryIndex);
+                      setEditorScenery(newScenery);
+                      setSelectedSceneryIndex(null);
+                      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
                     }}
-                    className="w-full bg-slate-950 hover:bg-slate-800 border border-slate-800 py-1.5 rounded-xl text-[10px] font-bold transition-all text-slate-200 cursor-pointer"
+                    className="w-full mt-3 bg-red-955/60 hover:bg-red-900 border border-red-800/80 hover:border-red-650 text-red-300 hover:text-white py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
                   >
-                    Import Code
+                    Delete Selected Scenery
                   </button>
                 </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Track Design & Setup</h3>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Track Name</label>
+                <input
+                  type="text"
+                  value={editorTrackName}
+                  onChange={(e) => {
+                    setEditorTrackName(e.target.value);
+                    saveCustomTrack(editorNodes, e.target.value, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
+                  }}
+                  placeholder="My Custom Track"
+                  maxLength={24}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors"
+                />
               </div>
 
-              <div className="mt-6 space-y-2">
-                <button
-                  disabled={editorNodes.length < 3}
-                  onClick={launchTestDrive}
-                  className={`w-full py-3.5 rounded-xl text-xs font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-2 border cursor-pointer ${editorNodes.length >= 3
-                    ? 'bg-purple-600 hover:bg-purple-500 border-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.35)] hover:shadow-[0_0_20px_rgba(168,85,247,0.55)]'
-                    : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                    }`}
+              <div className="space-y-1.5 mt-4">
+                <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Snap to Grid</label>
+                <select
+                  value={snapToGrid}
+                  onChange={(e) => setSnapToGrid(parseInt(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors cursor-pointer"
                 >
-                  <Play className="w-4 h-4 fill-current" />
-                  {editorNodes.length >= 3 ? 'Test Drive Track' : 'Needs Min. 3 Nodes'}
-                </button>
+                  <option value={0}>Off (Free Move)</option>
+                  <option value={5}>5m Grid</option>
+                  <option value={10}>10m Grid</option>
+                  <option value={20}>20m Grid</option>
+                </select>
+              </div>
 
+              <div className="space-y-1.5 mt-4">
+                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                  <span>Default Node Elevation</span>
+                  <span className="text-purple-400 font-mono">{editorCornerHeight}m</span>
+                </div>
+                <input
+                  type="range"
+                  min="2"
+                  max="35"
+                  step="1"
+                  value={editorCornerHeight}
+                  onChange={(e) => setEditorCornerHeight(parseInt(e.target.value))}
+                  className="w-full accent-purple-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="space-y-1.5 mt-4">
+                <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Grid Size (Map Scale)</label>
+                <select
+                  value={editorGridLimit}
+                  onChange={(e) => {
+                    const newLimit = parseInt(e.target.value);
+                    setEditorGridLimit(newLimit);
+                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, newLimit);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors cursor-pointer"
+                >
+                  <option value={250}>250m (Total 500m area)</option>
+                  <option value={500}>500m (Total 1.0km area)</option>
+                  <option value={1000}>1000m (Total 2.0km area)</option>
+                  <option value={2000}>2000m (Total 4.0km area)</option>
+                  <option value={3000}>3000m (Total 6.0km area)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5 mt-4">
+                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                  <span>Road Width</span>
+                  <span className="text-purple-400 font-mono">{editorRoadWidth}m</span>
+                </div>
+                <input
+                  type="range"
+                  min="12"
+                  max="40"
+                  step="2"
+                  value={editorRoadWidth}
+                  onChange={(e) => {
+                    const width = parseInt(e.target.value);
+                    setEditorRoadWidth(width);
+                    saveCustomTrack(editorNodes, editorTrackName, width, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                  }}
+                  className="w-full accent-purple-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="space-y-1.5 mt-4">
+                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                  <span>Time Limit (Lap)</span>
+                  <span className="text-purple-400 font-mono">{editorTimeLimit}s</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="120"
+                  step="5"
+                  value={editorTimeLimit}
+                  onChange={(e) => {
+                    const time = parseInt(e.target.value);
+                    setEditorTimeLimit(time);
+                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, time, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                  }}
+                  className="w-full accent-purple-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
+                <div className="flex flex-col">
+                  <span className="text-[11px] font-bold text-slate-355">Active Obstacles</span>
+                  <span className="text-[9px] text-slate-500">Spawns barrier cones along paths</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={editorHasObstacles}
+                  onChange={(e) => {
+                    setEditorHasObstacles(e.target.checked);
+                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, e.target.checked, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                  }}
+                  className="w-4 h-4 accent-purple-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
+                <div className="flex flex-col">
+                  <span className="text-[11px] font-bold text-slate-355">Trackside Grass</span>
+                  <span className="text-[9px] text-slate-500">Renders grass strips along the curbs</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={editorHaveGrass}
+                  onChange={(e) => {
+                    setEditorHaveGrass(e.target.checked);
+                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, e.target.checked);
+                  }}
+                  className="w-4 h-4 accent-purple-500 cursor-pointer"
+                />
+              </div>
+
+              {editorHaveGrass && (
+                <div className="space-y-1.5 mt-4">
+                  <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                    <span>Grass Field Width (Length)</span>
+                    <span className="text-purple-400 font-mono">{editorGrassWidth}m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="2"
+                    max="12"
+                    step="1"
+                    value={editorGrassWidth}
+                    onChange={(e) => {
+                      const width = parseInt(e.target.value);
+                      setEditorGrassWidth(width);
+                      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, width);
+                    }}
+                    className="w-full accent-purple-500 cursor-pointer"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-2">Track Presets</h3>
+              <div className="grid grid-cols-3 gap-2">
                 <button
-                  disabled={editorNodes.length < 3}
+                  onClick={() => handleApplyTemplate('oval')}
+                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
+                >
+                  Oval Loop
+                </button>
+                <button
+                  onClick={() => handleApplyTemplate('scurve')}
+                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
+                >
+                  S-Curves
+                </button>
+                <button
+                  onClick={() => handleApplyTemplate('figure8')}
+                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
+                >
+                  Figure 8
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider">Vector3 Code Tools</h3>
+                <button
                   onClick={() => {
-                    if (editorNodes.length >= 3) {
-                      setLivePreview(!livePreview);
-                      if (!livePreview && engineRef.current) {
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                        engineRef.current.buildPreviewTrack('custom');
-                      } else if (livePreview && engineRef.current) {
-                        engineRef.current.buildGarage();
-                      }
+                    navigator.clipboard.writeText(
+                      editorNodes.map(n => `new THREE.Vector3(${Math.round(n.x)}, 2, ${Math.round(n.z)})`).join(',\n')
+                    );
+                    alert("Vector3 coordinate code copied to clipboard!");
+                  }}
+                  className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer bg-transparent border-0 font-bold"
+                >
+                  <Copy className="w-3 h-3" /> Copy Code
+                </button>
+              </div>
+
+              <textarea
+                placeholder="Paste new THREE.Vector3(x, 2, z) lines here and click 'Import Code' to load a custom track path..."
+                id="import-export-textarea"
+                className="w-full bg-slate-955 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-[10px] font-mono text-slate-400 outline-none transition-colors h-24 resize-none leading-relaxed"
+              />
+
+              <button
+                onClick={() => {
+                  const txtarea = document.getElementById('import-export-textarea') as HTMLTextAreaElement;
+                  if (txtarea) importTrack(txtarea.value);
+                }}
+                className="w-full bg-slate-955 hover:bg-slate-800 border border-slate-800 py-1.5 rounded-xl text-[10px] font-bold transition-all text-slate-200 cursor-pointer"
+              >
+                Import Code
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-2">
+              <button
+                disabled={editorNodes.length < 3}
+                onClick={launchTestDrive}
+                className={`w-full py-3.5 rounded-xl text-xs font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-2 border cursor-pointer ${editorNodes.length >= 3
+                  ? 'bg-purple-600 hover:bg-purple-500 border-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.35)] hover:shadow-[0_0_20px_rgba(168,85,247,0.55)]'
+                  : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
+                  }`}
+              >
+                <Play className="w-4 h-4 fill-current" />
+                {editorNodes.length >= 3 ? 'Test Drive Track' : 'Needs Min. 3 Nodes'}
+              </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleClearAll}
+                  className="bg-slate-955 hover:bg-red-955/40 border border-slate-800 hover:border-red-900/60 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-red-400 transition-all cursor-pointer"
+                >
+                  Clear All
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveMode('garage');
+                    if (livePreview) {
+                      setLivePreview(false);
+                      engineRef.current?.buildGarage();
                     }
                   }}
-                  className={`w-full py-2.5 rounded-xl text-xs font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-2 border cursor-pointer ${editorNodes.length >= 3
-                    ? (livePreview ? 'bg-green-600 hover:bg-green-500 border-green-500 text-white shadow-[0_0_15px_rgba(34,197,94,0.35)]' : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200')
-                    : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                    }`}
+                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 py-2 rounded-xl text-xs font-bold text-slate-250 transition-all cursor-pointer"
                 >
-                  <Map className="w-4 h-4" />
-                  {livePreview ? 'Stop Live Preview' : 'Live 3D Preview'}
+                  Close Editor
                 </button>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={handleClearAll}
-                    className="bg-slate-950 hover:bg-red-950/40 border border-slate-800 hover:border-red-900/60 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-red-400 transition-all cursor-pointer"
-                  >
-                    Clear All
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowEditor(false);
-                      if (livePreview) {
-                        setLivePreview(false);
-                        engineRef.current?.buildGarage();
-                      }
-                    }}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 py-2 rounded-xl text-xs font-bold text-slate-250 transition-all cursor-pointer"
-                  >
-                    Close Editor
-                  </button>
-                </div>
               </div>
-
             </div>
           </div>
-          )}
+
+          {/* Bottom Floating Editor Panel */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-3xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col items-center gap-4 w-[620px]">
+            {/* Mode Tab Toggle */}
+            <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 w-full max-w-[320px]">
+              <button
+                onClick={() => setEditorTool('node')}
+                className={`flex-1 text-xs font-extrabold py-2 px-4 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
+                  editorTool === 'node'
+                    ? 'bg-purple-600 text-white shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Track Mode
+              </button>
+              <button
+                onClick={() => setEditorTool('tree1')}
+                className={`flex-1 text-xs font-extrabold py-2 px-4 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
+                  editorTool !== 'node'
+                    ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Decorate Mode
+              </button>
+            </div>
+
+            {/* Tools list */}
+            <div className="flex gap-3 justify-center items-center w-full text-slate-300">
+              {editorTool === 'node' ? (
+                // Track Mode: single tool (Node)
+                <button
+                  onClick={() => setEditorTool('node')}
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border transition-all cursor-pointer w-[100px] h-[95px] justify-between ${
+                    editorTool === 'node'
+                      ? 'bg-purple-950/40 border-purple-500/80 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
+                      : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  {renderToolIcon('node', editorTool === 'node')}
+                  <span className="text-[10px] font-bold tracking-wide">Track Node</span>
+                </button>
+              ) : (
+                // Decorate Mode: scenery tools (tree1, tree2, tree3, rock, mountain, hill, podium)
+                <div className="flex gap-2.5 overflow-x-auto w-full justify-start py-1 px-1">
+                  {[
+                    { id: 'tree1', name: 'Conifer' },
+                    { id: 'tree2', name: 'Oak Tree' },
+                    { id: 'tree3', name: 'Palm Tree' },
+                    { id: 'rock', name: 'Rock' },
+                    { id: 'mountain', name: 'Mountain' },
+                    { id: 'hill', name: 'Hill' },
+                    { id: 'podium', name: 'Grandstand' },
+                  ].map((item) => {
+                    const isActive = editorTool === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => setEditorTool(item.id as any)}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-2xl border transition-all cursor-pointer w-[75px] h-[85px] justify-between shrink-0 ${
+                          isActive
+                            ? 'bg-emerald-950/40 border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                            : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                        }`}
+                      >
+                        {renderToolIcon(item.id, isActive)}
+                        <span className="text-[9px] font-bold tracking-wide text-center leading-none">{item.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -7,7 +7,7 @@
  * then rapidly lose performance — matching real racing tire behavior.
  */
 
-export type TireCompoundType = 'super_hard' | 'hard' | 'normal' | 'soft' | 'super_soft';
+export type TireCompoundType = 'economy' | 'super_hard' | 'hard' | 'normal' | 'soft' | 'super_soft';
 
 export interface TireCompoundConfig {
   id: TireCompoundType;
@@ -28,6 +28,14 @@ export interface TireState {
  * Ordered from hardest (least grip, most durable) to softest (most grip, least durable).
  */
 export const TIRE_COMPOUNDS: Record<TireCompoundType, TireCompoundConfig> = {
+  economy: {
+    id: 'economy',
+    name: 'Economy',
+    gripMultiplier: 1.50,
+    wearRate: 0.10,
+    colorHex: '#6b7280',
+    colorLabel: 'Gray'
+  },
   super_hard: {
     id: 'super_hard',
     name: 'Super Hard',

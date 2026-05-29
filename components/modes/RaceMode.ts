@@ -226,6 +226,9 @@ export class RaceMode extends BaseMode {
     this.updateScrollingFloor();
     this.updateGrass(deltaTime);
 
+    // Update checkpoint rings (hologram scrolls and float animations)
+    this.checkpoints.forEach(cp => cp.update(deltaTime));
+
     const isCountdown = this.engine.gameStatus === 'countdown';
     const isPlaying = this.engine.gameStatus === 'playing';
 
@@ -369,6 +372,7 @@ export class RaceMode extends BaseMode {
         if (distToFinish < finishRadius) {
           finishCheckpoint.markPassed();
           this.particles.emitSparks(25, finishCheckpoint.pos, 0x00ff00);
+          this.engine.triggerCheckpointFlash();
           
           // Calculate and track lap times
           const currentLapTime = this.raceTime - this.lapStartTimes[this.currentLap];

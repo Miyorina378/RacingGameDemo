@@ -22,6 +22,13 @@ export class Vehicle {
   public leftFrontWheel?: THREE.Object3D;
   public rightFrontWheel?: THREE.Object3D;
 
+  // Shader materials tracking
+  private paintMaterials: THREE.MeshPhysicalMaterial[] = [];
+  private windshieldMaterials: THREE.MeshPhysicalMaterial[] = [];
+  private rimMaterials: THREE.MeshPhysicalMaterial[] = [];
+  private underglowMaterial?: THREE.ShaderMaterial;
+  private taillightMaterials: THREE.MeshStandardMaterial[] = [];
+
   // Physics parameters
   public pos = new THREE.Vector3(0, 0, 0);
   public yaw = 0; // Heading direction in radians
@@ -43,6 +50,7 @@ export class Vehicle {
     rightScale?: number;
     sideSign?: number;
     trackBoundary?: number;
+    banking?: number;
   };
   public onFenceCollision?: (contactPt: THREE.Vector3) => void;
   public haveFence = false;
@@ -56,7 +64,7 @@ export class Vehicle {
   public wheelBase = 3.2;  // Distance between front and rear axles (m)
 
   // --- TIRE COMPOUND SYSTEM ---
-  public tireState: TireState = createFreshTireState('normal');
+  public tireState: TireState = createFreshTireState('economy');
   public tireWearEnabled = false;  // Only true in endurance mode
 
   // --- REALISM ENHANCEMENT VARIABLES ---
@@ -138,7 +146,8 @@ export class Vehicle {
     },
     suspensionLevel: 0,     // Level 0-3: Lowers center of gravity, sharpens handling, reduces visual body roll
     bodyControlModuleLevel: 0, // Level 0-3: Electronic Traction Control (TCS) preventing low-speed wheel spin
-    tireCompound: 'normal' as TireCompoundType  // Tire compound selection
+    tireLevel: 0,
+    tireCompound: 'economy' as TireCompoundType  // Tire compound selection
   };
 
   public carId: string;
@@ -250,6 +259,13 @@ export class Vehicle {
     this.carId = carId;
     this.color = color;
 
+    // Reset material tracking
+    this.paintMaterials = [];
+    this.windshieldMaterials = [];
+    this.rimMaterials = [];
+    this.underglowMaterial = undefined;
+    this.taillightMaterials = [];
+
     // Clear old children
     while (this.mesh.children.length > 0) {
       this.mesh.remove(this.mesh.children[0]);
@@ -270,26 +286,65 @@ export class Vehicle {
     }
   }
 
+  private createPaintMaterial(color: THREE.Color | string | number): THREE.MeshPhysicalMaterial {
+    const paintColor = new THREE.Color(color);
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: paintColor,
+      roughness: 0.18,
+      metalness: 0.82,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.04
+    });
+    this.paintMaterials.push(mat);
+    return mat;
+  }
+
+  private createWindshieldMaterial(): THREE.MeshPhysicalMaterial {
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: 0x334455,
+      roughness: 0.08,
+      metalness: 0.05,
+      transmission: 0.9,
+      ior: 1.5,
+      thickness: 0.5,
+      transparent: true,
+      opacity: 0.45
+    });
+    this.windshieldMaterials.push(mat);
+    return mat;
+  }
+
+  private createRimMaterial(): THREE.MeshPhysicalMaterial {
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: 0xcccccc,
+      roughness: 0.25,
+      metalness: 0.95,
+      clearcoat: 0.4,
+      clearcoatRoughness: 0.1
+    });
+    this.rimMaterials.push(mat);
+    return mat;
+  }
+
   private buildProceduralMesh() {
     // Chassis Base
     const chassisGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
-    const chassisMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(this.color),
-      roughness: 0.2,
-      metalness: 0.8,
-    });
+    const chassisMat = this.createPaintMaterial(this.color);
     const chassis = new THREE.Mesh(chassisGeom, chassisMat);
     chassis.position.y = 0.45;
     this.mesh.add(chassis);
 
     // Cabin/Windshield
     const cabinGeom = new THREE.BoxGeometry(1.8, 0.6, 2.2);
-    const cabinMat = new THREE.MeshStandardMaterial({
+    const cabinMat = new THREE.MeshPhysicalMaterial({
       color: 0x050510,
-      roughness: 0.1,
-      metalness: 0.9,
+      roughness: 0.05,
+      metalness: 0.1,
+      transmission: 0.9,
+      ior: 1.5,
+      thickness: 0.8,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.5
     });
     const cabin = new THREE.Mesh(cabinGeom, cabinMat);
     cabin.position.set(0, 0.9, -0.2); // Sits slightly back
@@ -297,22 +352,17 @@ export class Vehicle {
 
     // Windshield frame
     const windshieldGeom = new THREE.BoxGeometry(1.7, 0.5, 1.2);
-    const windshieldMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      roughness: 0.05,
-      metalness: 0.95,
-      emissive: 0x003333,
-    });
+    const windshieldMat = this.createWindshieldMaterial();
     const windshield = new THREE.Mesh(windshieldGeom, windshieldMat);
     windshield.position.set(0, 0.85, 0.8);
     windshield.rotation.x = -0.5; // Angled windshield
     this.mesh.add(windshield);
 
-    // Neon Headlights (Cyan glowing cylinders)
+    // Realistic Headlights (Xenon white cylinders)
     const headlightGeom = new THREE.BoxGeometry(0.6, 0.12, 0.2);
     const headlightMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
+      color: 0xe0e8ff,
+      emissive: 0xe0e8ff,
       emissiveIntensity: 2.0
     });
 
@@ -325,7 +375,7 @@ export class Vehicle {
     this.mesh.add(rightHeadlight);
 
     // Dynamic light beam emitting from front
-    const frontSpot = new THREE.SpotLight(0x00ffff, 4, 30, Math.PI / 4, 0.5, 1);
+    const frontSpot = new THREE.SpotLight(0xe0e8ff, 4, 30, Math.PI / 4, 0.5, 1);
     frontSpot.position.set(0, 0.5, 2.5);
     frontSpot.target.position.set(0, 0, 10);
     this.mesh.add(frontSpot);
@@ -334,13 +384,16 @@ export class Vehicle {
     // Red Tail lights
     const taillightGeom = new THREE.BoxGeometry(0.8, 0.1, 0.1);
     const taillightMat = new THREE.MeshStandardMaterial({
-      color: 0xff0055,
-      emissive: 0xff0055,
-      emissiveIntensity: 1.5
+      color: 0x550000,
+      roughness: 0.2,
+      metalness: 0.1,
+      emissive: 0x220000,
+      emissiveIntensity: 0.5
     });
     const tailLight = new THREE.Mesh(taillightGeom, taillightMat);
     tailLight.position.set(0, 0.5, -2.4);
     this.mesh.add(tailLight);
+    this.taillightMaterials.push(taillightMat);
 
     // Exhaust Boost Engine
     const exhaustGeom = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
@@ -352,11 +405,6 @@ export class Vehicle {
     const exhaust = new THREE.Mesh(exhaustGeom, exhaustMat);
     exhaust.position.set(0, 0.35, -2.4);
     this.mesh.add(exhaust);
-
-    // Neon Underglow Light
-    const underglow = new THREE.PointLight(new THREE.Color(this.color), 3, 6);
-    underglow.position.set(0, -0.2, 0);
-    this.mesh.add(underglow);
 
     // Add spoiler if config specifies it
     if (this.hasSpoiler) {
@@ -372,7 +420,7 @@ export class Vehicle {
       this.mesh.add(rightPillar);
 
       const wingGeom = new THREE.BoxGeometry(2.6, 0.08, 0.6);
-      const wingMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(this.color), roughness: 0.3 });
+      const wingMat = this.createPaintMaterial(this.color);
       const wing = new THREE.Mesh(wingGeom, wingMat);
       wing.position.set(0, 1.2, -2.1);
       wing.rotation.x = 0.05;
@@ -388,11 +436,7 @@ export class Vehicle {
     });
     const rimGeom = new THREE.CylinderGeometry(this.wheelRadius * (0.28 / 0.48), this.wheelRadius * (0.28 / 0.48), 0.46, 8);
     rimGeom.rotateZ(Math.PI / 2);
-    const rimMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x003333,
-      metalness: 0.9,
-    });
+    const rimMat = this.createRimMaterial();
 
     const createWheelAssembly = (x: number, y: number, z: number, isFront: boolean) => {
       // Outer group: handles position + steering (Y rotation only)
@@ -501,22 +545,45 @@ export class Vehicle {
         this.mesh.updateMatrixWorld(true);
         model.updateMatrixWorld(true);
 
-        // Traverse the loaded GLTF model
-        const paintColor = new THREE.Color(this.color);
         let originalWheels: THREE.Object3D[] = [];
-
         model.traverse((child: THREE.Object3D) => {
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
             child.receiveShadow = true;
 
-            // Dynamically paint the car body parts (handles array materials safely)
+            // Dynamically paint the car body parts and upgrade other surfaces (handles array materials safely)
+            const paintColor = new THREE.Color(this.color);
             const materials = Array.isArray(child.material) ? child.material : [child.material];
             materials.forEach((mat, idx) => {
               if (mat && (mat as any).name) {
                 const matName = (mat as any).name.toLowerCase();
                 const nodeName = child.name.toLowerCase();
+                
+                // Track and set up taillights/brake lights (checking both "brake" and "break" spellings)
                 if (
+                  nodeName.includes('taillight') ||
+                  nodeName.includes('tail_light') ||
+                  nodeName.includes('brake') ||
+                  nodeName.includes('break') ||
+                  matName.includes('taillight') ||
+                  matName.includes('tail_light') ||
+                  matName.includes('brake') ||
+                  matName.includes('break')
+                ) {
+                  const upgradedBrakeMat = new THREE.MeshStandardMaterial({
+                    color: 0x550000,
+                    roughness: 0.2,
+                    metalness: 0.1,
+                    emissive: 0x220000,
+                    emissiveIntensity: 0.5
+                  });
+                  if (Array.isArray(child.material)) {
+                    child.material[idx] = upgradedBrakeMat;
+                  } else {
+                    child.material = upgradedBrakeMat;
+                  }
+                  this.taillightMaterials.push(upgradedBrakeMat);
+                } else if (
                   nodeName.includes('body') ||
                   nodeName.includes('paint') ||
                   nodeName.includes('chassis') ||
@@ -526,14 +593,33 @@ export class Vehicle {
                   matName.includes('exterior') ||
                   matName.includes('car_paint')
                 ) {
-                  const clonedMat = mat.clone();
-                  if ((clonedMat as any).color) {
-                    (clonedMat as any).color.copy(paintColor);
-                  }
+                  const upgradedPaintMat = this.createPaintMaterial(paintColor);
                   if (Array.isArray(child.material)) {
-                    child.material[idx] = clonedMat;
+                    child.material[idx] = upgradedPaintMat;
                   } else {
-                    child.material = clonedMat;
+                    child.material = upgradedPaintMat;
+                  }
+                } else if (
+                  nodeName.includes('glass') ||
+                  nodeName.includes('windshield') ||
+                  matName.includes('glass') ||
+                  matName.includes('windshield')
+                ) {
+                  const upgradedGlassMat = this.createWindshieldMaterial();
+                  if (Array.isArray(child.material)) {
+                    child.material[idx] = upgradedGlassMat;
+                  } else {
+                    child.material = upgradedGlassMat;
+                  }
+                } else if (
+                  nodeName.includes('rim') ||
+                  matName.includes('rim')
+                ) {
+                  const upgradedRimMat = this.createRimMaterial();
+                  if (Array.isArray(child.material)) {
+                    child.material[idx] = upgradedRimMat;
+                  } else {
+                    child.material = upgradedRimMat;
                   }
                 }
               }
@@ -727,11 +813,7 @@ export class Vehicle {
     });
     const rimGeom = new THREE.CylinderGeometry(this.wheelRadius * (0.28 / 0.48), this.wheelRadius * (0.28 / 0.48), 0.46, 8);
     rimGeom.rotateZ(Math.PI / 2);
-    const rimMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x003333,
-      metalness: 0.9,
-    });
+    const rimMat = this.createRimMaterial();
 
     const createWheelAssembly = (x: number, y: number, z: number, isFront: boolean) => {
       const steerPivot = new THREE.Group();
@@ -762,17 +844,12 @@ export class Vehicle {
   }
 
   private addGltfVisualHelpers() {
-    // 1. Front spot light beam (no box mesh, only the spot light source)
-    const frontSpot = new THREE.SpotLight(0x00ffff, 4, 30, Math.PI / 4, 0.5, 1);
+    // 1. Front spot light beam (Realistic Xenon white headlight projection)
+    const frontSpot = new THREE.SpotLight(0xe0e8ff, 4, 30, Math.PI / 4, 0.5, 1);
     frontSpot.position.set(0, 0.5, 2.5);
     frontSpot.target.position.set(0, 0, 10);
     this.mesh.add(frontSpot);
     this.mesh.add(frontSpot.target);
-
-    // 2. Underglow PointLight (no box mesh, only the light source)
-    const underglow = new THREE.PointLight(new THREE.Color(this.color), 3, 6);
-    underglow.position.set(0, -0.2, 0);
-    this.mesh.add(underglow);
   }
 
   public updateStats() {
@@ -834,8 +911,8 @@ export class Vehicle {
       this.character = { ...config.character };
     }
 
-    // Sync tire compound from upgrades (fallback to normal if undefined)
-    this.tireState.compound = this.upgrades.tireCompound || 'normal';
+    // Sync tire compound from upgrades (fallback to economy if undefined)
+    this.tireState.compound = this.upgrades.tireCompound || 'economy';
   }
 
   private handleCountdown(isCountdown: boolean): boolean {
@@ -1079,7 +1156,21 @@ export class Vehicle {
     // --- EFFECTIVE GRIP ---
     const baseGripCoeff = this.getEffectiveTireGrip();
     const gravity = 9.81;
-    const totalWeight = this.mass * gravity;
+
+    let bankAngleRad = 0;
+    if (this.getTrackInfo) {
+      const info = this.getTrackInfo(this.pos.x, this.pos.z);
+      if (info && info.banking !== undefined) {
+        bankAngleRad = info.banking * (Math.PI / 180);
+      }
+    }
+
+    // Centrifugal acceleration component normal to track: speed * yawRate * sin(bankAngle)
+    const centAccelNormal = (this.speed * this.yawRate) * Math.sin(bankAngleRad);
+    // Effective gravity: gravity * cos(bankAngle) + centAccelNormal
+    const effectiveGravity = Math.max(1.0, gravity * Math.cos(bankAngleRad) + centAccelNormal);
+
+    const totalWeight = this.mass * effectiveGravity;
     const frontWeight = totalWeight * this.character.weightDistribution;
     const rearWeight = totalWeight * (1.0 - this.character.weightDistribution);
 
@@ -1323,7 +1414,8 @@ export class Vehicle {
     }
 
     // --- APPLY FORCES TO VELOCITY ---
-    const totalLatForce = frontLatForce + rearLatForce; 
+    const lateralGravityForce = -this.mass * gravity * Math.sin(bankAngleRad);
+    const totalLatForce = frontLatForce + rearLatForce + lateralGravityForce; 
     this.applyLocalForce(totalForwardForce, totalLatForce, deltaTime);
 
     // Damp lateral velocity at low speeds to prevent endless sideways sliding/creeping
@@ -1550,6 +1642,20 @@ export class Vehicle {
     this.updatePositionAndEnforceBoundaries(deltaTime);
 
     this.updateGravitySuspensionAndRoll(deltaTime, speedBeforeFrame, speedRatio, turnInput);
+
+    // Update taillight materials based on brakeInput (glows bright red when braking, dims otherwise)
+    const isBraking = this.brakeInput > 0.05;
+    this.taillightMaterials.forEach(mat => {
+      if (isBraking) {
+        mat.color.setHex(0xff0000);
+        mat.emissive.setHex(0xff0000);
+        mat.emissiveIntensity = 4.0;
+      } else {
+        mat.color.setHex(0x550000);
+        mat.emissive.setHex(0x220000);
+        mat.emissiveIntensity = 0.5;
+      }
+    });
   }
 
   /**

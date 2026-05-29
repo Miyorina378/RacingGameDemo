@@ -25,6 +25,9 @@ export abstract class BaseMode implements GameMode {
 
   protected roadSamplePoints: THREE.Vector3[] = [];
   protected roadSampleWidths: number[] = [];
+  protected roadSampleBankings: number[] = [];
+  protected roadSampleLeftPoints: THREE.Vector3[] = [];
+  protected roadSampleRightPoints: THREE.Vector3[] = [];
   protected roadSampleLeftScale: number[] = [];
   protected roadSampleRightScale: number[] = [];
   protected roadWidth: number = 14;
@@ -36,6 +39,7 @@ export abstract class BaseMode implements GameMode {
   protected haveCurb: boolean = false;
   protected trackBoundary: number = 0;
   protected grassUniforms = { uTime: { value: 0 } };
+  protected roadUniforms = { uTime: { value: 0 }, uTimeOfDayVal: { value: 1.0 } };
 
   // Settings for concrete block dimensions (used by Silverstone catch fence)
   protected concreteTopWidth: number = 0.3;
@@ -125,6 +129,12 @@ export abstract class BaseMode implements GameMode {
 
   protected updateGrass(deltaTime: number) {
     this.grassUniforms.uTime.value += deltaTime;
+    this.roadUniforms.uTime.value += deltaTime;
+    if (this.engine && this.engine.sky) {
+      this.roadUniforms.uTimeOfDayVal.value = (this.engine.sky as any).uTimeOfDayVal !== undefined 
+        ? (this.engine.sky as any).uTimeOfDayVal 
+        : 1.0;
+    }
   }
 
   protected clearEnvironment() {
@@ -149,12 +159,12 @@ export abstract class BaseMode implements GameMode {
 
     const pathNodes = pathPointsRaw.map(p => {
       if (p instanceof THREE.Vector3 || (p as any).isVector3) {
-        return { pos: p as THREE.Vector3, width: config.roadWidth };
+        return { pos: p as THREE.Vector3, width: config.roadWidth, banking: 0 };
       }
       const tn = p as TrackNode;
       const w = tn.width ?? config.roadWidth;
       if (w > maxRoadWidth) maxRoadWidth = w;
-      return { pos: tn.pos, width: w };
+      return { pos: tn.pos, width: w, banking: tn.banking ?? 0 };
     });
 
     this.roadWidth = config.roadWidth;
@@ -172,8 +182,8 @@ export abstract class BaseMode implements GameMode {
       return info.dist >= grassStart && info.dist < grassEnd;
     };
 
-    // 1. Project points flat to ground height y = 0.01
-    const roadPoints = pathNodes.map(p => new THREE.Vector3(p.pos.x, 0.01, p.pos.z));
+    // 1. Use actual node y height
+    const roadPoints = pathNodes.map(p => new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z));
 
     // 2. Create smooth closed loop curve
     const curve = new THREE.CatmullRomCurve3(roadPoints, true, config.curveType || 'centripetal', config.tension || 0.5);
@@ -185,8 +195,9 @@ export abstract class BaseMode implements GameMode {
     const samplePoints = curve.getSpacedPoints(totalSamplePoints);
     this.roadSamplePoints = samplePoints;
     
-    // Calculate interpolated width for each sample point
+    // Calculate interpolated width and banking for each sample point
     const sampleWidths: number[] = [];
+    const sampleBankings: number[] = [];
     for (let i = 0; i < samplePoints.length; i++) {
         // Handle closed curve last point duplicating the first
         const u = i === samplePoints.length - 1 ? 1 : i / (samplePoints.length - 1);
@@ -199,8 +210,13 @@ export abstract class BaseMode implements GameMode {
         const w0 = pathNodes[idx0].width;
         const w1 = pathNodes[idx1].width;
         sampleWidths.push(w0 + (w1 - w0) * frac);
+
+        const b0 = pathNodes[idx0].banking ?? 0;
+        const b1 = pathNodes[idx1].banking ?? 0;
+        sampleBankings.push(b0 + (b1 - b0) * frac);
     }
     this.roadSampleWidths = sampleWidths;
+    this.roadSampleBankings = sampleBankings;
 
     const leftPoints: THREE.Vector3[] = [];
     const rightPoints: THREE.Vector3[] = [];
@@ -227,6 +243,12 @@ export abstract class BaseMode implements GameMode {
       } else {
         normal.normalize();
       }
+      
+      const bankingAngle = (this.roadSampleBankings[i] ?? 0) * (Math.PI / 180);
+      if (Math.abs(bankingAngle) > 0.0001) {
+        normal.applyAxisAngle(tangent, bankingAngle);
+      }
+      
       normals.push(normal);
     }
 
@@ -318,8 +340,8 @@ export abstract class BaseMode implements GameMode {
       const rScale = this.roadSampleRightScale[i];
 
       // Save points for boundaries and lines
-      const left = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, w * lScale);
-      const right = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, -w * rScale);
+      const left = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, w * lScale);
+      const right = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, -w * rScale);
       leftPoints.push(left);
       rightPoints.push(right);
 
@@ -331,6 +353,9 @@ export abstract class BaseMode implements GameMode {
       roadPosArray[i * 6 + 4] = right.y;
       roadPosArray[i * 6 + 5] = right.z;
     }
+
+    this.roadSampleLeftPoints = leftPoints;
+    this.roadSampleRightPoints = rightPoints;
 
     for (let i = 0; i < samplePoints.length - 1; i++) {
       const currLeft = 2 * i;
@@ -353,6 +378,71 @@ export abstract class BaseMode implements GameMode {
       metalness: 0.1,
       side: THREE.DoubleSide
     });
+
+    const roadUniforms = this.roadUniforms;
+    roadMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = roadUniforms.uTime;
+      shader.uniforms.uTimeOfDayVal = roadUniforms.uTimeOfDayVal;
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+         varying vec3 vWorldPos;`
+      );
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+         vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+         uniform float uTime;
+         uniform float uTimeOfDayVal;
+         varying vec3 vWorldPos;
+
+         float hash2D(vec2 p) {
+           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+         }
+
+         float noise2D(vec2 p) {
+           vec2 i = floor(p);
+           vec2 f = fract(p);
+           vec2 u = f * f * (3.0 - 2.0 * f);
+           return mix(mix(hash2D(i + vec2(0.0,0.0)), hash2D(i + vec2(1.0,0.0)), u.x),
+                      mix(hash2D(i + vec2(0.0,1.0)), hash2D(i + vec2(1.0,1.0)), u.x), u.y);
+         }`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+         float grain = noise2D(vWorldPos.xz * 12.0) * 0.15;
+         float microGrain = noise2D(vWorldPos.xz * 120.0) * 0.08;
+         roughnessFactor = clamp(roughnessFactor + grain + microGrain, 0.0, 1.0);`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         float nightWeight = smoothstep(0.4, 0.9, uTimeOfDayVal);
+         if (nightWeight > 0.01) {
+           vec2 gridPos = abs(fract(vWorldPos.xz * 0.15 - 0.5) - 0.5) / fwidth(vWorldPos.xz * 0.15);
+           float gridLine = min(gridPos.x, gridPos.y);
+           float gridVal = 1.0 - min(gridLine, 1.0);
+           
+           float pulseWave = sin(vWorldPos.z * 0.04 - uTime * 3.5) * 0.5 + 0.5;
+           pulseWave = pow(pulseWave, 16.0);
+           
+           vec3 gridColor = mix(vec3(0.0, 1.0, 1.0), vec3(1.0, 0.0, 0.6), sin(vWorldPos.z * 0.005) * 0.5 + 0.5);
+           
+           vec3 neonGlow = gridColor * gridVal * (0.35 + pulseWave * 1.5) * nightWeight;
+           gl_FragColor.rgb += neonGlow;
+         }`
+      );
+    };
 
     const roadMesh = new THREE.Mesh(roadGeom, roadMat);
     roadMesh.receiveShadow = true;
@@ -447,10 +537,10 @@ export abstract class BaseMode implements GameMode {
         const normalNext = normals[i + 1];
 
         // Elevate center line slightly to prevent z-fighting
-        const c1 = new THREE.Vector3(ptCenter.x, 0.052, ptCenter.z).addScaledVector(normal, 0.1);
-        const c2 = new THREE.Vector3(ptCenter.x, 0.052, ptCenter.z).addScaledVector(normal, -0.1);
-        const c1Next = new THREE.Vector3(ptCenterNext.x, 0.052, ptCenterNext.z).addScaledVector(normalNext, 0.1);
-        const c2Next = new THREE.Vector3(ptCenterNext.x, 0.052, ptCenterNext.z).addScaledVector(normalNext, -0.1);
+        const c1 = new THREE.Vector3(ptCenter.x, ptCenter.y + 0.002, ptCenter.z).addScaledVector(normal, 0.1);
+        const c2 = new THREE.Vector3(ptCenter.x, ptCenter.y + 0.002, ptCenter.z).addScaledVector(normal, -0.1);
+        const c1Next = new THREE.Vector3(ptCenterNext.x, ptCenterNext.y + 0.002, ptCenterNext.z).addScaledVector(normalNext, 0.1);
+        const c2Next = new THREE.Vector3(ptCenterNext.x, ptCenterNext.y + 0.002, ptCenterNext.z).addScaledVector(normalNext, -0.1);
 
         centerLinePos.push(c1.x, c1.y, c1.z);
         centerLinePos.push(c2.x, c2.y, c2.z);
@@ -540,20 +630,20 @@ export abstract class BaseMode implements GameMode {
 
         // Add Left side curbs
         const l_inner_bottom = leftPoints[i];
-        const l_inner_top = new THREE.Vector3(l_inner_bottom.x, 0.05 + curbHeight, l_inner_bottom.z);
+        const l_inner_top = new THREE.Vector3(l_inner_bottom.x, l_inner_bottom.y + curbHeight, l_inner_bottom.z);
         const l_outer_top = new THREE.Vector3().copy(l_inner_top).addScaledVector(normal, curbWidth * lScale);
 
         const l_inner_bottom_next = leftPoints[next_i];
-        const l_inner_top_next = new THREE.Vector3(l_inner_bottom_next.x, 0.05 + curbHeight, l_inner_bottom_next.z);
+        const l_inner_top_next = new THREE.Vector3(l_inner_bottom_next.x, l_inner_bottom_next.y + curbHeight, l_inner_bottom_next.z);
         const l_outer_top_next = new THREE.Vector3().copy(l_inner_top_next).addScaledVector(normalNext, curbWidth * lScaleNext);
 
         // Add Right side curbs
         const r_inner_bottom = rightPoints[i];
-        const r_inner_top = new THREE.Vector3(r_inner_bottom.x, 0.05 + curbHeight, r_inner_bottom.z);
+        const r_inner_top = new THREE.Vector3(r_inner_bottom.x, r_inner_bottom.y + curbHeight, r_inner_bottom.z);
         const r_outer_top = new THREE.Vector3().copy(r_inner_top).addScaledVector(normal, -curbWidth * rScale);
 
         const r_inner_bottom_next = rightPoints[next_i];
-        const r_inner_top_next = new THREE.Vector3(r_inner_bottom_next.x, 0.05 + curbHeight, r_inner_bottom_next.z);
+        const r_inner_top_next = new THREE.Vector3(r_inner_bottom_next.x, r_inner_bottom_next.y + curbHeight, r_inner_bottom_next.z);
         const r_outer_top_next = new THREE.Vector3().copy(r_inner_top_next).addScaledVector(normalNext, -curbWidth * rScaleNext);
 
         if (isRed) {
@@ -600,6 +690,37 @@ export abstract class BaseMode implements GameMode {
         metalness: 0.2,
         side: THREE.DoubleSide
       });
+
+      const curbUniforms = this.roadUniforms;
+      redCurbMat.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = curbUniforms.uTime;
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uTime;`
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+           float pulse = sin(uTime * 3.5) * 0.25 + 0.75;
+           gl_FragColor.rgb += vec3(0.5, 0.0, 0.0) * pulse;`
+        );
+      };
+
+      whiteCurbMat.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = curbUniforms.uTime;
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uTime;`
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+           float pulse = sin(uTime * 3.5 + 3.14159) * 0.15 + 0.35;
+           gl_FragColor.rgb += vec3(0.2, 0.2, 0.2) * pulse;`
+        );
+      };
 
       if (redCurbPos.length > 0) {
         redCurbGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(redCurbPos), 3));
@@ -649,22 +770,24 @@ export abstract class BaseMode implements GameMode {
         const r_outerOffset = r_innerOffset + this.grassWidth * rScale;
         const r_outerOffsetNext = r_innerOffsetNext + this.grassWidth * rScaleNext;
 
-        const innerHeight = 0.05 + (this.haveCurb ? this.curbHeight : 0);
-        const outerHeight = 0.02;
+        const l_in_y = pt.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
+        const l_out_y = pt.y + 0.02;
+        const l_in_y_next = ptNext.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
+        const l_out_y_next = ptNext.y + 0.02;
 
         // Left grass vertices (sloped from innerHeight down to outerHeight)
-        const l_in = new THREE.Vector3(pt.x, innerHeight, pt.z).addScaledVector(normal, l_innerOffset);
-        const l_out = new THREE.Vector3(pt.x, outerHeight, pt.z).addScaledVector(normal, l_outerOffset);
+        const l_in = new THREE.Vector3(pt.x, l_in_y, pt.z).addScaledVector(normal, l_innerOffset);
+        const l_out = new THREE.Vector3(pt.x, l_out_y, pt.z).addScaledVector(normal, l_outerOffset);
         
-        const l_in_next = new THREE.Vector3(ptNext.x, innerHeight, ptNext.z).addScaledVector(normalNext, l_innerOffsetNext);
-        const l_out_next = new THREE.Vector3(ptNext.x, outerHeight, ptNext.z).addScaledVector(normalNext, l_outerOffsetNext);
+        const l_in_next = new THREE.Vector3(ptNext.x, l_in_y_next, ptNext.z).addScaledVector(normalNext, l_innerOffsetNext);
+        const l_out_next = new THREE.Vector3(ptNext.x, l_out_y_next, ptNext.z).addScaledVector(normalNext, l_outerOffsetNext);
 
         // Right grass vertices
-        const r_in = new THREE.Vector3(pt.x, innerHeight, pt.z).addScaledVector(normal, -r_innerOffset);
-        const r_out = new THREE.Vector3(pt.x, outerHeight, pt.z).addScaledVector(normal, -r_outerOffset);
+        const r_in = new THREE.Vector3(pt.x, l_in_y, pt.z).addScaledVector(normal, -r_innerOffset);
+        const r_out = new THREE.Vector3(pt.x, l_out_y, pt.z).addScaledVector(normal, -r_outerOffset);
         
-        const r_in_next = new THREE.Vector3(ptNext.x, innerHeight, ptNext.z).addScaledVector(normalNext, -r_innerOffsetNext);
-        const r_out_next = new THREE.Vector3(ptNext.x, outerHeight, ptNext.z).addScaledVector(normalNext, -r_outerOffsetNext);
+        const r_in_next = new THREE.Vector3(ptNext.x, l_in_y_next, ptNext.z).addScaledVector(normalNext, -r_innerOffsetNext);
+        const r_out_next = new THREE.Vector3(ptNext.x, l_out_y_next, ptNext.z).addScaledVector(normalNext, -r_outerOffsetNext);
 
         // Left side grass ground
         grassPos.push(l_in.x, l_in.y, l_in.z);
@@ -739,19 +862,64 @@ export abstract class BaseMode implements GameMode {
       leavesMat.customProgramCacheKey = () => 'grass_leaves';
       leavesMat.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = uniforms.uTime;
-        shader.vertexShader = `
-          uniform float uTime;
-        ` + shader.vertexShader;
+        
+        // Pass height to fragment shader for tip bleaching and ambient occlusion
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uTime;
+           varying float vHeight;`
+        );
+        
         shader.vertexShader = shader.vertexShader.replace(
           '#include <begin_vertex>',
           `
           #include <begin_vertex>
-          // Wind waving effect: tip waves back and forth, base remains fixed
-          float wave = sin(position.x * 0.12 + position.z * 0.12 + uTime * 2.8) * 0.22;
-          float factor = position.y; // 0 at base, 0.55 at tip
-          transformed.x += wave * factor * 1.5;
-          transformed.z += wave * factor * 1.5;
+          vHeight = position.y; // 0.0 at base to 0.55 at tip
+
+          // Multi-octave wind + gust model
+          float instX = instanceMatrix[3].x;
+          float instZ = instanceMatrix[3].z;
+          float timeScale = uTime * 2.8;
+
+          // Low-frequency gusts
+          float gust = sin(instX * 0.08 + instZ * 0.05 + timeScale * 0.5) * 0.35;
+          // High-frequency turbulence
+          float turb = sin(instX * 0.4 + instZ * 0.3 + timeScale * 2.2) * 0.12;
+          float wind = gust + turb;
+
+          // Quadratic bending factor
+          float bend = position.y * position.y * 3.0;
+
+          // Apply displacement to vertices
+          transformed.x += wind * bend * 1.5;
+          transformed.z += wind * bend * 0.9;
           `
+        );
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <common>',
+          `#include <common>
+           varying float vHeight;`
+        );
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+           // 1. Tip bleaching (sun-bleached tips)
+           float hNormalized = clamp(vHeight / 0.55, 0.0, 1.0);
+           vec3 bleachedTip = vec3(0.75, 0.88, 0.32); // Lime gold
+           gl_FragColor.rgb = mix(gl_FragColor.rgb, bleachedTip, hNormalized * 0.32);
+
+           // 2. Ambient occlusion at the base (darkening at base)
+           float ao = mix(0.42, 1.0, hNormalized);
+           gl_FragColor.rgb *= ao;
+
+           // 3. Distance fade to sage green ground color (0x7bb369) to reduce aliasing shimmering
+           float distToCam = length(vViewPosition);
+           float fadeFactor = smoothstep(110.0, 240.0, distToCam);
+           vec3 groundColor = vec3(0.482, 0.702, 0.412); // sage green
+           gl_FragColor.rgb = mix(gl_FragColor.rgb, groundColor, fadeFactor * 0.85);`
         );
       };
 
@@ -783,8 +951,8 @@ export abstract class BaseMode implements GameMode {
           tangent.subVectors(samplePoints[1], samplePoints[0]).normalize();
         }
 
-        const innerHeight = 0.05 + (this.haveCurb ? this.curbHeight : 0);
-        const outerHeight = 0.02;
+        const innerHeight = pt.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
+        const outerHeight = pt.y + 0.02;
 
         for (let side = 0; side < 2; side++) {
           const sideSign = side === 0 ? 1 : -1;
@@ -849,9 +1017,9 @@ export abstract class BaseMode implements GameMode {
         const totalOffsetR = baseOffset * rScale;
 
         // Left boundary point
-        const leftBound = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, totalOffsetL);
+        const leftBound = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, totalOffsetL);
         // Right boundary point
-        const rightBound = new THREE.Vector3(pt.x, 0.05, pt.z).addScaledVector(normal, -totalOffsetR);
+        const rightBound = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, -totalOffsetR);
 
         leftBoundPoints.push(leftBound);
         rightBoundPoints.push(rightBound);
@@ -1267,9 +1435,10 @@ export abstract class BaseMode implements GameMode {
     rightScale?: number;
     sideSign?: number;
     trackBoundary?: number;
+    banking?: number;
   } {
     if (this.roadSamplePoints.length === 0) {
-      return { dist: 0, closestPt: new THREE.Vector3(x, 0, z), closestIdx: 0, width: this.roadWidth, leftScale: 1.0, rightScale: 1.0, sideSign: 1, trackBoundary: this.trackBoundary };
+      return { dist: 0, closestPt: new THREE.Vector3(x, 0, z), closestIdx: 0, width: this.roadWidth, leftScale: 1.0, rightScale: 1.0, sideSign: 1, trackBoundary: this.trackBoundary, banking: 0 };
     }
 
     let minDistSq = Infinity;
@@ -1329,6 +1498,8 @@ export abstract class BaseMode implements GameMode {
     const halfWidth = width / 2;
     const trackBoundary = (halfWidth + (this.haveCurb ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0)) * activeScale;
 
+    const banking = this.roadSampleBankings[closestIdx] ?? 0;
+
     return {
       dist: Math.sqrt(minDistSq),
       closestPt: closestPt.clone(),
@@ -1337,7 +1508,8 @@ export abstract class BaseMode implements GameMode {
       leftScale: lScale,
       rightScale: rScale,
       sideSign: sideSign,
-      trackBoundary: trackBoundary
+      trackBoundary: trackBoundary,
+      banking: banking
     };
   }
 
@@ -1346,57 +1518,304 @@ export abstract class BaseMode implements GameMode {
 
     // Define materials
     const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4d3319, roughness: 1.0 });
-    const treeLeavesMat = new THREE.MeshStandardMaterial({ color: 0x2e8b57, roughness: 0.9, flatShading: true });
+    const coniferLeavesMat = new THREE.MeshStandardMaterial({ color: 0x2e8b57, roughness: 0.9, flatShading: true }); // tree1
+    const oakLeavesMat = new THREE.MeshStandardMaterial({ color: 0x1f663b, roughness: 0.9, flatShading: true }); // tree2
+    const palmLeavesMat = new THREE.MeshStandardMaterial({ color: 0x32cd32, roughness: 0.8, flatShading: true }); // tree3
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x7a7a7a, roughness: 0.9, flatShading: true });
+    const mountainMat = new THREE.MeshStandardMaterial({ color: 0x5a5a5a, roughness: 0.9, flatShading: true });
+    const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true });
     const hillMat = new THREE.MeshStandardMaterial({ color: 0x3b7d3b, roughness: 0.9, flatShading: true });
+    
+    // Grandstand materials
+    const standConcreteMat = new THREE.MeshStandardMaterial({ color: 0x2e3033, roughness: 0.8 });
+    const standRoofMat = new THREE.MeshStandardMaterial({ color: 0xd946ef, metalness: 0.8, roughness: 0.2 });
+    const standSeatsMat = new THREE.MeshStandardMaterial({ color: 0x06b6d4, roughness: 0.5 });
+    const standPostMat = new THREE.MeshStandardMaterial({ color: 0x1e2022, metalness: 0.9, roughness: 0.1 });
 
     // Define geometries
-    const trunkGeom = new THREE.CylinderGeometry(0.5, 0.7, 3, 5);
-    const leavesGeom = new THREE.ConeGeometry(3, 7, 5);
-    leavesGeom.translate(0, 5, 0); // Move leaves up
+    const trunkGeom1 = new THREE.CylinderGeometry(0.5, 0.7, 3, 5);
+    const leavesGeom1 = new THREE.ConeGeometry(3, 7, 5);
+    leavesGeom1.translate(0, 5, 0); // Move conifer leaves up
+    
+    const trunkGeom2 = new THREE.CylinderGeometry(0.4, 0.6, 3, 6);
+    const leavesGeom2 = new THREE.SphereGeometry(3.5, 6, 6);
+    leavesGeom2.translate(0, 4.5, 0); // Move oak leaves up
+    
+    const trunkGeom3 = new THREE.CylinderGeometry(0.15, 0.3, 6, 6);
+    const palmLeafGeom = new THREE.BoxGeometry(0.5, 0.1, 3.5);
+    palmLeafGeom.translate(0, 0, 1.75); // Pivot at the base of the leaf
+    
+    const rockGeom = new THREE.DodecahedronGeometry(2);
+    
+    const mountainGeom = new THREE.ConeGeometry(12, 25, 5);
+    mountainGeom.translate(0, 12.5, 0); // Position base at 0
+    const snowGeom = new THREE.ConeGeometry(3.36, 7, 5);
+    snowGeom.translate(0, 21.5, 0); // Position cap at top
+    
     const hillGeom = new THREE.SphereGeometry(15, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    
+    // Grandstand geometries
+    const row1Geom = new THREE.BoxGeometry(8, 0.6, 1.2);
+    const row2Geom = new THREE.BoxGeometry(8, 1.2, 1.2);
+    const row3Geom = new THREE.BoxGeometry(8, 1.8, 1.2);
+    const sideWallGeom = new THREE.BoxGeometry(0.3, 2.8, 4.2);
+    const backWallGeom = new THREE.BoxGeometry(8.6, 2.8, 0.3);
+    const roofGeom = new THREE.BoxGeometry(8.8, 0.15, 4.4);
+    const postGeom = new THREE.CylinderGeometry(0.08, 0.08, 3.2);
+    const seatOverlay1Geom = new THREE.BoxGeometry(7.8, 0.1, 0.5);
 
-    for (const item of scenery) {
+    scenery.forEach((item, idx) => {
       const scale = item.scale || 1.0;
       
-      if (item.type === 'tree') {
+      if (item.type === 'tree' || item.type === 'tree1') {
         const treeGroup = new THREE.Group();
         
-        const trunk = new THREE.Mesh(trunkGeom, treeTrunkMat);
+        const trunk = new THREE.Mesh(trunkGeom1, treeTrunkMat);
         trunk.position.y = 1.5;
         trunk.castShadow = true;
         treeGroup.add(trunk);
         
-        const leaves = new THREE.Mesh(leavesGeom, treeLeavesMat);
+        const leaves = new THREE.Mesh(leavesGeom1, coniferLeavesMat);
         leaves.castShadow = true;
         treeGroup.add(leaves);
         
         treeGroup.position.copy(item.position);
         treeGroup.scale.set(scale, scale, scale);
+        if (item.rotation) {
+          treeGroup.rotation.y = item.rotation;
+        }
         
+        treeGroup.userData = { isScenery: true, sceneryIndex: idx };
         this.environmentGroup.add(treeGroup);
+      } else if (item.type === 'tree2') {
+        const treeGroup = new THREE.Group();
+        
+        const trunk = new THREE.Mesh(trunkGeom2, treeTrunkMat);
+        trunk.position.y = 1.5;
+        trunk.castShadow = true;
+        treeGroup.add(trunk);
+        
+        const leaves = new THREE.Mesh(leavesGeom2, oakLeavesMat);
+        leaves.castShadow = true;
+        treeGroup.add(leaves);
+        
+        treeGroup.position.copy(item.position);
+        treeGroup.scale.set(scale, scale, scale);
+        if (item.rotation) {
+          treeGroup.rotation.y = item.rotation;
+        }
+        
+        treeGroup.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(treeGroup);
+      } else if (item.type === 'tree3') {
+        const palmGroup = new THREE.Group();
+        
+        const trunk = new THREE.Mesh(trunkGeom3, treeTrunkMat);
+        trunk.position.y = 3;
+        trunk.castShadow = true;
+        palmGroup.add(trunk);
+        
+        // 6 palm leaves in a star pattern, slightly tilted
+        for (let i = 0; i < 6; i++) {
+          const leaf = new THREE.Mesh(palmLeafGeom, palmLeavesMat);
+          leaf.position.set(0, 6, 0);
+          leaf.rotation.y = (i * Math.PI * 2) / 6;
+          leaf.rotation.x = 0.25; // Tilt downward
+          leaf.castShadow = true;
+          palmGroup.add(leaf);
+        }
+        
+        palmGroup.position.copy(item.position);
+        palmGroup.scale.set(scale, scale, scale);
+        if (item.rotation) {
+          palmGroup.rotation.y = item.rotation;
+        }
+        
+        palmGroup.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(palmGroup);
+      } else if (item.type === 'rock') {
+        const rock = new THREE.Mesh(rockGeom, rockMat);
+        rock.position.copy(item.position);
+        // Slightly irregular scaling for organic feel
+        rock.scale.set(scale * 1.2, scale * 0.8, scale * 1.0);
+        // Deterministic rotation based on position
+        rock.rotation.y = (item.position.x * 0.05 + item.position.z * 0.03) % (Math.PI * 2);
+        rock.rotation.x = 0.1;
+        rock.castShadow = true;
+        rock.receiveShadow = true;
+        if (item.rotation) {
+          rock.rotation.y = item.rotation;
+        }
+        rock.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(rock);
+      } else if (item.type === 'mountain') {
+        const mountainGroup = new THREE.Group();
+        
+        const body = new THREE.Mesh(mountainGeom, mountainMat);
+        body.castShadow = true;
+        body.receiveShadow = true;
+        mountainGroup.add(body);
+        
+        const snow = new THREE.Mesh(snowGeom, snowMat);
+        snow.castShadow = true;
+        mountainGroup.add(snow);
+        
+        mountainGroup.position.copy(item.position);
+        const heightScale = item.heightScale ?? scale;
+        mountainGroup.scale.set(scale, heightScale, scale);
+        if (item.rotation) {
+          mountainGroup.rotation.y = item.rotation;
+        }
+        
+        mountainGroup.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(mountainGroup);
       } else if (item.type === 'hill') {
         const hill = new THREE.Mesh(hillGeom, hillMat);
         hill.position.copy(item.position);
         const heightScale = item.heightScale ?? (scale * 0.8);
         hill.scale.set(scale, heightScale, scale);
         hill.receiveShadow = true;
+        if (item.rotation) {
+          hill.rotation.y = item.rotation;
+        }
+        hill.userData = { isScenery: true, sceneryIndex: idx };
         this.environmentGroup.add(hill);
+      } else if (item.type === 'podium') {
+        const standGroup = new THREE.Group();
+        
+        // Seating steps
+        const row1 = new THREE.Mesh(row1Geom, standConcreteMat);
+        row1.position.set(0, 0.3, 0.9);
+        row1.castShadow = true;
+        row1.receiveShadow = true;
+        standGroup.add(row1);
+        
+        const row2 = new THREE.Mesh(row2Geom, standConcreteMat);
+        row2.position.set(0, 0.6, -0.3);
+        row2.castShadow = true;
+        row2.receiveShadow = true;
+        standGroup.add(row2);
+        
+        const row3 = new THREE.Mesh(row3Geom, standConcreteMat);
+        row3.position.set(0, 0.9, -1.5);
+        row3.castShadow = true;
+        row3.receiveShadow = true;
+        standGroup.add(row3);
+
+        // Side Walls
+        const leftWall = new THREE.Mesh(sideWallGeom, standConcreteMat);
+        leftWall.position.set(-4.15, 1.4, -0.3);
+        leftWall.castShadow = true;
+        leftWall.receiveShadow = true;
+        standGroup.add(leftWall);
+
+        const rightWall = new THREE.Mesh(sideWallGeom, standConcreteMat);
+        rightWall.position.set(4.15, 1.4, -0.3);
+        rightWall.castShadow = true;
+        rightWall.receiveShadow = true;
+        standGroup.add(rightWall);
+
+        // Back Wall
+        const backWall = new THREE.Mesh(backWallGeom, standConcreteMat);
+        backWall.position.set(0, 1.4, -2.25);
+        backWall.castShadow = true;
+        backWall.receiveShadow = true;
+        standGroup.add(backWall);
+
+        // Posts
+        const leftPost = new THREE.Mesh(postGeom, standPostMat);
+        leftPost.position.set(-3.9, 1.6, 1.3);
+        leftPost.castShadow = true;
+        standGroup.add(leftPost);
+
+        const rightPost = new THREE.Mesh(postGeom, standPostMat);
+        rightPost.position.set(3.9, 1.6, 1.3);
+        rightPost.castShadow = true;
+        standGroup.add(rightPost);
+
+        // Roof
+        const roof = new THREE.Mesh(roofGeom, standRoofMat);
+        roof.position.set(0, 3.2, -0.3);
+        roof.rotation.x = 0.08;
+        roof.castShadow = true;
+        standGroup.add(roof);
+
+        // Seating Row Visual Overlays (colored rows)
+        const seat1 = new THREE.Mesh(seatOverlay1Geom, standSeatsMat);
+        seat1.position.set(0, 0.65, 1.15);
+        seat1.castShadow = true;
+        standGroup.add(seat1);
+
+        const seat2 = new THREE.Mesh(seatOverlay1Geom, standSeatsMat);
+        seat2.position.set(0, 1.25, -0.05);
+        seat2.castShadow = true;
+        standGroup.add(seat2);
+
+        const seat3 = new THREE.Mesh(seatOverlay1Geom, standSeatsMat);
+        seat3.position.set(0, 1.85, -1.25);
+        seat3.castShadow = true;
+        standGroup.add(seat3);
+
+        standGroup.position.copy(item.position);
+        standGroup.scale.set(scale, scale, scale);
+        if (item.rotation !== undefined) {
+          standGroup.rotation.y = item.rotation;
+        }
+        
+        standGroup.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(standGroup);
       }
-    }
+    });
   }
 
   public getGroundHeight(x: number, z: number): number {
-    if (this.roadSamplePoints.length === 0) return 0;
+    if (this.roadSamplePoints.length === 0 || this.roadSampleLeftPoints.length === 0 || this.roadSampleRightPoints.length === 0) return 0;
 
     const info = this.getTrackInfo(x, z);
     const scale = info.sideSign === 1 ? (info.leftScale ?? 1.0) : (info.rightScale ?? 1.0);
     const halfWidth = (info.width / 2) * scale;
+    
+    // Find the left and right points for this segment
+    const idx = info.closestIdx;
+    const left = this.roadSampleLeftPoints[idx];
+    const right = this.roadSampleRightPoints[idx];
+    
+    if (!left || !right) return 0;
 
-    // If we are beyond the asphalt road but within the curb width, return curbHeight
-    if (info.dist >= halfWidth && info.dist <= halfWidth + this.curbWidth * scale) {
-      return this.curbHeight;
+    // We interpolate the height between left and right points based on the XZ projection
+    const segmentXZ = new THREE.Vector2(left.x - right.x, left.z - right.z);
+    const lenXZSq = segmentXZ.lengthSq();
+    let u = 0.5; // Default to center if length is tiny
+    if (lenXZSq > 0.0001) {
+      const toCarXZ = new THREE.Vector2(x - right.x, z - right.z);
+      u = Math.max(0, Math.min(1, toCarXZ.dot(segmentXZ) / lenXZSq));
+    }
+    
+    // Calculate the base road height at the car's current offset
+    const baseRoadHeight = THREE.MathUtils.lerp(right.y, left.y, u);
+
+    // 1. If on the asphalt road
+    if (info.dist < halfWidth) {
+      return baseRoadHeight - 0.05; // Subtract the visual raise offset to get actual road height
     }
 
-    return 0;
+    // 2. If on the curb
+    const curbStart = halfWidth;
+    const curbEnd = halfWidth + (this.haveCurb ? this.curbWidth : 0) * scale;
+    if (this.haveCurb && info.dist >= curbStart && info.dist <= curbEnd) {
+      return baseRoadHeight - 0.05 + this.curbHeight;
+    }
+
+    // 3. If on the grass
+    const grassStart = curbEnd;
+    const grassEnd = grassStart + (this.haveGrass ? this.grassWidth : 0) * scale;
+    if (this.haveGrass && info.dist >= grassStart && info.dist < grassEnd) {
+      const t = (info.dist - grassStart) / ((this.grassWidth * scale) || 1);
+      const innerHeight = baseRoadHeight + (this.haveCurb ? this.curbHeight : 0);
+      const outerHeight = baseRoadHeight - 0.03; // matches baseRoadHeight - 0.05 + 0.02
+      return THREE.MathUtils.lerp(innerHeight, outerHeight, t);
+    }
+
+    return 0; // Off-track ground level
   }
 }
