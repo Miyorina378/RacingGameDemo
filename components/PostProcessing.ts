@@ -108,6 +108,7 @@ export class PostProcessing {
       }
     }
 
+    this.applyQualitySettingsToRenderer();
     this.initComposer();
   }
 
@@ -168,12 +169,32 @@ export class PostProcessing {
     this.composer.addPass(this.outputPass);
   }
 
+  private applyQualitySettingsToRenderer() {
+    if (this.quality === 'low') {
+      this.renderer.shadowMap.enabled = false;
+      this.scene.traverse((child) => {
+        if (child instanceof THREE.DirectionalLight || child instanceof THREE.SpotLight) {
+          child.castShadow = false;
+        }
+      });
+    } else {
+      this.renderer.shadowMap.enabled = true;
+      this.scene.traverse((child) => {
+        if (child instanceof THREE.DirectionalLight || child instanceof THREE.SpotLight) {
+          child.castShadow = true;
+        }
+      });
+    }
+  }
+
   public setQuality(quality: 'low' | 'medium' | 'high') {
     if (this.quality === quality) return;
     this.quality = quality;
     if (typeof window !== 'undefined') {
       localStorage.setItem('cyberdrive_graphics_quality', quality);
     }
+
+    this.applyQualitySettingsToRenderer();
 
     // Reconstruct composer with the new quality settings
     this.disposeComposer();
@@ -217,8 +238,24 @@ export class PostProcessing {
     }
   }
 
-  public update(deltaTime: number, speed: number, isDrifting: boolean, driftPoints: number, isBoosting: boolean, checkpointFlash: number) {
-    if (this.quality === 'low' || !this.effectsPass) return;
+  public update(deltaTime: number, speed: number, isDrifting: boolean, driftPoints: number, isBoosting: boolean, checkpointFlash: number, timeOfDayVal: number = 1.0) {
+    if (this.quality === 'low') return;
+
+    // Dynamically adjust bloom parameters based on time of day (daylight vs night)
+    if (this.bloomPass) {
+      const isHigh = this.quality === 'high';
+      const baseThreshold = isHigh ? 0.18 : 0.25;
+      
+      // Interpolate threshold: higher in afternoon (0.85) to prevent sky/ground glow, lower at night (0.18/0.25)
+      this.bloomPass.threshold = THREE.MathUtils.lerp(0.85, baseThreshold, timeOfDayVal);
+      
+      // Interpolate strength: softer in afternoon (50% strength) to prevent blinding, full at night
+      const strengthFactor = THREE.MathUtils.lerp(0.5, 1.0, timeOfDayVal);
+      const baseStrength = isHigh ? this.bloomIntensity : this.bloomIntensity * 0.8;
+      this.bloomPass.strength = baseStrength * strengthFactor;
+    }
+
+    if (!this.effectsPass) return;
 
     const uniforms = this.effectsPass.uniforms;
     

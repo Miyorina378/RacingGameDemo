@@ -84,6 +84,11 @@ export class Vehicle {
   public throttleInput = 0;
   public brakeInput = 0;
 
+  // --- ADVANCED PHYSICS PROPERTIES ---
+  public wheelSpeed = 0;            // Rotation speed of driving wheels (m/s)
+  public dynamicFrontWeight = 0;    // Dynamic weight on front axle (N)
+  public dynamicRearWeight = 0;     // Dynamic weight on rear axle (N)
+
   // GT4-style per-car physics character (loaded from CarDatabase)
   public character = {
     weightDistribution: 0.52,       // 0.0–1.0, >0.5 = front-heavy (understeer)
@@ -164,74 +169,63 @@ export class Vehicle {
   // ดึงค่าแรงบิดตามกราฟรอบเครื่องยนต์ (Torque Curve)
   private getTorque(currentRpm: number): number {
     const config = CARS_DATABASE.find(c => c.id === this.carId) || CARS_DATABASE[0];
-    let baseTorque = 180;
-    if (config.tier === 'Sport Tier') baseTorque = 240;
-    else if (config.tier === 'Hyper Tier') baseTorque = 320;
-    else if (config.tier === 'Legendary Tier') baseTorque = 400;
+    let baseTorque = 150;
+    if (config.tier === 'Sport Tier') baseTorque = 200;
+    else if (config.tier === 'Hyper Tier') baseTorque = 380;
+    else if (config.tier === 'Legendary Tier') baseTorque = 500;
 
     // [UPGRADE IMPACT]: Engine tuning alters base rotational force
-    baseTorque += this.upgrades.mufflers * 12;
-    baseTorque += this.upgrades.engine.ecuLevel * 20;
-    baseTorque += this.upgrades.engine.portGrindingLevel * 25;
+    baseTorque += this.upgrades.mufflers * 10;
+    baseTorque += this.upgrades.engine.ecuLevel * 15;
+    baseTorque += this.upgrades.engine.portGrindingLevel * 20;
 
     let torque = baseTorque;
     if (currentRpm < 1000) {
-      torque = baseTorque * 0.9;
-    } else if (currentRpm >= 1000 && currentRpm < 4500) {
-      // RPM climbing stage
-      torque = baseTorque + (currentRpm - 1000) * 0.04;
-    } else if (currentRpm >= 4500 && currentRpm <= this.maxRpm) {
-      // Falling stage near redline (port grinding flattens this drop out)
-      const highRpmDrop = 0.06 - (this.upgrades.engine.portGrindingLevel * 0.01);
-      torque = (baseTorque + 140) - (currentRpm - 4500) * Math.max(0.02, highRpmDrop);
+      torque = baseTorque * 0.8;
+    } else if (currentRpm >= 1000 && currentRpm < 6000) {
+      // Gentle climb to peak torque
+      torque = baseTorque * (0.8 + 0.2 * (currentRpm - 1000) / 5000);
+    } else if (currentRpm >= 6000 && currentRpm <= 8000) {
+      // Peak torque plateau
+      torque = baseTorque;
+    } else if (currentRpm > 8000 && currentRpm <= this.maxRpm) {
+      // Gentle drop-off near redline
+      const highRpmDrop = 0.15 - (this.upgrades.engine.portGrindingLevel * 0.03);
+      const rpmRange = Math.max(200, this.maxRpm - 8000);
+      const dropFraction = (currentRpm - 8000) / rpmRange;
+      torque = baseTorque * (1.0 - Math.max(0.05, highRpmDrop) * Math.min(1.0, dropFraction));
     } else {
       torque = 10; // Rev limiter cut-off
     }
 
     // [UPGRADE IMPACT]: Turbo Aspiration with realistic spool-up lag
-    // Turbo boost is now gated by turboSpoolLevel (0.0–1.0) which ramps up over time
     if (this.upgrades.aspiration === 'turbo' && currentRpm > 3200 && currentRpm < 5800) {
-      const boostSwell = Math.sin((currentRpm - 3200) / 2600 * Math.PI) * 65;
+      const boostSwell = Math.sin((currentRpm - 3200) / 2600 * Math.PI) * 50;
       torque += boostSwell * this.turboSpoolLevel;
     }
 
     return Math.max(10, torque);
   }
 
-  // ระบบเปลี่ยนเกียร์อัตโนมัติอิงตามความเร็วรถ (Auto Gearbox Logic - Speed-based dynamically scaled to maxSpeed)
+  // ระบบเปลี่ยนเกียร์อัตโนมัติอิงตามรอบเครื่องยนต์ (Auto Gearbox Logic - RPM-based)
   private handleAutoTransmission(deltaTime: number) {
     if (this.speed < 0) {
       this.currentGear = 1;
       return;
     }
 
-    const absSpeed = Math.abs(this.speed);
-    const max = this.maxSpeed;
     let desiredGear = this.currentGear;
 
-    // Base shift thresholds
-    const t1 = max * 0.15;
-    const t2 = max * 0.28;
-    const t3 = max * 0.42;
-    const t4 = max * 0.56;
-    const t5 = max * 0.72;
-
-    // Hysteresis margin to prevent gear hunting (constantly shifting up and down)
-    const margin = max * 0.02;
-
-    // Upshifts
-    if (desiredGear === 1 && absSpeed > t1 + margin) desiredGear = 2;
-    else if (desiredGear === 2 && absSpeed > t2 + margin) desiredGear = 3;
-    else if (desiredGear === 3 && absSpeed > t3 + margin) desiredGear = 4;
-    else if (desiredGear === 4 && absSpeed > t4 + margin) desiredGear = 5;
-    else if (desiredGear === 5 && absSpeed > t5 + margin) desiredGear = 6;
-
-    // Downshifts
-    if (desiredGear === 6 && absSpeed < t5 - margin) desiredGear = 5;
-    else if (desiredGear === 5 && absSpeed < t4 - margin) desiredGear = 4;
-    else if (desiredGear === 4 && absSpeed < t3 - margin) desiredGear = 3;
-    else if (desiredGear === 3 && absSpeed < t2 - margin) desiredGear = 2;
-    else if (desiredGear === 2 && absSpeed < t1 - margin) desiredGear = 1;
+    if (!this.isShifting) {
+      // Upshift when RPM >= maxRpm - 400 (94% of redline)
+      if (this.rpm >= this.maxRpm - 400 && desiredGear < 6) {
+        desiredGear = this.currentGear + 1;
+      }
+      // Downshift when RPM <= 1800 (with hysteresis prevention)
+      else if (this.rpm <= 1800 && desiredGear > 1) {
+        desiredGear = this.currentGear - 1;
+      }
+    }
 
     // Start a shift if desiredGear is different from currentGear and we aren't already shifting
     if (desiredGear !== this.currentGear && !this.isShifting) {
@@ -255,34 +249,52 @@ export class Vehicle {
     }
   }
 
-  public rebuild(carId: string, color: string) {
+  public rebuild(carId: string, color: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
+    this.updateStats();
+
+    // Instant color update if it is the same car and meshes are already loaded
+    if (this.carId === carId && this.paintMaterials.length > 0 && this.mesh.children.length > 0) {
+      this.color = color;
+      const paintColor = new THREE.Color(color);
+      this.paintMaterials.forEach((mat) => {
+        mat.color.copy(paintColor);
+      });
+      if (onLoadComplete) onLoadComplete();
+      return;
+    }
+
+    // Otherwise, we are switching cars or loading for the first time
     this.carId = carId;
     this.color = color;
 
-    // Reset material tracking
     this.paintMaterials = [];
     this.windshieldMaterials = [];
     this.rimMaterials = [];
     this.underglowMaterial = undefined;
     this.taillightMaterials = [];
 
-    // Clear old children
-    while (this.mesh.children.length > 0) {
-      this.mesh.remove(this.mesh.children[0]);
+    // Note: Do NOT clear old children immediately for GLTF models to avoid showing skeleton.
+    // Procedural cars build instantly, so we can clear them now.
+    if (carId !== 'honda_s2000') {
+      while (this.mesh.children.length > 0) {
+        this.mesh.remove(this.mesh.children[0]);
+      }
+      this.wheels = [];
+      this.leftFrontWheel = undefined;
+      this.rightFrontWheel = undefined;
+      this.buildProceduralMesh();
+      if (onLoadComplete) onLoadComplete();
+    } else {
+      this.buildMesh(onLoadProgress, onLoadComplete);
     }
-    this.wheels = [];
-    this.leftFrontWheel = undefined;
-    this.rightFrontWheel = undefined;
-
-    this.updateStats();
-    this.buildMesh();
   }
 
-  private buildMesh() {
+  private buildMesh(onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
     if (this.carId === 'honda_s2000') {
-      this.buildGltfMesh('/models/honda_s2000.glb');
+      this.buildGltfMesh('/models/honda_s2000.glb', onLoadProgress, onLoadComplete);
     } else {
       this.buildProceduralMesh();
+      if (onLoadComplete) onLoadComplete();
     }
   }
 
@@ -477,29 +489,33 @@ export class Vehicle {
     });
   }
 
-  private buildGltfMesh(modelPath: string) {
-    // 1. Build a basic procedural box placeholder and fallback wheels synchronously
+  private buildGltfMesh(modelPath: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
+    // 1. If there is no previous car visible, build a basic procedural box placeholder and fallback wheels synchronously
     // so visual bounds are present and physics loop doesn't crash during network load.
-    const placeholderGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
-    const placeholderMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(this.color),
-      roughness: 0.5,
-      metalness: 0.5,
-      transparent: true,
-      opacity: 0.6
-    });
-    const placeholder = new THREE.Mesh(placeholderGeom, placeholderMat);
-    placeholder.position.y = 0.45;
-    this.mesh.add(placeholder);
+    if (this.mesh.children.length === 0) {
+      const placeholderGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
+      const placeholderMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(this.color),
+        roughness: 0.5,
+        metalness: 0.5,
+        transparent: true,
+        opacity: 0.6
+      });
+      const placeholder = new THREE.Mesh(placeholderGeom, placeholderMat);
+      placeholder.position.y = 0.45;
+      this.mesh.add(placeholder);
 
-    this.buildFallbackWheels();
+      this.buildFallbackWheels();
+    }
+
+    onLoadProgress?.(0);
 
     // 2. Load the actual model asynchronously
     const loader = new GLTFLoader();
     loader.load(
       modelPath,
       (gltf: GLTF) => {
-        // Clear all temporary placeholder meshes from this.mesh
+        // Clear all old model/placeholder meshes from this.mesh only when loaded
         while (this.mesh.children.length > 0) {
           this.mesh.remove(this.mesh.children[0]);
         }
@@ -796,10 +812,19 @@ export class Vehicle {
 
         // Add underglow, lights, and exhaust particle systems (only light sources/particles, no duplicate box meshes)
         this.addGltfVisualHelpers();
+
+        onLoadProgress?.(100);
+        onLoadComplete?.();
       },
-      undefined,
+      (xhr: ProgressEvent) => {
+        if (xhr.lengthComputable) {
+          const pct = Math.round((xhr.loaded / xhr.total) * 100);
+          onLoadProgress?.(pct);
+        }
+      },
       (err: any) => {
         console.error('Failed to load Honda S2000 model:', err);
+        onLoadComplete?.();
       }
     );
   }
@@ -866,9 +891,6 @@ export class Vehicle {
     if (config.gearRatios) {
       this.gearRatios = config.gearRatios;
     }
-    if (config.finalDrive !== undefined) {
-      this.finalDrive = config.finalDrive;
-    }
     if (config.wheelRadius !== undefined) {
       this.wheelRadius = config.wheelRadius;
     }
@@ -913,6 +935,16 @@ export class Vehicle {
 
     // Sync tire compound from upgrades (fallback to economy if undefined)
     this.tireState.compound = this.upgrades.tireCompound || 'economy';
+
+    // Tune the final drive dynamically so that top gear (Gear 6) reaches maxSpeed at (maxRpm - 500)
+    if (config.finalDrive !== undefined) {
+      this.finalDrive = config.finalDrive;
+    } else {
+      const topGearRatio = this.gearRatios[6] || 0.80;
+      const targetRpm = this.maxRpm - 500;
+      const radPerSecToRpm = 60 / (2 * Math.PI);
+      this.finalDrive = (targetRpm * this.wheelRadius) / (this.maxSpeed * topGearRatio * radPerSecToRpm);
+    }
   }
 
   private handleCountdown(isCountdown: boolean): boolean {
@@ -941,56 +973,49 @@ export class Vehicle {
   private processEngineRpm(deltaTime: number, throttleValue: number): void {
     this.handleAutoTransmission(deltaTime);
 
-    const absSpeed = Math.abs(this.speed);
-    if (this.speed >= 0) {
-      const max = this.maxSpeed;
+    const gearRatio = this.gearRatios[this.currentGear];
+    const wheelRpm = (this.wheelSpeed / this.wheelRadius) * gearRatio * this.finalDrive * (60 / (2 * Math.PI));
 
-      const getGearRpm = (gearNum: number, speedVal: number) => {
-        let lower = 0;
-        let upper = max * 0.15;
-        let entry = 1000;
+    const engineInertia = 0.05 + (0.15 - this.upgrades.driveTrain.flywheelLevel * 0.04) + 0.03;
+    const baseTorque = this.getTorque(this.rpm);
+    const combustionTorque = baseTorque * throttleValue;
+    const frictionTorque = 15 + 0.012 * this.rpm;
 
-        if (gearNum === 1) {
-          lower = 0; upper = max * 0.15; entry = 1000;
-        } else if (gearNum === 2) {
-          lower = max * 0.15; upper = max * 0.28; entry = 3200;
-        } else if (gearNum === 3) {
-          lower = max * 0.28; upper = max * 0.42; entry = 3500;
-        } else if (gearNum === 4) {
-          lower = max * 0.42; upper = max * 0.56; entry = 3800;
-        } else if (gearNum === 5) {
-          lower = max * 0.56; upper = max * 0.72; entry = 4000;
-        } else if (gearNum === 6) {
-          lower = max * 0.72; upper = max * 1.0; entry = 4200;
-        }
-
-        let frac = 0;
-        if (upper > lower) {
-          frac = (speedVal - lower) / (upper - lower);
-        }
-        return entry + Math.max(0, frac) * (this.maxRpm - 500 - entry);
-      };
-
-      if (this.isRevLimiterCut) {
-        this.rpm = (this.maxRpm - 150) + Math.sin(performance.now() * 0.05) * 100;
-      } else if (this.isShifting) {
-        const rpmPrev = getGearRpm(this.previousGear, absSpeed);
-        const rpmTarget = getGearRpm(this.targetGear, absSpeed);
-        const duration = (this.targetGear > this.previousGear) ? 0.35 : 0.20;
-        const shiftTimeModifier = 1.0 - (this.upgrades.driveTrain.gearboxLevel * 0.12) - (this.upgrades.driveTrain.flywheelLevel * 0.05);
-        const actualDuration = Math.max(0.08, duration * shiftTimeModifier);
-        const progress = 1 - (this.shiftTimer / actualDuration);
-        this.rpm = THREE.MathUtils.lerp(rpmPrev, rpmTarget, progress);
-      } else {
-        this.rpm = getGearRpm(this.currentGear, absSpeed);
-      }
-
-      this.rpm = Math.max(1000, Math.min(this.rpm, this.maxRpm));
-    } else {
-      // absSpeed is in m/s; multiply by 3.6 to restore km/h-scale RPM relationship
-      this.rpm = 1000 + (absSpeed * 3.6) * 100;
-      this.currentGear = 1;
+    // Rev limiter cut logic
+    if (this.rpm >= this.maxRpm - 20) {
+      this.isRevLimiterCut = true;
     }
+    if (this.isRevLimiterCut && this.rpm < this.maxRpm - 300) {
+      this.isRevLimiterCut = false;
+    }
+
+    if (this.isRevLimiterCut) {
+      this.rpm = (this.maxRpm - 150) + Math.sin(performance.now() * 0.05) * 100;
+    } else if (this.isShifting) {
+      // Clutch disengaged: engine revs freely
+      const netTorque = combustionTorque - frictionTorque;
+      const rpmChange = (netTorque / engineInertia) * (60 / (2 * Math.PI)) * deltaTime;
+      this.rpm = Math.max(1000, Math.min(this.maxRpm, this.rpm + rpmChange));
+    } else {
+      // Clutch engaged
+      if (this.speed < 0) {
+        this.rpm = 1000 + Math.abs(this.speed) * 3.6 * 100;
+      } else if (wheelRpm < 1000) {
+        // Clutch slips at launch (drivetrain speed below idle)
+        const slipFactor = Math.max(0, (this.rpm - 1000) / 1000);
+        const clutchCapacity = 300 * (1.0 + this.upgrades.driveTrain.clutchLevel * 0.2);
+        const clutchLoad = clutchCapacity * slipFactor * Math.max(0.1, throttleValue);
+
+        const netTorque = combustionTorque - frictionTorque - clutchLoad;
+        const rpmChange = (netTorque / engineInertia) * (60 / (2 * Math.PI)) * deltaTime;
+        this.rpm = Math.max(1000, Math.min(this.maxRpm, this.rpm + rpmChange));
+      } else {
+        // Clutch locked to wheels
+        this.rpm = wheelRpm;
+      }
+    }
+
+    this.rpm = Math.max(1000, Math.min(this.rpm, this.maxRpm));
 
     if (this.upgrades.aspiration === 'turbo') {
       const inBoostRange = this.rpm > 3200 && this.rpm < 5800 && throttleValue > 0.1;
@@ -1072,7 +1097,7 @@ export class Vehicle {
     // We scale down the max steering angle based on speed to keep tires near peak grip.
     // However, if the player is drifting or handbraking, we allow a wider steering angle to control the slide or spin.
     const isDriftingOrHandbraking = this.isDrifting || handbrake;
-    const maxSteerLimit = isDriftingOrHandbraking ? 0.35 : 0.16;
+    const maxSteerLimit = isDriftingOrHandbraking ? 0.35 : 0.22;
     const speedRatio = Math.min(1.0, absForward / Math.max(1, this.maxSpeed));
     const maxSteer = THREE.MathUtils.lerp(0.45, maxSteerLimit, speedRatio);
 
@@ -1122,7 +1147,9 @@ export class Vehicle {
 
     // Visual wheel spin: applied to the spinNode child (X rotation only)
     // Using a shared angle prevents per-wheel floating-point drift.
-    const wheelRotSpeed = (local.forward / this.wheelRadius) * deltaTime;
+    // Rotate wheels visually using this.wheelSpeed instead of local.forward.
+    const directionSign = local.forward >= 0 ? 1 : -1;
+    const wheelRotSpeed = (this.wheelSpeed * directionSign / this.wheelRadius) * deltaTime;
     this.wheelSpinAngle += wheelRotSpeed;
     // Normalize to prevent precision loss from unbounded accumulation
     if (this.wheelSpinAngle > Math.PI * 2) this.wheelSpinAngle -= Math.PI * 2;
@@ -1171,8 +1198,23 @@ export class Vehicle {
     const effectiveGravity = Math.max(1.0, gravity * Math.cos(bankAngleRad) + centAccelNormal);
 
     const totalWeight = this.mass * effectiveGravity;
-    const frontWeight = totalWeight * this.character.weightDistribution;
-    const rearWeight = totalWeight * (1.0 - this.character.weightDistribution);
+
+    // Dynamic longitudinal weight transfer based on acceleration
+    // h = 0.6m (center of gravity height), L = 3.2m (wheelBase)
+    const weightTransfer = (this.longitudinalAccel * 0.6 / this.wheelBase) * this.mass;
+
+    const staticFrontWeight = totalWeight * this.character.weightDistribution;
+    const staticRearWeight = totalWeight * (1.0 - this.character.weightDistribution);
+
+    // Clamp transfer to prevent negative weight (maximum 80% transfer of static load)
+    const maxTransfer = Math.min(staticFrontWeight * 0.8, staticRearWeight * 0.8);
+    const clampedTransfer = THREE.MathUtils.clamp(weightTransfer, -maxTransfer, maxTransfer);
+
+    this.dynamicFrontWeight = staticFrontWeight - clampedTransfer;
+    this.dynamicRearWeight = staticRearWeight + clampedTransfer;
+
+    const frontWeight = this.dynamicFrontWeight;
+    const rearWeight = this.dynamicRearWeight;
 
     // --- FRONT AXLE: slip angle ---
     // Front tire velocity in local frame includes yaw rate contribution
@@ -1234,21 +1276,7 @@ export class Vehicle {
       }
     }
 
-    // --- LATERAL FORCES (Pacejka-lite) ---
-    // Cornering stiffness: lower = more progressive grip, less snap-oversteer
-    const corneringStiffness = 5.5;
-    // The force applied BY the tire ON the car opposes the slip angle, so we negate the result
-    let frontLatForce = -computeLateralForce(frontSlipAngle, frontGrip, frontWeight, corneringStiffness);
-    let rearLatForce = -computeLateralForce(rearSlipAngle, rearGrip, rearWeight, corneringStiffness);
-
-    // Dampen lateral forces at very low speeds to prevent Pacejka jitter and instant snap oversteer at launch
-    const lowSpeedDampener = Math.min(1.0, absForward / 4.0);
-    frontLatForce *= lowSpeedDampener;
-    rearLatForce *= lowSpeedDampener;
-
-    // Apply braking steer reduction to front lateral force
-    frontLatForce *= brakingSteerReduction;
-
+    // --- DRIVE & BRAKE FORCES (Torque-based, no arcade multiplier) ---
     let driveForce = 0;
     if (throttleValue > 0.01) {
       const currentTorque = this.getTorque(this.rpm);
@@ -1260,14 +1288,6 @@ export class Vehicle {
       }
 
       driveForce = (currentTorque * this.gearRatios[this.currentGear] * this.finalDrive * gearEfficiency) / this.wheelRadius;
-      
-      // Apply simcade acceleration boost based on the car's built-in accelerationRate.
-      // This bridges the gap between realistic torque and the fast arcade feel of the old physics.
-      // We scale this multiplier using a balanced formula (accelerationRate + 1.33) to keep
-      // starter cars snappy and hypercars fast, but prevents uncontrollable 14g rocket acceleration.
-      const arcadeMultiplier = this.accelerationRate + 1.33;
-      driveForce *= arcadeMultiplier;
-
       driveForce *= throttleValue;
 
       // TCS: reduce drive force at low speed to prevent wheelspin
@@ -1283,9 +1303,16 @@ export class Vehicle {
       // Forward braking (scaled to match realistic ~16m/s^2 deceleration)
       brakeForce = -this.brakingRate * 20.0 * this.mass * reverseValue;
     } else if (reverseValue > 0.01 && local.forward <= 0.5) {
-      // Reversing (toned down to 15.0 instead of 60.0 for realistic reverse speeds)
+      // Reversing (uses engine torque in 1st/reverse gear instead of accelerationRate)
       if (local.forward > -12.0) { // Limit reverse speed to ~43 km/h
-        driveForce = -this.accelerationRate * 15.0 * this.mass * reverseValue;
+        const currentTorque = this.getTorque(this.rpm);
+        let gearEfficiency = (this.isShifting || this.isRevLimiterCut) ? 0.0 : 0.85;
+        if (!this.isShifting && !this.isRevLimiterCut) {
+          gearEfficiency = 0.83 + (this.upgrades.driveTrain.clutchLevel * 0.04) + (this.upgrades.driveTrain.propellerShaftLevel * 0.02);
+          if (gearEfficiency > 0.98) gearEfficiency = 0.98;
+        }
+        const reverseGearRatio = this.gearRatios[1];
+        driveForce = -(currentTorque * reverseGearRatio * this.finalDrive * gearEfficiency * reverseValue) / this.wheelRadius;
       }
     }
     if (throttleValue > 0.01 && local.forward < -0.5) {
@@ -1302,20 +1329,15 @@ export class Vehicle {
     }
 
     // Drag + rolling resistance
-    // In old physics, dragCoeff was tuned to balance speed limits in arbitrary units (e.g., 0.000012)
-    // We scale it up significantly to act as physical drag in Newtons.
     const dragForce = -this.dragCoeff * 50000 * local.forward * Math.abs(local.forward);
     let rollingResistance = -0.08 * Math.sign(local.forward) * this.mass;
     if (this.grassInstability > 0) {
       rollingResistance -= 0.06 * this.grassInstability * Math.sign(local.forward) * this.mass;
     }
 
-    // Engine braking when coasting (Arcade style)
-    // When the player lets off the gas, we want the car to aggressively slow down.
+    // Engine braking when coasting
     let engineBraking = 0;
     if (throttleValue <= 0.01 && reverseValue <= 0.01 && absForward > 0.5) {
-      // 2.5 m/s² of coasting deceleration — realistic engine braking that doesn't
-      // overwhelm rear tire grip and cause unwanted oversteer during throttle lift-off.
       engineBraking = -2.5 * this.mass * Math.sign(local.forward);
     }
 
@@ -1338,10 +1360,95 @@ export class Vehicle {
       rearEngineBrake = engineBraking * 0.6;
     }
 
-    // Handbrake disables rear drive force (spinning in place or locked)
+    // Handbrake disables rear drive force
     if (handbrake) {
       rearDrive *= 0.05;
     }
+
+    const frontMaxGrip = frontGrip * frontWeight;
+    const rearMaxGrip = rearGrip * rearWeight;
+
+    // --- TORQUE-INDUCED TRACTION LOSS (WHEELSPIN) ---
+    let isWheelspinning = false;
+    let excessForce = 0;
+
+    if (this.driveType === 'FWD') {
+      const absFrontDrive = Math.abs(frontDrive);
+      if (absFrontDrive > frontMaxGrip) {
+        isWheelspinning = true;
+        excessForce = absFrontDrive - frontMaxGrip;
+      }
+    } else if (this.driveType === 'RWD') {
+      const absRearDrive = Math.abs(rearDrive);
+      if (absRearDrive > rearMaxGrip) {
+        isWheelspinning = true;
+        excessForce = absRearDrive - rearMaxGrip;
+      }
+    } else { // AWD
+      const absTotalDrive = Math.abs(frontDrive + rearDrive);
+      const totalGrip = frontMaxGrip + rearMaxGrip;
+      if (absTotalDrive > totalGrip) {
+        isWheelspinning = true;
+        excessForce = absTotalDrive - totalGrip;
+      }
+    }
+
+    if (isWheelspinning) {
+      // Accelerate wheelSpeed using excess force over effective wheel mass (100 kg)
+      const wheelAccel = excessForce / 100;
+      this.wheelSpeed += wheelAccel * deltaTime;
+      
+      // Clamp wheelSpeed based on maxRpm in current gear
+      const gearRatio = this.gearRatios[this.currentGear] || 1.0;
+      const maxWheelSpeedForRpm = (this.maxRpm * 2 * Math.PI / 60) * this.wheelRadius / (gearRatio * this.finalDrive);
+      this.wheelSpeed = Math.min(this.wheelSpeed, maxWheelSpeedForRpm);
+
+      // Clamp actual propulsive force to sliding grip (0.85 * grip limit)
+      const forceSign = Math.sign(driveForce) || 1;
+      if (this.driveType === 'FWD') {
+        frontDrive = forceSign * frontMaxGrip * 0.85;
+      } else if (this.driveType === 'RWD') {
+        rearDrive = forceSign * rearMaxGrip * 0.85;
+      } else { // AWD
+        frontDrive = forceSign * frontMaxGrip * 0.85 * 0.4;
+        rearDrive = forceSign * rearMaxGrip * 0.85 * 0.6;
+      }
+
+      // Decrease lateral grip coefficient (0.25 for 2WD, 0.45 for AWD)
+      if (this.driveType === 'AWD') {
+        frontGrip *= 0.45;
+        rearGrip *= 0.45;
+      } else if (this.driveType === 'FWD') {
+        frontGrip *= 0.25;
+      } else if (this.driveType === 'RWD') {
+        rearGrip *= 0.25;
+      }
+    } else {
+      // If handbrake is pulled and we are RWD, wheels lock up completely
+      if (handbrake && this.driveType === 'RWD') {
+        this.wheelSpeed = 0;
+      } else {
+        // Lock wheelSpeed to absForward, with gradual spin-down decay if it was spinning
+        if (this.wheelSpeed > absForward + 0.1) {
+          this.wheelSpeed = THREE.MathUtils.lerp(this.wheelSpeed, absForward, 10.0 * deltaTime);
+        } else {
+          this.wheelSpeed = absForward;
+        }
+      }
+    }
+
+    // --- LATERAL FORCES (Pacejka-lite) ---
+    const corneringStiffness = 5.5;
+    let frontLatForce = -computeLateralForce(frontSlipAngle, frontGrip, frontWeight, corneringStiffness);
+    let rearLatForce = -computeLateralForce(rearSlipAngle, rearGrip, rearWeight, corneringStiffness);
+
+    // Dampen lateral forces at very low speeds
+    const lowSpeedDampener = Math.min(1.0, absForward / 4.0);
+    frontLatForce *= lowSpeedDampener;
+    rearLatForce *= lowSpeedDampener;
+
+    // Apply braking steer reduction to front lateral force
+    frontLatForce *= brakingSteerReduction;
 
     // Split brakeForce using a 60/40 front/rear bias
     const frontBrake = brakeForce * 0.6;
@@ -1351,31 +1458,28 @@ export class Vehicle {
     let frontLongForce = frontDrive + frontBrake + frontEngineBrake;
     let rearLongForce = rearDrive + rearBrake + rearEngineBrake;
 
-    const frontMaxGrip = frontGrip * frontWeight;
-    const rearMaxGrip = rearGrip * rearWeight;
-
     // ABS and non-ABS lock-up emulation to allow steering while braking
     if (reverseValue > 0.01 && local.forward > 0.5) {
       if (this.upgrades.brake.hasABS) {
-        // ABS keeps the longitudinal force modulated, leaving plenty of room for steering
-        frontLongForce = Math.sign(frontLongForce) * Math.min(Math.abs(frontLongForce), frontMaxGrip * 0.65);
-        rearLongForce = Math.sign(rearLongForce) * Math.min(Math.abs(rearLongForce), rearMaxGrip * 0.65);
+        frontLongForce = Math.sign(frontLongForce) * Math.min(Math.abs(frontLongForce), frontMaxGrip * 0.90);
+        rearLongForce = Math.sign(rearLongForce) * Math.min(Math.abs(rearLongForce), rearMaxGrip * 0.90);
       } else {
-        // Without ABS, the wheels lock up, consuming most of the grip circle, but leaving some steering
-        frontLongForce = Math.sign(frontLongForce) * Math.min(Math.abs(frontLongForce), frontMaxGrip * 0.88);
-        rearLongForce = Math.sign(rearLongForce) * Math.min(Math.abs(rearLongForce), rearMaxGrip * 0.88);
+        frontLongForce = Math.sign(frontLongForce) * Math.min(Math.abs(frontLongForce), frontMaxGrip * 0.95);
+        rearLongForce = Math.sign(rearLongForce) * Math.min(Math.abs(rearLongForce), rearMaxGrip * 0.95);
       }
     }
 
     // Total forward force acting on the vehicle chassis
-    const totalForwardForce = driveForce + brakeForce + dragForce + rollingResistance + engineBraking + handbrakeBrakeForce;
+    const totalForwardForce = frontLongForce + rearLongForce + dragForce + rollingResistance;
 
-    // --- COMBINED GRIP CIRCLE for front and rear axles ---
-    // Ensure drive/braking force + lateral force don't exceed tire friction circle
-    const frontCombined = combinedGripCircle(frontLatForce, frontLongForce, frontMaxGrip);
+    // --- COMBINED GRIP CIRCLE using updated grip values ---
+    const updatedFrontMaxGrip = frontGrip * frontWeight;
+    const updatedRearMaxGrip = rearGrip * rearWeight;
+
+    const frontCombined = combinedGripCircle(frontLatForce, frontLongForce, updatedFrontMaxGrip);
     frontLatForce = frontCombined.lateral;
 
-    const rearCombined = combinedGripCircle(rearLatForce, rearLongForce, rearMaxGrip);
+    const rearCombined = combinedGripCircle(rearLatForce, rearLongForce, updatedRearMaxGrip);
     rearLatForce = rearCombined.lateral;
 
     // --- YAW RATE: bicycle model ---

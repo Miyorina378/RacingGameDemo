@@ -923,80 +923,89 @@ export abstract class BaseMode implements GameMode {
         );
       };
 
-      const bladesPerSegment = 150;
-      const totalInstances = samplePoints.length * bladesPerSegment * 2;
-      const grassBladesMesh = new THREE.InstancedMesh(bladeGeom, leavesMat, totalInstances);
-      grassBladesMesh.receiveShadow = true;
+      let bladesPerSegment = 150;
+      const quality = this.engine.postProcessing ? this.engine.postProcessing.getQuality() : 'high';
+      if (quality === 'medium') {
+        bladesPerSegment = 50;
+      } else if (quality === 'low') {
+        bladesPerSegment = 0;
+      }
 
-      const leafColors = [
-        new THREE.Color(0x2ecc71), // fresh spring green
-        new THREE.Color(0x27ae60), // rich green
-        new THREE.Color(0xa3e635), // fresh lime green
-        new THREE.Color(0x4ade80), // bright neon light green
-        new THREE.Color(0x10b981), // vibrant emerald
-        new THREE.Color(0x7bb369)  // user-requested fresh green
-      ];
+      if (bladesPerSegment > 0) {
+        const totalInstances = samplePoints.length * bladesPerSegment * 2;
+        const grassBladesMesh = new THREE.InstancedMesh(bladeGeom, leavesMat, totalInstances);
+        grassBladesMesh.receiveShadow = true;
 
-      let bladeIndex = 0;
-      const dummy = new THREE.Object3D();
+        const leafColors = [
+          new THREE.Color(0x2ecc71), // fresh spring green
+          new THREE.Color(0x27ae60), // rich green
+          new THREE.Color(0xa3e635), // fresh lime green
+          new THREE.Color(0x4ade80), // bright neon light green
+          new THREE.Color(0x10b981), // vibrant emerald
+          new THREE.Color(0x7bb369)  // user-requested fresh green
+        ];
 
-      for (let i = 0; i < samplePoints.length; i++) {
-        const pt = samplePoints[i];
-        const normal = normals[i];
+        let bladeIndex = 0;
+        const dummy = new THREE.Object3D();
 
-        const tangent = new THREE.Vector3();
-        if (i < samplePoints.length - 1) {
-          tangent.subVectors(samplePoints[i + 1], pt).normalize();
-        } else {
-          tangent.subVectors(samplePoints[1], samplePoints[0]).normalize();
-        }
+        for (let i = 0; i < samplePoints.length; i++) {
+          const pt = samplePoints[i];
+          const normal = normals[i];
 
-        const innerHeight = pt.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
-        const outerHeight = pt.y + 0.02;
+          const tangent = new THREE.Vector3();
+          if (i < samplePoints.length - 1) {
+            tangent.subVectors(samplePoints[i + 1], pt).normalize();
+          } else {
+            tangent.subVectors(samplePoints[1], samplePoints[0]).normalize();
+          }
 
-        for (let side = 0; side < 2; side++) {
-          const sideSign = side === 0 ? 1 : -1;
-          const scale = side === 0 ? this.roadSampleLeftScale[i] : this.roadSampleRightScale[i];
+          const innerHeight = pt.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
+          const outerHeight = pt.y + 0.02;
 
-          const innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * scale;
+          for (let side = 0; side < 2; side++) {
+            const sideSign = side === 0 ? 1 : -1;
+            const scale = side === 0 ? this.roadSampleLeftScale[i] : this.roadSampleRightScale[i];
 
-          for (let b = 0; b < bladesPerSegment; b++) {
-            // Scatter randomly within the grass strip
-            const randomNormOffset = innerOffset + Math.random() * this.grassWidth * scale;
-            const randomTangOffset = (Math.random() - 0.5) * 4.0;
+            const innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * scale;
 
-            const bladePos = new THREE.Vector3()
-              .copy(pt)
-              .addScaledVector(normal, sideSign * randomNormOffset)
-              .addScaledVector(tangent, randomTangOffset);
+            for (let b = 0; b < bladesPerSegment; b++) {
+              // Scatter randomly within the grass strip
+              const randomNormOffset = innerOffset + Math.random() * this.grassWidth * scale;
+              const randomTangOffset = (Math.random() - 0.5) * 4.0;
 
-            // Interpolate height on the slope
-            const t = (randomNormOffset - innerOffset) / (this.grassWidth * (scale > 0.0001 ? scale : 1));
-            bladePos.y = THREE.MathUtils.lerp(innerHeight, outerHeight, t);
+              const bladePos = new THREE.Vector3()
+                .copy(pt)
+                .addScaledVector(normal, sideSign * randomNormOffset)
+                .addScaledVector(tangent, randomTangOffset);
 
-            dummy.position.copy(bladePos);
-            dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+              // Interpolate height on the slope
+              const t = (randomNormOffset - innerOffset) / (this.grassWidth * (scale > 0.0001 ? scale : 1));
+              bladePos.y = THREE.MathUtils.lerp(innerHeight, outerHeight, t);
 
-            const randomHeightScale = 0.7 + Math.random() * 0.6;
-            const randomWidthScale = 0.8 + Math.random() * 0.4;
-            dummy.scale.set(randomWidthScale, randomHeightScale, randomWidthScale);
+              dummy.position.copy(bladePos);
+              dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
 
-            dummy.updateMatrix();
-            grassBladesMesh.setMatrixAt(bladeIndex, dummy.matrix);
+              const randomHeightScale = 0.7 + Math.random() * 0.6;
+              const randomWidthScale = 0.8 + Math.random() * 0.4;
+              dummy.scale.set(randomWidthScale, randomHeightScale, randomWidthScale);
 
-            // Set color
-            const randColor = leafColors[Math.floor(Math.random() * leafColors.length)];
-            grassBladesMesh.setColorAt(bladeIndex, randColor);
+              dummy.updateMatrix();
+              grassBladesMesh.setMatrixAt(bladeIndex, dummy.matrix);
 
-            bladeIndex++;
+              // Set color
+              const randColor = leafColors[Math.floor(Math.random() * leafColors.length)];
+              grassBladesMesh.setColorAt(bladeIndex, randColor);
+
+              bladeIndex++;
+            }
           }
         }
-      }
 
-      if (grassBladesMesh.instanceColor) {
-        grassBladesMesh.instanceColor.needsUpdate = true;
+        if (grassBladesMesh.instanceColor) {
+          grassBladesMesh.instanceColor.needsUpdate = true;
+        }
+        this.environmentGroup.add(grassBladesMesh);
       }
-      this.environmentGroup.add(grassBladesMesh);
     }
 
     // 8. Create Normal Racing Fences (Motorsport Steel Guardrails or Silverstone Catch Fences on Concrete Barriers)

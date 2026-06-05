@@ -280,7 +280,7 @@ export class RaceMode extends BaseMode {
           ai.checkpointsPassed++;
         }
       }
-
+      
       // Emit boosters if going fast
       if (ai.vehicle.speed > 5.6) {
         this.particles.emitBoosters(ai.vehicle.mesh.matrixWorld, ai.vehicle.yaw, ai.vehicle.speed, ai.vehicle.boosterColor);

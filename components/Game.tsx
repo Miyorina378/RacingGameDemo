@@ -23,7 +23,9 @@ import {
   Map,
   Copy,
   Play,
-  Timer
+  Timer,
+  Car,
+  Settings
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -34,8 +36,78 @@ import {
   loadMirrorInTPS,
   saveMirrorInTPS,
   loadSoundEnabled,
-  saveSoundEnabled
+  saveSoundEnabled,
+  KeyBindings,
+  DEFAULT_KEY_BINDINGS,
+  loadKeyBindings,
+  saveKeyBindings
 } from './option';
+
+import Garage from './ui/Garage';
+import Setting from './ui/Setting';
+import HUD from './ui/HUD';
+import GameOverlays from './ui/GameOverlays';
+import HelpModal from './ui/HelpModal';
+import HUDCustomizer from './ui/HUDCustomizer';
+import MapEditor from './ui/MapEditor';
+
+const RacingFlagsIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    {/* Flagpoles */}
+    <line x1="4" y1="20" x2="18" y2="6" strokeWidth="2" />
+    <line x1="20" y1="20" x2="6" y2="6" strokeWidth="2" />
+    {/* Waving chequered flag 1 */}
+    <path d="M4 6c3-1.5 6 .5 9-1 3-1.5 6-1 7 .5v6c-1-1.5-4-2-7-.5-3 1.5-6-.5-9 1V6z" fill="currentColor" fillOpacity="0.2" />
+    <path d="M7 6.5h2v1.5H7z M11 5.8h2v1.5h-2z M15 5.2h2v1.5h-2z" fill="currentColor" />
+    {/* Waving chequered flag 2 */}
+    <path d="M20 6c-3-1.5-6 .5-9-1-3-1.5-6-1-7 .5v6c1-1.5 4-2 7-.5 3 1.5 6-.5 9 1V6z" fill="currentColor" fillOpacity="0.1" />
+    <path d="M15 6.5h2v1.5h-2z M11 7.2h2v1.5h-2z M7 7.8h2v1.5H7z" fill="currentColor" />
+  </svg>
+);
+
+const S2000Icon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    {/* Car wheels */}
+    <circle cx="6.5" cy="15.5" r="2" fill="currentColor" fillOpacity="0.25" strokeWidth="2" />
+    <circle cx="17.5" cy="15.5" r="2" fill="currentColor" fillOpacity="0.25" strokeWidth="2" />
+    {/* Roadster body line */}
+    <path d="M2 14h2c.2-1.1 1.1-2 2.3-2s2.1.9 2.3 2h6.8c.2-1.1 1.1-2 2.3-2s2.1.9 2.3 2h2v-2c-.3-1.5-1.5-3.5-3-3.8-1-.2-2.5-.2-3.5-.2h-2L12.5 8H8l-2.5 4H2v2z" strokeWidth="1.6" />
+    {/* Windshield */}
+    <path d="M10.2 11.2L12 8.2" strokeWidth="1.8" />
+    {/* Door line */}
+    <path d="M9.8 14V11" />
+    {/* Spoiler */}
+    <path d="M19.5 10c.8 0 1.5.3 1.5.5" />
+  </svg>
+);
+
+const RealisticWrenchIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    {/* Solid metallic handle shaft */}
+    <line x1="7.5" y1="16.5" x2="16.5" y2="7.5" strokeWidth="3" />
+    {/* Inner metallic line detail */}
+    <line x1="8.5" y1="15.5" x2="15.5" y2="8.5" stroke="currentColor" strokeWidth="0.8" opacity="0.6" />
+    {/* Wrench head claw 1 */}
+    <path d="M16 4.5c.7-.7 1.7-1 2.7-.8 1.5.3 2.5 1.5 2.5 3s-1 2.7-2.5 3c-1 .2-2-.1-2.7-.8l-1.5-1.5L16 4.5z" fill="currentColor" fillOpacity="0.25" strokeWidth="1.5" />
+    {/* Wrench jaw cutout 1 */}
+    <path d="M17.5 5.5l2.5 2.5" strokeWidth="2" />
+    {/* Wrench head claw 2 */}
+    <path d="M8 19.5c-.7.7-1.7 1-2.7.8-1.5-.3-2.5-1.5-2.5-3s1-2.7 2.5-3c1-.2 2 .1 2.7.8l1.5 1.5L8 19.5z" fill="currentColor" fillOpacity="0.25" strokeWidth="1.5" />
+    {/* Wrench jaw cutout 2 */}
+    <path d="M4 16l2.5 2.5" strokeWidth="2" />
+  </svg>
+);
+
+const MechanicalGearIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    {/* Center spoke holes */}
+    <circle cx="12" cy="12" r="2.5" fill="currentColor" fillOpacity="0.3" />
+    {/* Outer gear circle */}
+    <circle cx="12" cy="12" r="6" strokeWidth="1.5" />
+    {/* 8 detailed teeth */}
+    <path d="M11 4h2l.5 2h-3L11 4z M11 18h2l.5 2h-3L11 18z M4 11v2l2 .5v-3L4 11z M18 11v2l2 .5v-3L18 11z M6.4 6.4l1.4 1.4-1.4 1.4-1.4-1.4 1.4-1.4z M16.2 16.2l1.4 1.4-1.4 1.4-1.4-1.4 1.4-1.4z M6.4 17.6l1.4-1.4 1.4 1.4-1.4 1.4-1.4-1.4z M16.2 7.8l1.4-1.4 1.4 1.4-1.4 1.4-1.4-1.4z" fill="currentColor" />
+  </svg>
+);
 
 const PAINT_SWATCHES = [
   { name: 'Rose Red', hex: '#f43f5e' },
@@ -333,71 +405,71 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
     case 'node':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke={isActive ? "#d946ef" : "#a855f7"} strokeWidth="6" strokeLinecap="round"/>
-          <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke="#ffffff" strokeWidth="1.5" strokeDasharray="3,3" strokeLinecap="round"/>
+          <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke={isActive ? "#d946ef" : "#a855f7"} strokeWidth="6" strokeLinecap="round" />
+          <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke="#ffffff" strokeWidth="1.5" strokeDasharray="3,3" strokeLinecap="round" />
           <circle cx="30" cy="18" r="4" fill="#06b6d4" />
         </svg>
       );
     case 'tree1':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="22" y="32" width="4" height="10" rx="1" fill="#78350f"/>
-          <path d="M 24,6 L 12,22 L 36,22 Z" fill={isActive ? "#22c55e" : "#16a34a"}/>
-          <path d="M 24,14 L 8,30 L 40,30 Z" fill={isActive ? "#16a34a" : "#15803d"}/>
+          <rect x="22" y="32" width="4" height="10" rx="1" fill="#78350f" />
+          <path d="M 24,6 L 12,22 L 36,22 Z" fill={isActive ? "#22c55e" : "#16a34a"} />
+          <path d="M 24,14 L 8,30 L 40,30 Z" fill={isActive ? "#16a34a" : "#15803d"} />
         </svg>
       );
     case 'tree2':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="21" y="30" width="6" height="12" rx="1.5" fill="#78350f"/>
-          <circle cx="24" cy="20" r="12" fill={isActive ? "#16a34a" : "#15803d"}/>
-          <circle cx="20" cy="16" r="7" fill={isActive ? "#4ade80" : "#22c55e"} style={{ opacity: 0.85 }}/>
+          <rect x="21" y="30" width="6" height="12" rx="1.5" fill="#78350f" />
+          <circle cx="24" cy="20" r="12" fill={isActive ? "#16a34a" : "#15803d"} />
+          <circle cx="20" cy="16" r="7" fill={isActive ? "#4ade80" : "#22c55e"} style={{ opacity: 0.85 }} />
         </svg>
       );
     case 'tree3':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 24,42 Q 22,28 24,18" stroke="#a16207" strokeWidth="3" strokeLinecap="round"/>
-          <path d="M 24,18 Q 14,14 10,22" stroke={isActive ? "#4ade80" : "#22c55e"} strokeWidth="3" strokeLinecap="round"/>
-          <path d="M 24,18 Q 34,14 38,22" stroke={isActive ? "#4ade80" : "#22c55e"} strokeWidth="3" strokeLinecap="round"/>
-          <path d="M 24,18 Q 16,10 20,6" stroke={isActive ? "#86efac" : "#4ade80"} strokeWidth="3" strokeLinecap="round"/>
-          <path d="M 24,18 Q 32,10 28,6" stroke={isActive ? "#86efac" : "#4ade80"} strokeWidth="3" strokeLinecap="round"/>
+          <path d="M 24,42 Q 22,28 24,18" stroke="#a16207" strokeWidth="3" strokeLinecap="round" />
+          <path d="M 24,18 Q 14,14 10,22" stroke={isActive ? "#4ade80" : "#22c55e"} strokeWidth="3" strokeLinecap="round" />
+          <path d="M 24,18 Q 34,14 38,22" stroke={isActive ? "#4ade80" : "#22c55e"} strokeWidth="3" strokeLinecap="round" />
+          <path d="M 24,18 Q 16,10 20,6" stroke={isActive ? "#86efac" : "#4ade80"} strokeWidth="3" strokeLinecap="round" />
+          <path d="M 24,18 Q 32,10 28,6" stroke={isActive ? "#86efac" : "#4ade80"} strokeWidth="3" strokeLinecap="round" />
         </svg>
       );
     case 'rock':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 24,8 L 38,20 L 32,38 L 16,38 L 10,20 Z" fill={isActive ? "#a8a29e" : "#78716c"} stroke="#57534e" strokeWidth="2"/>
-          <path d="M 24,8 L 24,24 L 10,20" stroke="#44403c" strokeWidth="1.5"/>
-          <path d="M 24,24 L 38,20" stroke="#44403c" strokeWidth="1.5"/>
-          <path d="M 24,24 L 32,38" stroke="#44403c" strokeWidth="1.5"/>
-          <path d="M 24,24 L 16,38" stroke="#44403c" strokeWidth="1.5"/>
+          <path d="M 24,8 L 38,20 L 32,38 L 16,38 L 10,20 Z" fill={isActive ? "#a8a29e" : "#78716c"} stroke="#57534e" strokeWidth="2" />
+          <path d="M 24,8 L 24,24 L 10,20" stroke="#44403c" strokeWidth="1.5" />
+          <path d="M 24,24 L 38,20" stroke="#44403c" strokeWidth="1.5" />
+          <path d="M 24,24 L 32,38" stroke="#44403c" strokeWidth="1.5" />
+          <path d="M 24,24 L 16,38" stroke="#44403c" strokeWidth="1.5" />
         </svg>
       );
     case 'mountain':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 24,8 L 6,38 L 42,38 Z" fill={isActive ? "#71717a" : "#3f3f46"}/>
-          <path d="M 24,8 L 18,18 L 24,16 L 30,18 Z" fill="#ffffff"/>
-          <path d="M 24,8 L 24,38" stroke="#18181b" strokeWidth="1.5"/>
+          <path d="M 24,8 L 6,38 L 42,38 Z" fill={isActive ? "#71717a" : "#3f3f46"} />
+          <path d="M 24,8 L 18,18 L 24,16 L 30,18 Z" fill="#ffffff" />
+          <path d="M 24,8 L 24,38" stroke="#18181b" strokeWidth="1.5" />
         </svg>
       );
     case 'hill':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 4,38 Q 24,12 44,38 Z" fill={isActive ? "#d97706" : "#b45309"}/>
-          <path d="M 8,38 Q 24,16 40,38 Z" fill={isActive ? "#22c55e" : "#15803d"} style={{ opacity: 0.85 }}/>
+          <path d="M 4,38 Q 24,12 44,38 Z" fill={isActive ? "#d97706" : "#b45309"} />
+          <path d="M 8,38 Q 24,16 40,38 Z" fill={isActive ? "#22c55e" : "#15803d"} style={{ opacity: 0.85 }} />
         </svg>
       );
     case 'podium':
       return (
         <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 8,36 L 40,36 L 40,24 L 28,24 L 28,16 L 8,16 Z" fill={isActive ? "#475569" : "#334155"} stroke="#1e293b" strokeWidth="1.5"/>
-          <line x1="8" y1="28" x2="40" y2="28" stroke="#06b6d4" strokeWidth="2"/>
-          <line x1="8" y1="20" x2="28" y2="20" stroke="#06b6d4" strokeWidth="2"/>
-          <line x1="10" y1="16" x2="10" y2="8" stroke="#64748b" strokeWidth="2"/>
-          <line x1="38" y1="24" x2="38" y2="8" stroke="#64748b" strokeWidth="2"/>
-          <path d="M 6,10 L 42,6 L 38,10 L 10,12 Z" fill={isActive ? "#f43f5e" : "#d946ef"}/>
+          <path d="M 8,36 L 40,36 L 40,24 L 28,24 L 28,16 L 8,16 Z" fill={isActive ? "#475569" : "#334155"} stroke="#1e293b" strokeWidth="1.5" />
+          <line x1="8" y1="28" x2="40" y2="28" stroke="#06b6d4" strokeWidth="2" />
+          <line x1="8" y1="20" x2="28" y2="20" stroke="#06b6d4" strokeWidth="2" />
+          <line x1="10" y1="16" x2="10" y2="8" stroke="#64748b" strokeWidth="2" />
+          <line x1="38" y1="24" x2="38" y2="8" stroke="#64748b" strokeWidth="2" />
+          <path d="M 6,10 L 42,6 L 38,10 L 10,12 Z" fill={isActive ? "#f43f5e" : "#d946ef"} />
         </svg>
       );
     default:
@@ -456,6 +528,9 @@ export default function Game() {
   // Sound toggle (visual only for retro feel)
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
+  // Key bindings State
+  const [keyBindings, setKeyBindings] = useState<KeyBindings>(DEFAULT_KEY_BINDINGS);
+
   // Graphics Quality State
   const [graphicsQuality, setGraphicsQuality] = useState<'low' | 'medium' | 'high'>(() => {
     if (typeof window !== 'undefined') {
@@ -467,6 +542,7 @@ export default function Game() {
 
   const changeGraphicsQuality = (quality: 'low' | 'medium' | 'high') => {
     setGraphicsQuality(quality);
+    localStorage.setItem('cyberdrive_graphics_quality', quality);
     if (engineRef.current && engineRef.current.postProcessing) {
       engineRef.current.postProcessing.setQuality(quality);
     }
@@ -476,9 +552,11 @@ export default function Game() {
   const [bloomIntensity, setBloomIntensity] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const b = localStorage.getItem('cyberdrive_bloom_intensity');
-      return b !== null ? parseFloat(b) : 1.1;
+      const parsed = b !== null ? parseFloat(b) : 0.30;
+      // Normalise to 0.30 if stored value is high from old default
+      return parsed > 0.5 ? 0.30 : parsed;
     }
-    return 1.1;
+    return 0.30;
   });
 
   const changeBloomIntensity = (intensity: number) => {
@@ -488,11 +566,79 @@ export default function Game() {
     }
   };
 
+  const handleKeyBindingsChange = (newBindings: KeyBindings) => {
+    setKeyBindings(newBindings);
+    saveKeyBindings(newBindings);
+    if (engineRef.current) {
+      engineRef.current.keyBindings = newBindings;
+    }
+  };
+
   // UI Upgrades State
   const [carUpgrades, setCarUpgrades] = useState<{ [carId: string]: any }>({});
 
   // UI Tabs
-  const [activeGarageTab, setActiveGarageTab] = useState<'paint' | 'dealership' | 'modes' | 'tuning'>('modes');
+  const [activeGarageTab, setActiveGarageTab] = useState<null | 'drive' | 'dealer' | 'tuning' | 'setting'>(null);
+  const [tuningState, setTuningState] = useState<'closed' | 'entering' | 'open' | 'exiting'>('closed');
+  const [settingsSubTab, setSettingsSubTab] = useState<'graphics' | 'control' | 'layout'>('graphics');
+
+  // Shrink Canvas Preview states & ref
+  const placeholderRef = useRef<HTMLDivElement>(null);
+  const [placeholderRect, setPlaceholderRect] = useState<DOMRect | null>(null);
+  const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
+  const [settingsTransitionComplete, setSettingsTransitionComplete] = useState<boolean>(false);
+  const [settingsState, setSettingsState] = useState<'closed' | 'entering' | 'open' | 'exiting_ui' | 'expanding_canvas'>('closed');
+  const [noTransition, setNoTransition] = useState<boolean>(false);
+
+  useEffect(() => {
+    const isShrunk = (activeGarageTab === 'setting' && settingsSubTab === 'graphics' &&
+      (settingsState === 'open' || settingsState === 'exiting_ui' ||
+        settingsState === 'entering')) || (tuningState !== 'closed');
+
+    if (!isShrunk) {
+      setPlaceholderRect(null);
+      return;
+    }
+
+    let alive = true;
+
+    const updateRect = () => {
+      if (!alive || !placeholderRef.current) return;
+      const rect = placeholderRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setPlaceholderRect(rect);
+      }
+    };
+
+    // ResizeObserver catches all layout shifts
+    const ro = new ResizeObserver(updateRect);
+    if (placeholderRef.current) ro.observe(placeholderRef.current);
+
+    window.addEventListener('resize', updateRect);
+    updateRect(); // initial attempt
+
+    return () => {
+      alive = false;
+      ro.disconnect();
+      window.removeEventListener('resize', updateRect);
+    };
+  }, [activeGarageTab, settingsSubTab, settingsState, tuningState]);
+
+  // Call resize only at key transition milestones to avoid dynamic layout thrashing
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.handleResize();
+    }
+  }, [activeGarageTab, settingsSubTab, placeholderRect, settingsTransitionComplete, settingsState]);
+
+  useEffect(() => {
+    if (engineRef.current) {
+      (engineRef.current as any).tuningState = tuningState;
+    }
+  }, [tuningState]);
+
+  const [isTransitioningDrive, setIsTransitioningDrive] = useState<boolean>(false);
+  const [isBlackOverlay, setIsBlackOverlay] = useState<boolean>(false);
   const [selectedBrand, setSelectedBrand] = useState<string>('All');
 
   // Keyboard help modal toggle
@@ -542,6 +688,7 @@ export default function Game() {
       setHudConfig(loadHUDConfig());
       setShowMirrorInTPS(loadMirrorInTPS());
       setSoundEnabled(loadSoundEnabled());
+      setKeyBindings(loadKeyBindings());
 
       const savedTrack = localStorage.getItem('cyberdrive_custom_track');
       if (savedTrack) {
@@ -617,6 +764,13 @@ export default function Game() {
     }
   }, [placement, prevPlacement]);
 
+  // Sync activeGarageTab state to the Three.js game engine
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.activeGarageTab = activeGarageTab;
+    }
+  }, [activeGarageTab]);
+
   // Initialize Game Engine
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -624,11 +778,12 @@ export default function Game() {
     // Callbacks to sync logic from Three.js render loop to React UI state
     const callbacks = {
       onSpeedChange: (s: number) => {
-        setSpeed(s);
+        const displayS = hudConfig.speedUnit === 'mph' ? Math.round(s * 0.621371) : s;
+        setSpeed(displayS);
         if (engineRef.current && engineRef.current.activeMode === 'tutorial') {
           const status = engineRef.current.getTutorialStatus();
           setTutorialStep((prevStep) => {
-            if (prevStep === 0 && s > 15) return 1;
+            if (prevStep === 0 && displayS > 15) return 1;
             if (prevStep === 1 && status.turnKeyPressed) return 2;
             if (prevStep === 2 && status.isDrifting) return 3;
             if (prevStep === 3 && !status.isGrounded && status.carPosY > 1.5) return 4;
@@ -641,7 +796,8 @@ export default function Game() {
         }
       },
       onVehicleStatsChange: (s: number, r: number, g: number, shifting: boolean, throttle?: number, brake?: number) => {
-        setSpeed(s);
+        const displayS = hudConfig.speedUnit === 'mph' ? Math.round(s * 0.621371) : s;
+        setSpeed(displayS);
         setRpm(r);
         setGear(g);
         setIsShifting(shifting);
@@ -747,6 +903,7 @@ export default function Game() {
 
     engine.playerCredits = initialCredits;
     engine.hasLicense = initialLicense;
+    engine.keyBindings = loadKeyBindings();
     engine.setActiveCar(initialCarId, initialColor, initialUpgrades);
 
     return () => {
@@ -1038,10 +1195,187 @@ export default function Game() {
       setSpeed(0);
       setDriftScore(0);
       setPlacement(1);
-      setPrevPlacement(1);
+      setPrevPlacement(placement);
       setPlacementShift(null);
       setRaceResults(null);
     }
+  };
+
+  const handleDriveClick = () => {
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      setActiveGarageTab('drive');
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
+  };
+
+  const handleBackToGarageClick = () => {
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      setActiveGarageTab(null);
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
+  };
+
+  const handleTuningClick = () => {
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      setActiveGarageTab('tuning');
+      setTuningState('entering');
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+      setTuningState('open');
+    }, 1550);
+  };
+
+  const handleExitTuningClick = () => {
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      setActiveGarageTab(null);
+      setTuningState('closed');
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
+  };
+
+  const handleSettingClick = () => {
+    setActiveGarageTab('setting');
+    setSettingsSubTab('graphics');
+    setSettingsTransitionComplete(false);
+    setSettingsState('entering');
+    setSettingsVisible(true);
+    setIsBlackOverlay(false);
+
+    setTimeout(() => {
+      setSettingsTransitionComplete(true);
+      setSettingsState('open');
+    }, 700);
+  };
+
+  const handleSettingBackClick = () => {
+    if (settingsSubTab !== 'graphics') {
+      setIsBlackOverlay(true);
+
+      setTimeout(() => {
+        setSettingsState('closed');
+        setSettingsVisible(false);
+        setSettingsTransitionComplete(false);
+        setActiveGarageTab(null);
+      }, 700);
+
+      setTimeout(() => {
+        setIsBlackOverlay(false);
+      }, 850);
+    } else {
+      setSettingsState('exiting_ui');
+      setSettingsVisible(false);
+      setSettingsTransitionComplete(false);
+
+      // 1. Settings UI animates out first. We wait 400ms for settings card to fade out.
+      setTimeout(() => {
+        setSettingsState('expanding_canvas');
+      }, 400);
+
+      // 2. Canvas expands (takes 700ms). So we wait 400ms + 700ms = 1100ms.
+      setTimeout(() => {
+        setSettingsState('closed');
+        setActiveGarageTab(null);
+      }, 1100);
+    }
+  };
+
+  const handleSettingsSubTabChange = (tab: 'graphics' | 'control' | 'layout') => {
+    setNoTransition(true);
+    setSettingsSubTab(tab);
+    setTimeout(() => {
+      setNoTransition(false);
+    }, 50);
+  };
+
+  const handleSettingClickNoFade = () => {
+    setActiveGarageTab('setting');
+    setSettingsSubTab('graphics');
+    setSettingsTransitionComplete(false);
+    setSettingsState('entering');
+    setSettingsVisible(true);
+
+    setTimeout(() => {
+      setSettingsTransitionComplete(true);
+      setSettingsState('open');
+    }, 700);
+  };
+
+  const handleResetTransitionNoFade = () => {
+    setNoTransition(true);
+    setSettingsState('closed');
+    setSettingsVisible(false);
+    setSettingsTransitionComplete(false);
+    setActiveGarageTab(null);
+    setPlaceholderRect(null);
+    setTimeout(() => {
+      setNoTransition(false);
+    }, 50);
+  };
+
+  const handleResetTransitionClick = () => {
+    // Phase 1: Fade to black overlay (covers Scene 2 / Settings)
+    setIsBlackOverlay(true);
+
+    // Phase 2: After overlay is fully dark (500ms), snap canvas back to fullscreen instantly
+    setTimeout(() => {
+      // Disable CSS transitions so canvas snaps instantly
+      setNoTransition(true);
+      // Reset all settings state
+      setSettingsState('closed');
+      setSettingsVisible(false);
+      setSettingsTransitionComplete(false);
+      setActiveGarageTab(null);
+      setPlaceholderRect(null);
+
+      // Phase 3: After a paint frame, fade out the overlay to reveal fullscreen Garage
+      setTimeout(() => {
+        setIsBlackOverlay(false);
+
+        // Phase 4: Re-enable CSS transitions after overlay fade-out completes
+        setTimeout(() => {
+          setNoTransition(false);
+        }, 550);
+      }, 50);
+    }, 500);
   };
 
   const resetCar = () => {
@@ -1381,37 +1715,37 @@ export default function Game() {
     let r = (num >> 16);
     let g = ((num >> 8) & 0x00ff);
     let b = (num & 0x0000ff);
-    
+
     r = Math.max(0, Math.floor(r * (1 - amount)));
     g = Math.max(0, Math.floor(g * (1 - amount)));
     b = Math.max(0, Math.floor(b * (1 - amount)));
-    
+
     return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
   };
 
   // Canvas minimap rendering loop
   useEffect(() => {
     let animFrameId: number;
-    
+
     const drawMinimap = () => {
       animFrameId = requestAnimationFrame(drawMinimap);
-      
+
       const canvas = minimapCanvasRef.current;
       if (!canvas || !engineRef.current || activeMode === 'garage' || gameStatus === 'idle') return;
-      
+
       const engine = engineRef.current;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      
+
       const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
       if (!activeTrack) return;
-      
+
       const path = activeTrack.path;
       if (path.length === 0) return;
-      
+
       // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
+
       // Set translucent background
       ctx.fillStyle = 'rgba(9, 13, 22, 0.45)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1428,24 +1762,24 @@ export default function Game() {
         if (pos.z < minZ) minZ = pos.z;
         if (pos.z > maxZ) maxZ = pos.z;
       });
-      
+
       // Add padding to bounds
       const padding = 15;
       const width = canvas.width - padding * 2;
       const height = canvas.height - padding * 2;
-      
+
       const rangeX = maxX - minX || 1;
       const rangeZ = maxZ - minZ || 1;
-      
+
       const scale = Math.min(width / rangeX, height / rangeZ);
-      
+
       // Center offsets
       const offsetX = padding + (width - rangeX * scale) / 2;
       const offsetZ = padding + (height - rangeZ * scale) / 2;
-      
+
       const mapX = (x: number) => offsetX + (x - minX) * scale;
       const mapZ = (z: number) => offsetZ + (z - minZ) * scale;
-      
+
       // Draw road line
       ctx.beginPath();
       ctx.moveTo(mapX(getPos(path[0]).x), mapZ(getPos(path[0]).z));
@@ -1458,7 +1792,7 @@ export default function Game() {
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.stroke();
-      
+
       // Draw AI Opponents
       if (activeMode === 'race' && engine.currentModeInstance && 'aiCars' in engine.currentModeInstance) {
         const aiCars = (engine.currentModeInstance as any).aiCars as any[];
@@ -1470,7 +1804,7 @@ export default function Game() {
             ctx.beginPath();
             ctx.arc(mapX(aiPos.x), mapZ(aiPos.z), 4, 0, Math.PI * 2);
             ctx.fill();
-            
+
             // Draw a darker outliner than the dot color
             ctx.strokeStyle = darkenColor(dotColor, 0.45);
             ctx.lineWidth = 1.25;
@@ -1478,7 +1812,7 @@ export default function Game() {
           });
         }
       }
-      
+
       // Draw Player Position (Blue dot)
       if (engine.vehicle) {
         const playerPos = engine.vehicle.pos;
@@ -1490,1180 +1824,165 @@ export default function Game() {
         ctx.arc(mapX(playerPos.x), mapZ(playerPos.z), 5, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
-        
+
         // Draw a darker outliner than the dot color
         ctx.strokeStyle = darkenColor(playerDotColor, 0.5);
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
     };
-    
+
     if (activeMode !== 'garage' && gameStatus !== 'idle') {
       animFrameId = requestAnimationFrame(drawMinimap);
     }
-    
+
     return () => {
       cancelAnimationFrame(animFrameId);
     };
   }, [activeMode, gameStatus, activeTrackId]);
 
+  const activeCar = CARS_DATABASE.find((c) => c.id === activeCarId);
+  const activeCarName = activeCar ? `${activeCar.brand} ${activeCar.name}` : 'Starter Hatchback';
+
+  // Calculate GPU transform scale factors for picture-in-picture transition
+  const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1920;
+  const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 1080;
+  const scaleX = placeholderRect ? placeholderRect.width / screenWidth : 1;
+  const scaleY = placeholderRect ? placeholderRect.height / screenHeight : 1;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden font-sans text-white select-none bg-slate-950">
-      {/* 3D Canvas */}
-      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
-
-      {/* Top Center: Rear View Mirror & Timers */}
-      {activeMode !== 'garage' && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-auto z-20 flex flex-col items-center gap-3">
-          {/* Interior Rear View Mirror (TPS Toggle and Master Customize Switch) */}
-          {(cameraViewMode === 'driver' || showMirrorInTPS) && hudConfig.showMirror && (
-            <div 
-              id="rear-view-mirror-hud" 
-              className="w-[280px] h-[75px] bg-slate-950/40 border-[5px] border-slate-950 rounded-2xl relative overflow-hidden select-none"
-            >
-              {/* Glass sheen reflection overlay */}
-              <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/15 pointer-events-none rounded-xl" />
-              
-              {/* Subtle grid lines for high tech mirror HUD feel */}
-              <div className="absolute inset-0 border border-cyan-500/10 pointer-events-none rounded-xl" />
-            </div>
-          )}
-
-          {/* Time Limit Timer (for License mode) */}
-          {activeMode === 'license' && hudConfig.showLapTimer && (
-            <div className={`bg-slate-950/80 border backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[120px] transition-colors ${timeRemaining <= 7 ? 'border-rose-600 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-pulse' : 'border-slate-800'}`}>
-              <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                Time Limit
-              </span>
-              <span className={`text-3xl font-black font-mono tracking-wider ${timeRemaining <= 7 ? 'text-rose-500' : 'text-white'}`}>
-                {formatTime(timeRemaining)}
-              </span>
-            </div>
-          )}
-
-          {/* Current Lap Timer (for Race mode) */}
-          {activeMode === 'race' && (gameStatus === 'playing' || gameStatus === 'success') && hudConfig.showLapTimer && (
-            <div className="bg-slate-950/80 border border-slate-800 backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[120px]">
-              <span className="text-slate-400 text-[9px] font-extrabold uppercase tracking-widest text-slate-500 mb-0.5">
-                LAP TIMER
-              </span>
-              <span className="text-3xl font-black font-mono tracking-wider text-white">
-                {formatTime(currentLapTime)}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TOP HEADER: Credits & HUD values */}
-      <div className="absolute top-6 inset-x-6 flex items-start justify-between pointer-events-none z-10">
-        {/* Left Side: Game Logo, Credits, and Lap/Length in race mode */}
-        <div className="flex flex-col gap-3 pointer-events-auto">
-          {activeMode === 'garage' && (
-            <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-              <span className="text-xs font-black tracking-[0.25em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500 uppercase select-none italic font-sans pr-1">
-                CYBER DRIVE
-              </span>
-              <div className="h-4 w-px bg-slate-800" />
-              <div className="flex items-center gap-2" onClick={cheatCredits} title="Double-click to get test credits!">
-                <Coins className="w-5 h-5 text-yellow-400 cursor-pointer hover:scale-110 transition-transform" />
-                <span className="font-mono font-bold text-yellow-400 text-lg">
-                  {playerCredits.toLocaleString()} <span className="text-xs">CR</span>
-                </span>
-              </div>
-              {hasLicense && (
-                <>
-                  <div className="h-4 w-px bg-slate-800" />
-                  <div className="flex items-center gap-1.5 bg-cyan-950/50 border border-cyan-800/80 px-2 py-0.5 rounded-md">
-                    <Award className="w-4 h-4 text-cyan-400" />
-                    <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">
-                      A-License
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Move lap and length to there instead (top left) */}
-          {(activeMode === 'license' || activeMode === 'race') && (
-            <div className="flex flex-col gap-3.5">
-              <div className="flex items-center gap-4">
-                {/* Checkpoint counters */}
-                {hudConfig.showLap && (
-                  <div className="flex items-baseline gap-1 select-none">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-2 leading-none">
-                      {activeMode === 'race' ? 'LAP' : 'GATE'}
-                    </span>
-                    <span className="text-4xl font-black text-white font-mono leading-none tracking-tight">
-                      {checkpointIndex}
-                    </span>
-                    <span className="text-slate-500 text-sm font-bold font-mono leading-none">
-                      /{totalCheckpoints}
-                    </span>
-                  </div>
-                )}
-
-                {/* Track length */}
-                {hudConfig.showLength && (() => {
-                  const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
-                  const trackLength = activeTrack ? getTrackLength(activeTrack.path.map(p => 'isVector3' in p ? p : p.pos)) : 0;
-                  if (trackLength <= 0) return null;
-                  return (
-                    <div className="bg-slate-950/60 border border-slate-800/60 px-3 py-1 rounded-xl shadow-[0_0_10px_rgba(0,0,0,0.35)] flex items-center gap-2">
-                      <span className="text-slate-500 text-[8px] font-extrabold uppercase tracking-wider leading-none">Length</span>
-                      <span className="text-xs font-mono font-bold text-cyan-400 leading-none">
-                        {formatDistance(trackLength)}
-                      </span>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Minimap canvas rendering directly below */}
-              {hudConfig.showMap && (
-                <div className="w-40 h-40 bg-slate-950/40 backdrop-blur-md rounded-2xl overflow-hidden border border-slate-800/80 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-                  <canvas 
-                    ref={minimapCanvasRef} 
-                    width={160} 
-                    height={160} 
-                    className="w-full h-full"
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Right Side: Options / Reset */}
-        <div className="flex flex-col items-end gap-2.5 pointer-events-auto">
-          <div className="flex items-center gap-3">
-            {activeMode === 'race' && hudConfig.showPosition && (
-              <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-2.5 shadow-[0_0_15px_rgba(0,0,0,0.5)] select-none overflow-hidden relative">
-                <Trophy className="w-4 h-4 text-yellow-400 shrink-0" />
-                <div className="flex flex-col">
-                  <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest leading-none mb-0.5">
-                    POS
-                  </span>
-                  <div className="flex items-baseline gap-0.5 h-5 overflow-hidden">
-                    <span
-                      key={placement}
-                      className={`text-base font-black leading-none bg-gradient-to-r from-cyan-400 to-pink-500 bg-clip-text text-transparent font-mono transition-transform duration-300 ${placementShift === 'up'
-                        ? 'animate-slideUp'
-                        : placementShift === 'down'
-                          ? 'animate-slideDown'
-                          : ''
-                        }`}
-                    >
-                      {placement === 1 ? '1st' : placement === 2 ? '2nd' : placement === 3 ? '3rd' : `${placement}th`}
-                    </span>
-                    <span className="text-slate-500 text-[10px] font-bold font-mono">/ {totalParticipants}</span>
-                  </div>
-                </div>
-                {placementShift && (
-                  <div className={`absolute inset-0 pointer-events-none opacity-15 blur-sm transition-colors duration-500 ${placementShift === 'up' ? 'bg-cyan-500' : 'bg-rose-500'
-                    }`} />
-                )}
-              </div>
-            )}
-
-            {/* Hide reset, help, sound, exit in gameplay modes since they are in the ESC pause menu instead */}
-            {activeMode === 'garage' && (
-              <>
-                <button
-                  onClick={() => setShowHelp(!showHelp)}
-                  className="bg-slate-900/85 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white p-2.5 rounded-xl transition-all"
-                >
-                  <HelpCircle className="w-5 h-5" />
-                </button>
-
-                <button
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className="bg-slate-900/85 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white p-2.5 rounded-xl transition-all"
-                >
-                  {soundEnabled ? <Volume2 className="w-5 h-5 text-cyan-400" /> : <VolumeX className="w-5 h-5 text-slate-500" />}
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Time & Best Lap stats block directly below/next to POS in driving mode */}
-          {activeMode !== 'garage' && hudConfig.showStats && (
-            <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex flex-col gap-2 shadow-[0_0_15px_rgba(0,0,0,0.5)] min-w-[150px] select-none">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-1.5">
-                  <Timer className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Time</span>
-                </div>
-                <span className="text-sm font-bold font-mono text-white">
-                  {formatTime(activeMode === 'race' ? totalRaceTime : timeRemaining)}
-                </span>
-              </div>
-              {activeMode === 'race' && (
-                <>
-                  <div className="h-px bg-slate-800" />
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-1.5">
-                      <Trophy className="w-3.5 h-3.5 text-pink-500 shrink-0" />
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Best</span>
-                    </div>
-                    <span className="text-sm font-bold font-mono text-pink-500">
-                      {bestLapTime === Infinity ? '--:--.---' : formatTime(bestLapTime)}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+      {/* 3D Canvas Wrapper (decouples CSS transitions from WebGL canvas drawing buffer resizing) */}
+      <div
+        id="canvas-container"
+        className={tuningState === 'entering' ? 'animate-slideInLeft' : ''}
+        style={
+          placeholderRect
+            ? (activeGarageTab === 'tuning'
+              ? {
+                position: 'fixed',
+                left: '0px',
+                top: '0px',
+                width: `${placeholderRect.width}px`,
+                height: `${placeholderRect.height}px`,
+                transform: `translate(${placeholderRect.left}px, ${placeholderRect.top}px)`,
+                transformOrigin: 'top left',
+                borderRadius: '0px',
+                zIndex: 80,
+                overflow: 'hidden',
+                pointerEvents: 'auto',
+                transition: 'none',
+              }
+              : {
+                position: 'fixed',
+                left: '0px',
+                top: '0px',
+                width: typeof window !== 'undefined' ? `${window.innerWidth}px` : '100vw',
+                height: typeof window !== 'undefined' ? `${window.innerHeight}px` : '100vh',
+                transform: `translate(${placeholderRect.left}px, ${placeholderRect.top}px) scale(${scaleX}, ${scaleY})`,
+                transformOrigin: 'top left',
+                borderRadius: `${16 / scaleX}px`,
+                zIndex: 80,
+                overflow: 'hidden',
+                pointerEvents: 'auto',
+                transition: noTransition
+                  ? 'none'
+                  : 'transform 0.7s ease-in-out, border-radius 0.7s ease-in-out',
+              })
+            : {
+              position: 'fixed',
+              left: '0px',
+              top: '0px',
+              width: typeof window !== 'undefined' ? `${window.innerWidth}px` : '100vw',
+              height: typeof window !== 'undefined' ? `${window.innerHeight}px` : '100vh',
+              transform: 'translate(0px, 0px) scale(1)',
+              transformOrigin: 'top left',
+              borderRadius: '0px',
+              zIndex: (activeGarageTab === 'setting' && settingsSubTab === 'graphics') ? 60 : 0,
+              overflow: 'hidden',
+              pointerEvents: 'auto',
+              transition: noTransition
+                ? 'none'
+                : 'transform 0.7s ease-in-out, border-radius 0.7s ease-in-out',
+            }
+        }
+      >
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'block',
+          }}
+        />
       </div>
 
-      {/* DRIVING HUD: Speedometer, Timers, Checkpoints, Drift */}
-      {activeMode !== 'garage' && (
-        <div className="absolute inset-0 pointer-events-none z-0 flex flex-col justify-between p-6">
-          {/* Top Center: Tutorial Step HUD */}
-          {activeMode === 'tutorial' && (
-            <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-slate-950/90 border border-pink-500/40 backdrop-blur-md px-6 py-4 rounded-2xl shadow-[0_0_25px_rgba(236,72,153,0.25)] text-center max-w-md w-full pointer-events-auto flex flex-col gap-2 z-20">
-              <span className="text-[10px] font-extrabold tracking-widest text-pink-400 uppercase">Interactive Driver Training</span>
-              <h3 className="font-extrabold text-sm text-slate-100">
-                {tutorialStep === 0 && "Step 1/5: Hold 'W' or 'Up Arrow' to accelerate forward"}
-                {tutorialStep === 1 && "Step 2/5: Great job! Now press 'A' or 'D' to steer"}
-                {tutorialStep === 2 && "Step 3/5: Feel the steering! Now speed up and hold Spacebar while turning to drift"}
-                {tutorialStep === 3 && "Step 4/5: Excellent drift! Drive straight over the glowing ramp ahead to jump"}
-                {tutorialStep === 4 && "Step 5/5: Soft landing! Drive into the golden crystal ahead to finish your training"}
-                {tutorialStep === 5 && "Congratulations! You have completed the training. Exit to showroom or try again!"}
-              </h3>
-              {/* Progress bar */}
-              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1.5">
-                <div
-                  className="h-full bg-pink-500 transition-all duration-300"
-                  style={{ width: `${(tutorialStep / 5) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-          {/* Middle: Drift Score Notification */}
-          <div className="flex-1 flex flex-col items-center justify-center">
-            {driftScore > 0 && (
-              <div className="bg-slate-950/60 border border-pink-500/30 backdrop-blur-sm px-6 py-3 rounded-2xl flex flex-col items-center shadow-[0_0_30px_rgba(217,70,239,0.2)] animate-pulse">
-                <span className="text-pink-400 font-bold tracking-widest text-xs uppercase">
-                  Drifting
-                </span>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-4xl font-extrabold text-white font-mono">
-                    {driftScore}
-                  </span>
-                  <span className="text-pink-400 font-extrabold text-2xl font-mono">
-                    x{driftMultiplier}
-                  </span>
-                </div>
-                <span className="text-pink-500 text-xs font-bold mt-0.5">
-                  {(driftScore * driftMultiplier).toLocaleString()} pts
-                </span>
-              </div>
-            )}
+      {/* HELP MODAL OVERLAY */}
+      <HelpModal showHelp={showHelp} setShowHelp={setShowHelp} />
 
-            {recentDriftGain > 0 && (
-              <div className="bg-yellow-950/60 border border-yellow-500/30 backdrop-blur-sm px-4 py-2 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(234,179,8,0.25)] animate-bounce mt-4">
-                <Coins className="w-4 h-4 text-yellow-400" />
-                <span className="text-yellow-400 font-bold font-mono">
-                  +{recentDriftGain} CR EARNED
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom HUD: Speed, Timer, Checkpoint Progress */}
-          <div className="w-full flex items-end justify-between">
-            {/* Speedometer & Transmission HUD */}
-            {hudConfig.showSpeedometer && (
-              <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 p-5 rounded-2xl shadow-[0_0_25px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[180px] pointer-events-auto">
-              <div className="flex items-center gap-4 mt-1">
-                {/* GT4 Style Throttle (Engine Up) & Brake (Brake Down) Input Indicators */}
-                <div className="flex gap-1.5 h-10 items-stretch select-none">
-                  {/* Brake indicator (fills down) */}
-                  <div className="w-1.5 bg-slate-900 border border-slate-800 rounded-sm relative overflow-hidden" title="Brake Input">
-                    <div 
-                      className="absolute top-0 inset-x-0 bg-rose-500 transition-all duration-75 shadow-[0_0_8px_rgba(239,68,68,0.5)]" 
-                      style={{ height: `${brakeInput * 100}%` }}
-                    />
-                  </div>
-                  {/* Throttle indicator (fills up) */}
-                  <div className="w-1.5 bg-slate-900 border border-slate-800 rounded-sm relative overflow-hidden" title="Throttle Input">
-                    <div 
-                      className="absolute bottom-0 inset-x-0 bg-cyan-400 transition-all duration-75 shadow-[0_0_8px_rgba(34,211,238,0.5)]" 
-                      style={{ height: `${throttleInput * 100}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Divider between input bars and gear section */}
-                <div className="h-10 w-px bg-slate-800" />
-
-                <div className="flex flex-col items-center min-w-[36px]">
-                  <span className="text-slate-400 text-[9px] font-bold uppercase tracking-wider">Gear</span>
-                  <span className={`text-3xl font-black font-mono mt-1 transition-all duration-150 ${isShifting ? 'text-slate-600 scale-95' : 'text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.3)]'}`}>
-                    {speed === 0 ? 'N' : (speed < 0 ? 'R' : gear)}
-                  </span>
-                </div>
-                <div className="h-10 w-px bg-slate-800" />
-                <div className="flex flex-col items-center">
-                  <span className="text-slate-400 text-[9px] font-bold uppercase tracking-wider">Speed</span>
-                  <div className="flex items-baseline gap-0.5 mt-0.5">
-                    <span className="text-4xl font-black font-mono tracking-tight bg-gradient-to-b from-white to-slate-300 bg-clip-text text-transparent">
-                      {speed}
-                    </span>
-                    <span className="text-slate-400 font-bold text-[10px]">KM/H</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Real RPM indicator bar */}
-              <div className="w-full flex justify-between items-center mt-3 px-1 text-[8px] text-slate-500 font-mono">
-                <span>1K RPM</span>
-                <span className={rpm > 5500 ? 'text-rose-400 font-bold animate-pulse' : ''}>
-                  {rpm > 5500 ? 'LIMITER' : `${Math.round(rpm)}`}
-                </span>
-                <span className="text-rose-500 font-bold">6.5K REDLINE</span>
-              </div>
-              <div className="w-full h-2 bg-slate-800 rounded-full mt-1 overflow-hidden border border-slate-700/50">
-                <div
-                  className={`h-full transition-all duration-75 ${rpm > 5500 ? 'bg-gradient-to-r from-red-500 to-rose-600 animate-pulse' : 'bg-gradient-to-r from-cyan-400 via-indigo-500 to-pink-500'
-                    }`}
-                  style={{ width: `${Math.min(100, (rpm / 6500) * 100)}%` }}
-                />
-              </div>
-            </div>
-            )}
-
-
-          </div>
-        </div>
-      )}
+      {/* HUD LAYOUT CUSTOMIZER OVERLAY */}
+      <HUDCustomizer
+        showHUDCustomizer={showHUDCustomizer}
+        setShowHUDCustomizer={setShowHUDCustomizer}
+        hudConfig={hudConfig}
+        setHudConfig={setHudConfig}
+        defaultHudConfig={DEFAULT_HUD_CONFIG}
+        setShowMirrorInTPS={setShowMirrorInTPS}
+      />
 
       {/* GAMEPLAY OVERLAYS: Countdown, Success, Failed */}
-      {gameStatus !== 'idle' && gameStatus !== 'playing' && (
-        <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm z-30 flex items-center justify-center p-6">
-          {/* Countdown timer */}
-          {gameStatus === 'countdown' && (
-            <div className="text-center animate-scaleIn">
-              <span className="text-7xl md:text-9xl font-black tracking-widest italic bg-gradient-to-r from-cyan-400 via-pink-500 to-yellow-400 bg-clip-text text-transparent">
-                {statusMessage}
-              </span>
-            </div>
-          )}
+      <GameOverlays
+        gameStatus={gameStatus}
+        statusMessage={statusMessage}
+        activeMode={activeMode}
+        raceResults={raceResults}
+        placement={placement}
+        activeTrackId={activeTrackId}
+        exitToGarage={exitToGarage}
+        startLicenseTest={startLicenseTest}
+        startRace={startRace}
+        startTutorial={startTutorial}
+      />
 
-          {/* Success screen */}
-          {gameStatus === 'success' && (
-            activeMode === 'race' && raceResults ? (
-              <div className="flex flex-col items-center max-w-2xl w-full">
-                {/* Staggered F I N I S H letters */}
-                <div className="flex justify-center gap-2.5 md:gap-4 mb-8">
-                  {['F', 'I', 'N', 'I', 'S', 'H'].map((char, index) => (
-                    <span
-                      key={index}
-                      className="text-5xl md:text-7xl font-black tracking-widest italic bg-gradient-to-r from-cyan-400 via-pink-500 to-yellow-400 bg-clip-text text-transparent animate-slideUp inline-block"
-                      style={{
-                        animationDelay: `${index * 0.25}s`,
-                        animationFillMode: 'both',
-                        display: 'inline-block'
-                      }}
-                    >
-                      {char}
-                    </span>
-                  ))}
-                </div>
+      {/* DRIVING HUD: Speedometer, Timers, Checkpoints, Drift */}
+      <HUD
+        activeMode={activeMode}
+        gameStatus={gameStatus}
+        hudConfig={hudConfig}
+        timeRemaining={timeRemaining}
+        currentLapTime={currentLapTime}
+        checkpointIndex={checkpointIndex}
+        totalCheckpoints={totalCheckpoints}
+        activeTrackId={activeTrackId}
+        minimapCanvasRef={minimapCanvasRef}
+        placement={placement}
+        totalParticipants={totalParticipants}
+        placementShift={placementShift}
+        totalRaceTime={totalRaceTime}
+        bestLapTime={bestLapTime}
+        tutorialStep={tutorialStep}
+        driftScore={driftScore}
+        driftMultiplier={driftMultiplier}
+        recentDriftGain={recentDriftGain}
+        brakeInput={brakeInput}
+        throttleInput={throttleInput}
+        speed={speed}
+        gear={speed === 0 ? 'N' : (speed < 0 ? 'R' : gear)}
+        rpm={rpm}
+        isShifting={isShifting}
+        cameraViewMode={cameraViewMode}
+        showMirrorInTPS={showMirrorInTPS}
+        engineRef={engineRef}
+      />
 
-                {/* Sliding results table container */}
-                <div
-                  className="animate-slideUp w-full p-4"
-                  style={{
-                    animationDelay: '1.75s',
-                    animationFillMode: 'both'
-                  }}
-                >
-                  <h3 className="text-2xl font-black text-slate-100 uppercase tracking-widest mb-6 text-center bg-gradient-to-r from-cyan-400 to-pink-500 bg-clip-text text-transparent">
-                    Race Standings
-                  </h3>
-
-                  <div className="overflow-hidden rounded-xl border border-slate-800/30 bg-slate-950/30">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-800 text-sm uppercase tracking-wider text-slate-400 font-bold bg-slate-950/80">
-                          <th className="py-4 px-5">pos.</th>
-                          <th className="py-4 px-5">car.</th>
-                          <th className="py-4 px-5 text-right">time.</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {raceResults.map((result, idx) => (
-                          <tr
-                            key={idx}
-                            className={`border-b border-slate-900/30 text-base font-semibold transition-colors ${result.isPlayer
-                              ? 'bg-cyan-500/10 text-cyan-400 border-l-2 border-l-cyan-400 font-bold font-mono'
-                              : 'text-slate-300 font-mono'
-                              }`}
-                          >
-                            <td className="py-4 px-5">
-                              {result.pos === 1 ? '1st' : result.pos === 2 ? '2nd' : result.pos === 3 ? '3rd' : `${result.pos}th`}
-                            </td>
-                            <td className="py-4 px-5">
-                              {result.isPlayer ? (
-                                <span className="flex items-center gap-2">
-                                  {result.car}
-                                  <span className="text-[10px] bg-cyan-950 text-cyan-400 border border-cyan-800 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">YOU</span>
-                                </span>
-                              ) : (
-                                <span>{result.car}</span>
-                              )}
-                            </td>
-                            <td className="py-4 px-5 text-right font-mono">
-                              {formatResultTime(result.time)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Credit Reward Info */}
-                  <div className="flex items-center justify-between bg-yellow-950/40 border border-yellow-800/50 rounded-2xl px-5 py-4 mt-6">
-                    <span className="text-sm font-bold text-yellow-500 uppercase tracking-wider flex items-center gap-1.5">
-                      <Coins className="w-4.5 h-4.5" /> Credits Reward
-                    </span>
-                    <span className="text-lg font-black font-mono text-yellow-400">
-                      +{placement === 1 ? '1,000' : placement === 2 ? '600' : placement === 3 ? '300' : placement === 4 ? '150' : placement === 5 ? '100' : '50'} CR
-                    </span>
-                  </div>
-
-                  {/* Action link */}
-                  <div className="mt-8 flex justify-center">
-                    <button
-                      onClick={exitToGarage}
-                      className="text-slate-400 hover:text-cyan-400 font-mono text-base tracking-wider transition-colors duration-200 hover:underline cursor-pointer bg-transparent border-0 outline-none flex items-center gap-1"
-                    >
-                      return to garage -&gt;
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              // Default success screen (License / Tutorial)
-              <div className="bg-slate-900/90 border border-emerald-500/40 p-8 rounded-3xl max-w-md w-full shadow-[0_0_50px_rgba(16,185,129,0.25)] text-center">
-                <div className="w-16 h-16 rounded-full bg-emerald-950/80 border border-emerald-800/80 mx-auto flex items-center justify-center mb-4">
-                  <Check className="w-8 h-8 text-emerald-400" />
-                </div>
-                <h2 className="text-3xl font-black italic text-emerald-400 tracking-wider">
-                  COMPLETED
-                </h2>
-                <p className="text-slate-300 font-medium text-sm mt-3 px-2">
-                  {statusMessage}
-                </p>
-
-                <div className="mt-8 flex flex-col gap-3">
-                  <button
-                    onClick={() => {
-                      if (activeMode === 'license') startLicenseTest();
-                      else if (activeMode === 'race') startRace(activeTrackId);
-                      else if (activeMode === 'tutorial') startTutorial();
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_20px_rgba(16,185,129,0.5)]"
-                  >
-                    Retry Challenge
-                  </button>
-                  <button
-                    onClick={exitToGarage}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-3 px-6 rounded-xl transition-all"
-                  >
-                    Return to Garage
-                  </button>
-                </div>
-              </div>
-            )
-          )}
-
-          {/* Failed screen */}
-          {gameStatus === 'failed' && (
-            <div className="bg-slate-900/90 border border-rose-500/40 p-8 rounded-3xl max-w-md w-full shadow-[0_0_50px_rgba(244,63,94,0.25)] text-center">
-              <div className="w-16 h-16 rounded-full bg-rose-950/80 border border-rose-800/80 mx-auto flex items-center justify-center mb-4">
-                <Lock className="w-6 h-6 text-rose-400" />
-              </div>
-              <h2 className="text-3xl font-black italic text-rose-500 tracking-wider">
-                CHALLENGE FAILED
-              </h2>
-              <p className="text-slate-300 font-medium text-sm mt-3 px-2">
-                {statusMessage}
-              </p>
-
-              <div className="mt-8 flex flex-col gap-3">
-                <button
-                  onClick={() => {
-                    if (activeMode === 'license') startLicenseTest();
-                    else if (activeMode === 'race') startRace(activeTrackId);
-                    else if (activeMode === 'tutorial') startTutorial();
-                    else exitToGarage();
-                  }}
-                  className="bg-rose-600 hover:bg-rose-500 border border-rose-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-[0_0_15px_rgba(244,63,94,0.3)] hover:shadow-[0_0_20px_rgba(244,63,94,0.5)]"
-                >
-                  Try Again
-                </button>
-                <button
-                  onClick={exitToGarage}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-3 px-6 rounded-xl transition-all"
-                >
-                  Return to Garage
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* MAIN GARAGE INTERFACE (When in Garage) */}
-      {activeMode === 'garage' && (
-        <div className="absolute inset-y-0 right-0 w-full md:w-[420px] bg-slate-950/85 backdrop-blur-xl border-l border-slate-900 shadow-2xl p-6 flex flex-col justify-between z-10">
-
-          {/* Garage Header */}
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-pink-950/60 border border-pink-900/60">
-                <Wrench className="w-5 h-5 text-pink-400" />
-              </div>
-              <div>
-                <h1 className="text-xl font-black tracking-widest text-slate-100 uppercase">
-                  CYBER SHOWROOM
-                </h1>
-                <p className="text-xs font-semibold text-slate-400">
-                  Inspect and upgrade your fleet
-                </p>
-              </div>
-            </div>
-
-            {/* Mode selection tabs */}
-            <div className="grid grid-cols-4 gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800/80 mt-5">
-              <button
-                onClick={() => setActiveGarageTab('modes')}
-                className={`py-2 px-1 text-[11px] font-bold rounded-lg transition-all ${activeGarageTab === 'modes'
-                  ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/25'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-              >
-                Modes
-              </button>
-              <button
-                onClick={() => setActiveGarageTab('dealership')}
-                className={`py-2 px-1 text-[11px] font-bold rounded-lg transition-all ${activeGarageTab === 'dealership'
-                  ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/25'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-              >
-                Dealer
-              </button>
-              <button
-                onClick={() => setActiveGarageTab('paint')}
-                className={`py-2 px-1 text-[11px] font-bold rounded-lg transition-all ${activeGarageTab === 'paint'
-                  ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/25'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-              >
-                Paint
-              </button>
-              <button
-                onClick={() => setActiveGarageTab('tuning')}
-                className={`py-2 px-1 text-[11px] font-bold rounded-lg transition-all ${activeGarageTab === 'tuning'
-                  ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/25'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-              >
-                Tuning
-              </button>
-            </div>
-          </div>
-
-          {/* Garage Tab Content Section (Scrollable) */}
-          <div className="flex-1 my-6 overflow-y-auto pr-1">
-
-            {/* TAB: DRIVING MODES */}
-            {activeGarageTab === 'modes' && (
-              <div className="flex flex-col gap-4 animate-fadeIn">
-                {/* 0. Interactive Tutorial */}
-                <div className="group bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 p-4 rounded-2xl transition-all duration-200 flex flex-col gap-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-pink-950/60 border border-pink-900/60 flex items-center justify-center group-hover:scale-105 transition-transform">
-                        <HelpCircle className="w-5 h-5 text-pink-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-slate-100">Driving School</h3>
-                        <span className="text-[10px] font-bold text-pink-400 tracking-wider uppercase">Interactive Tutorial</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Learn the basic driving controls step-by-step. Master acceleration, steering, drifting, and launching off jumps! Rewards +200 Credits.
-                  </p>
-                  <button
-                    onClick={startTutorial}
-                    className="w-full bg-pink-600 hover:bg-pink-500 border border-pink-500 py-2.5 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(236,72,153,0.2)] hover:shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all mt-2"
-                  >
-                    Start Training
-                  </button>
-                </div>
-
-                {/* 1. Free Roam */}
-                <div className="group bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 p-4 rounded-2xl transition-all duration-200 flex flex-col gap-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-cyan-950/60 border border-cyan-900/60 flex items-center justify-center group-hover:scale-105 transition-transform">
-                        <Compass className="w-5 h-5 text-cyan-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-slate-100">Free Roam</h3>
-                        <span className="text-[10px] font-bold text-cyan-400 tracking-wider uppercase">Open World</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Test your driving skills in a neon playground. Jump off ramps, collect score crystals, and test your drift capabilities to earn extra credits.
-                  </p>
-                  <button
-                    onClick={startFreeRoam}
-                    className="w-full bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 py-2.5 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(6,182,212,0.2)] hover:shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all mt-2"
-                  >
-                    Enter Open World
-                  </button>
-                </div>
-
-                {/* 2. License Trial */}
-                <div className="group bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 p-4 rounded-2xl transition-all duration-200 flex flex-col gap-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-yellow-950/60 border border-yellow-900/60 flex items-center justify-center group-hover:scale-105 transition-transform">
-                        <Award className="w-5 h-5 text-yellow-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-slate-100">License A-Test</h3>
-                        <span className="text-[10px] font-bold text-yellow-400 tracking-wider uppercase">Time Trial</span>
-                      </div>
-                    </div>
-                    {hasLicense && (
-                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-900 px-2 py-0.5 rounded">Passed</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Pass through all {11} checkpoint rings in order within 35 seconds. Unlocks the high-speed Pro Hypercar Race. Rewards 500 Credits.
-                  </p>
-                  <button
-                    onClick={startLicenseTest}
-                    className="w-full bg-yellow-600 hover:bg-yellow-500 border border-yellow-500 py-2.5 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_20px_rgba(234,179,8,0.4)] transition-all mt-2"
-                  >
-                    Start License Test
-                  </button>
-                </div>
-
-                {/* 2.5 Custom Track Editor trigger panel */}
-                <div className="group bg-gradient-to-br from-slate-900/80 to-purple-950/40 border border-purple-900/50 hover:border-purple-500/50 p-4 rounded-2xl transition-all duration-200 flex flex-col gap-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-purple-950/60 border border-purple-900/60 flex items-center justify-center group-hover:scale-105 transition-transform">
-                        <Map className="w-5 h-5 text-purple-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-slate-100">Custom Map Editor</h3>
-                        <span className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Interactive Grid</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Visually design custom racetracks. Place/drag nodes, adjust road width, add obstacles, and test-drive instantly with AI!
-                  </p>
-                  <button
-                    onClick={() => setActiveMode('editor')}
-                    className="w-full bg-purple-600 hover:bg-purple-500 border border-purple-500 py-2.5 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(168,85,247,0.2)] hover:shadow-[0_0_20px_rgba(168,85,247,0.4)] transition-all mt-2 cursor-pointer"
-                  >
-                    Open Map Editor
-                  </button>
-                </div>
-
-                {/* 3. Races Grid */}
-                <div className="bg-slate-900/40 border border-slate-800/80 p-4 rounded-2xl flex flex-col gap-3">
-                  <span className="text-[10px] font-bold text-pink-400 tracking-widest uppercase">Circuit Racing</span>
-
-                  <div className="grid grid-cols-1 gap-3">
-                    {TRACKS_DATABASE.filter(t => t.id !== 'license' && t.id !== 'custom').map((track) => {
-                      const isLocked = track.requiresLicense && !hasLicense;
-                      const length = getTrackLength(track.path.map(p => 'isVector3' in p ? p : p.pos));
-                      return (
-                        <div key={track.id} className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex flex-col gap-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-bold text-sm">{track.name}</h4>
-                              {isLocked && <Lock className="w-3.5 h-3.5 text-slate-500" />}
-                            </div>
-                            <div className="flex flex-col items-end">
-                              <span className={`text-[10px] font-mono ${!isLocked ? 'text-cyan-400' : 'text-slate-500'}`}>
-                                Up to +{track.baseReward} CR
-                              </span>
-                              <span className="text-[9px] font-mono text-slate-500">
-                                {formatDistance(length)}
-                              </span>
-                            </div>
-                          </div>
-                          <p className="text-[11px] text-slate-400 leading-relaxed">
-                            {track.description}
-                          </p>
-                          <button
-                            disabled={isLocked}
-                            onClick={() => startRace(track.id)}
-                            className={`w-full py-2 rounded-xl text-xs font-bold transition-all mt-1 ${!isLocked
-                              ? 'bg-pink-600 hover:bg-pink-500 border border-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.25)] hover:shadow-[0_0_15px_rgba(236,72,153,0.45)]'
-                              : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                              }`}
-                          >
-                            {!isLocked ? `Enter ${track.name}` : 'Requires A-License'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB: DEALERSHIP */}
-            {activeGarageTab === 'dealership' && (
-              <div className="flex flex-col gap-4 animate-fadeIn">
-                {/* Brand Filter Tab Row */}
-                <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-                  {['All', 'Toyota', 'Ford', 'Nissan', 'Tesla', 'Porsche', 'Ferrari', 'Audi', 'Chevrolet'].map((brand) => (
-                    <button
-                      key={brand}
-                      onClick={() => setSelectedBrand(brand)}
-                      className={`px-3 py-1.5 text-[10px] font-bold rounded-lg whitespace-nowrap transition-all border ${selectedBrand === brand
-                        ? 'bg-pink-600 border-pink-500 text-white shadow-md shadow-pink-600/25'
-                        : 'bg-slate-900 border-slate-800/80 text-slate-400 hover:text-slate-200'
-                        }`}
-                    >
-                      {brand}
-                    </button>
-                  ))}
-                </div>
-
-                {CARS_DATABASE
-                  .filter((car) => selectedBrand === 'All' || car.brand === selectedBrand)
-                  .map((car) => {
-                    const isUnlocked = purchasedCars.includes(car.id);
-                    const isActive = activeCarId === car.id;
-                    const canAfford = playerCredits >= car.price;
-                    const isSuperLocked = car.requiresLicense && !hasLicense;
-
-                    return (
-                      <div
-                        key={car.id}
-                        className={`border p-4 rounded-2xl transition-all flex flex-col gap-3 ${isActive
-                          ? 'bg-slate-900 border-pink-500/80 shadow-[0_0_15px_rgba(236,72,153,0.15)]'
-                          : 'bg-slate-900/60 border-slate-800'
-                          }`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-bold text-slate-100">{car.brand} {car.name}</h3>
-                            <span
-                              className="text-[10px] font-bold tracking-wider uppercase"
-                              style={{ color: car.color }}
-                            >
-                              {car.tier}
-                            </span>
-                          </div>
-                          {isUnlocked ? (
-                            <span className="text-[10px] font-bold text-pink-400 bg-pink-950/40 border border-pink-900 px-2 py-0.5 rounded">Owned</span>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <Coins className="w-3.5 h-3.5 text-yellow-400" />
-                              <span className="text-xs font-mono font-bold text-yellow-400">{car.price} Cr</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Spec bar-graphs */}
-                        {(() => {
-                          const upgradesForCar = getCarUpgrades(car.id);
-                          const upgradedStats = getUpgradedStats(car, upgradesForCar);
-                          return (
-                            <div className="flex flex-col gap-1.5 mt-1 bg-slate-950/50 p-3 rounded-xl border border-slate-800/40">
-                              {/* Speed */}
-                              <div>
-                                <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-0.5">
-                                  <span>TOP SPEED</span>
-                                  <span>{Math.round(upgradedStats.speed * 10)}%</span>
-                                </div>
-                                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative">
-                                  <div className="absolute left-0 top-0 h-full bg-pink-500 transition-all duration-300" style={{ width: `${Math.min(100, upgradedStats.speed * 10)}%` }} />
-                                  <div className="absolute left-0 top-0 h-full bg-cyan-500 transition-all duration-300" style={{ width: `${Math.min(100, car.speed * 10)}%` }} />
-                                </div>
-                              </div>
-                              {/* Acceleration */}
-                              <div>
-                                <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-0.5">
-                                  <span>ACCELERATION</span>
-                                  <span>{Math.round(upgradedStats.acceleration * 10)}%</span>
-                                </div>
-                                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative">
-                                  <div className="absolute left-0 top-0 h-full bg-pink-500 transition-all duration-300" style={{ width: `${Math.min(100, upgradedStats.acceleration * 10)}%` }} />
-                                  <div className="absolute left-0 top-0 h-full bg-cyan-500 transition-all duration-300" style={{ width: `${Math.min(100, car.acceleration * 10)}%` }} />
-                                </div>
-                              </div>
-                              {/* Handling */}
-                              <div>
-                                <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-0.5">
-                                  <span>HANDLING</span>
-                                  <span>{Math.round(upgradedStats.handling * 10)}%</span>
-                                </div>
-                                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative">
-                                  <div className="absolute left-0 top-0 h-full bg-pink-500 transition-all duration-300" style={{ width: `${Math.min(100, upgradedStats.handling * 10)}%` }} />
-                                  <div className="absolute left-0 top-0 h-full bg-cyan-500 transition-all duration-300" style={{ width: `${Math.min(100, car.handling * 10)}%` }} />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Dealership Action Buttons */}
-                        {isUnlocked ? (
-                          <button
-                            disabled={isActive}
-                            onClick={() => selectCar(car.id)}
-                            className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all ${isActive
-                              ? 'bg-slate-950 border border-slate-800 text-slate-500 cursor-default'
-                              : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200'
-                              }`}
-                          >
-                            {isActive ? 'Active Vehicle' : 'Select Vehicle'}
-                          </button>
-                        ) : (
-                          <button
-                            disabled={!canAfford || isSuperLocked}
-                            onClick={() => buyCar(car)}
-                            className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all ${isSuperLocked
-                              ? 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                              : canAfford
-                                ? 'bg-yellow-600 hover:bg-yellow-500 border border-yellow-500 text-white shadow-[0_0_15px_rgba(234,179,8,0.2)]'
-                                : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                              }`}
-                          >
-                            {isSuperLocked
-                              ? 'Requires A-License'
-                              : canAfford
-                                ? `Purchase Vehicle (-${car.price} CR)`
-                                : 'Insufficient Credits'}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-
-            {/* TAB: PAINT SHOP */}
-            {activeGarageTab === 'paint' && (
-              <div className="flex flex-col gap-4 animate-fadeIn">
-                <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl flex flex-col gap-4">
-                  <div className="flex items-center gap-2">
-                    <Paintbrush className="w-4 h-4 text-pink-400" />
-                    <span className="text-xs font-bold text-slate-300 uppercase">Body Paint Color</span>
-                  </div>
-
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Select a custom paint finish for your active cyber car. Applied immediately to the 3D showcase stand.
-                  </p>
-
-                  <div className="grid grid-cols-4 gap-3 mt-2">
-                    {PAINT_SWATCHES.map((swatch) => {
-                      const isSelected = selectedColor === swatch.hex;
-                      return (
-                        <button
-                          key={swatch.name}
-                          onClick={() => changeCarColor(swatch.hex)}
-                          className={`group relative w-12 h-12 rounded-xl flex items-center justify-center border hover:scale-105 transition-all ${isSelected
-                            ? 'border-white ring-2 ring-pink-500 ring-offset-2 ring-offset-slate-950'
-                            : 'border-slate-800'
-                            }`}
-                          style={{ backgroundColor: swatch.hex }}
-                          title={swatch.name}
-                        >
-                          {isSelected && <Check className="w-5 h-5 text-white filter drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB: PERFORMANCE TUNING */}
-            {activeGarageTab === 'tuning' && (
-              <div className="flex flex-col gap-5 animate-fadeIn">
-                <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
-                    <Wrench className="w-4 h-4 text-pink-400" />
-                    <span className="text-xs font-bold text-slate-300 uppercase">Performance Tuning</span>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Install high-performance parts to tune your engine, drivetrain, and chassis. Upgrades apply directly to the active vehicle.
-                  </p>
-                </div>
-
-                {UPGRADES_CONFIG.map((group) => (
-                  <div key={group.group} className="flex flex-col gap-3">
-                    <h3 className="text-xs font-black tracking-wider text-cyan-400 uppercase pl-1 border-l-2 border-cyan-500">
-                      {group.group}
-                    </h3>
-
-                    <div className="flex flex-col gap-3">
-                      {group.items.map((item) => {
-                        const currentCarUpgrades = getCarUpgrades(activeCarId);
-
-                        // Resolve current value based on path
-                        let currentVal: any = currentCarUpgrades;
-                        for (let i = 0; i < item.path.length; i++) {
-                          if (currentVal !== undefined && currentVal !== null) {
-                            currentVal = currentVal[item.path[i]];
-                          }
-                        }
-
-                        if (item.type === 'level') {
-                          const maxLvl = item.maxLevel || 3;
-                          const costs = item.costs || [100, 200, 300];
-                          const purchasedLvl = getPurchasedLevel(currentCarUpgrades, item);
-                          const currentLvl = currentVal || 0;
-                          const isMaxed = purchasedLvl >= maxLvl;
-                          const cost = isMaxed ? 0 : (costs[purchasedLvl] || 0);
-                          const canAfford = playerCredits >= cost;
-
-                          return (
-                            <div
-                              key={item.id}
-                              className="bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-slate-700/80 transition-all"
-                            >
-                              <div className="flex-1">
-                                <h4 className="font-bold text-slate-100 text-sm">{item.name}</h4>
-                                <p className="text-xs text-slate-400 mt-1 leading-relaxed">{item.description}</p>
-
-                                 {/* Equipped Stage Selector */}
-                                <div className="flex flex-wrap gap-1.5 mt-3">
-                                  <button
-                                    onClick={() => equipLevelUpgrade(item, 0)}
-                                    className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all border cursor-pointer ${
-                                      currentLvl === 0
-                                        ? 'bg-cyan-600 border-cyan-500 text-white shadow-[0_0_8px_rgba(6,182,212,0.3)]'
-                                        : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-350'
-                                    }`}
-                                  >
-                                    {item.id === 'tireLevel' ? 'Economy' : 'Stock'}
-                                  </button>
-                                  {Array.from({ length: purchasedLvl }).map((_, idx) => {
-                                    const lvl = idx + 1;
-                                    const isEquipped = currentLvl === lvl;
-                                    let btnLabel = `Stage ${lvl}`;
-                                    if (item.id === 'tireLevel') {
-                                      const compounds = ['', 'Super Hard', 'Hard', 'Medium', 'Soft', 'Super Soft'];
-                                      btnLabel = compounds[lvl] || btnLabel;
-                                    }
-                                    return (
-                                      <button
-                                        key={lvl}
-                                        onClick={() => equipLevelUpgrade(item, lvl)}
-                                        className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all border cursor-pointer ${
-                                          isEquipped
-                                            ? 'bg-cyan-600 border-cyan-500 text-white shadow-[0_0_8px_rgba(6,182,212,0.3)]'
-                                            : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:text-slate-200'
-                                        }`}
-                                      >
-                                        {btnLabel}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2.5 shrink-0 self-end md:self-center">
-                                {isMaxed ? (
-                                  <span className="text-[10px] font-bold text-pink-400 bg-pink-950/30 border border-pink-900/40 px-2.5 py-1.5 rounded-lg uppercase tracking-wider">
-                                    Fully Upgraded
-                                  </span>
-                                ) : (
-                                  <button
-                                    onClick={() => buyUpgrade(item, cost)}
-                                    disabled={!canAfford}
-                                    className={`px-3 py-2 rounded-xl text-xs font-bold font-mono transition-all flex items-center gap-1.5 border border-pink-500/80 ${canAfford
-                                      ? 'bg-pink-600 hover:bg-pink-500 border-pink-500 text-white shadow-[0_0_12px_rgba(236,72,153,0.25)] hover:scale-[1.02]'
-                                      : 'bg-slate-800 border-slate-750 text-slate-500 cursor-not-allowed'
-                                      }`}
-                                  >
-                                    <Coins className="w-3.5 h-3.5" />
-                                    <span>
-                                      {item.id === 'tireLevel'
-                                        ? `Buy ${['', 'Super Hard', 'Hard', 'Medium', 'Soft', 'Super Soft'][purchasedLvl + 1] || 'Upgrade'}: ${cost} Cr`
-                                        : `Buy Stg ${purchasedLvl + 1}: ${cost} Cr`
-                                      }
-                                    </span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        } else {
-                          // Toggle item
-                          const isPurchased = isTogglePurchased(currentCarUpgrades, item.id);
-
-                          // Check active equipped state
-                          let isEquipped = false;
-                          if (item.id === 'hasABS') isEquipped = !!currentVal;
-                          else if (item.id === 'hasESC') isEquipped = !!currentVal;
-                          else if (item.id === 'aspiration') isEquipped = currentVal === 'turbo';
-
-                          const cost = item.cost || 0;
-                          const canAfford = playerCredits >= cost;
-
-                          return (
-                            <div
-                              key={item.id}
-                              className="bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700/80 transition-all"
-                            >
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <h4 className="font-bold text-slate-100 text-sm">{item.name}</h4>
-                                  {isPurchased && (
-                                    <span className="text-[9px] font-bold text-cyan-400 bg-cyan-950/40 border border-cyan-900/50 px-1.5 py-0.5 rounded uppercase">
-                                      Owned
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-slate-400 mt-1 leading-relaxed">{item.description}</p>
-                              </div>
-
-                              <div className="flex items-center gap-2 self-end sm:self-center">
-                                {!isPurchased ? (
-                                  <button
-                                    onClick={() => buyUpgrade(item, cost)}
-                                    disabled={!canAfford}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 border border-pink-500/80 ${canAfford
-                                      ? 'bg-pink-600 hover:bg-pink-500 border-pink-500 text-white shadow-[0_0_10px_rgba(236,72,153,0.2)] shadow-pink-600/30'
-                                      : 'bg-slate-800 border-slate-750 text-slate-500 cursor-not-allowed'
-                                      }`}
-                                  >
-                                    <Coins className="w-3.5 h-3.5" />
-                                    <span>{cost} Cr</span>
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => toggleUpgrade(item)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${isEquipped
-                                      ? 'bg-cyan-600 hover:bg-cyan-500 border-cyan-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.2)] shadow-cyan-600/30'
-                                      : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-350'
-                                      }`}
-                                  >
-                                    {isEquipped ? 'EQUIPPED' : 'INSTALL'}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        }
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Garage Footer Quick Info */}
-          <div className="bg-slate-900/40 border border-slate-900 p-4 rounded-2xl">
-            <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block mb-1">Quick Controls</span>
-            <div className="grid grid-cols-2 gap-y-1.5 gap-x-3 font-mono text-[10px] text-slate-400">
-              <div><span className="text-cyan-400 font-bold">W / S</span> Acceleration/Brake</div>
-              <div><span className="text-cyan-400 font-bold">A / D</span> Steering</div>
-              <div><span className="text-cyan-400 font-bold">Space</span> Handbrake Drift</div>
-              <div><span className="text-cyan-400 font-bold">R</span> Reset Position</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* HELP / INSTRUCTIONS MODAL OVERLAY */}
-      {showHelp && (
-        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-40 flex items-center justify-center p-6">
-          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-lg w-full shadow-[0_0_40px_rgba(0,255,255,0.15)] flex flex-col gap-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-black italic tracking-wider text-cyan-400">
-                DRIVING MANUAL & DETAILS
-              </h2>
-              <button
-                onClick={() => setShowHelp(false)}
-                className="text-slate-500 hover:text-slate-300 font-bold p-1"
-              >
-                CLOSE
-              </button>
-            </div>
-
-            <div className="space-y-4 text-sm text-slate-300">
-              <div>
-                <h4 className="font-bold text-slate-100 flex items-center gap-2 mb-1.5">
-                  <span className="w-1.5 h-3 bg-pink-500 rounded" />
-                  Vehicle Controls
-                </h4>
-                <ul className="list-disc pl-5 space-y-1 text-slate-400">
-                  <li>Use <span className="text-white font-semibold">W / A / S / D</span> or the <span className="text-white font-semibold">Arrow Keys</span> to steer, accelerate, and brake.</li>
-                  <li>Hold <span className="text-white font-semibold">Spacebar</span> while turning to engage high-speed drifting.</li>
-                  <li>Press <span className="text-white font-semibold">R</span> to reset the car position if you get stuck or go out-of-bounds.</li>
-                </ul>
-              </div>
-
-              <div>
-                <h4 className="font-bold text-slate-100 flex items-center gap-2 mb-1.5">
-                  <span className="w-1.5 h-3 bg-pink-500 rounded" />
-                  Earning Credits (CR)
-                </h4>
-                <ul className="list-disc pl-5 space-y-1 text-slate-400">
-                  <li><span className="text-white font-semibold">Drifting</span>: Accumulate slide points. Completing a drift successfully awards credits.</li>
-                  <li><span className="text-white font-semibold">Crystals</span>: Search the Open World to find yellow crystals (+50 Credits each).</li>
-                  <li><span className="text-white font-semibold">Racing</span>: Complete circuit laps before the countdown limit. Medals award massive Credit payouts!</li>
-                </ul>
-              </div>
-
-              <div>
-                <h4 className="font-bold text-slate-100 flex items-center gap-2 mb-1.5">
-                  <span className="w-1.5 h-3 bg-pink-500 rounded" />
-                  A-License Unlock
-                </h4>
-                <p className="text-slate-400 leading-relaxed">
-                  Start the <span className="text-yellow-400 font-semibold">License Test</span>, which is a timed gate navigation. Complete all checkpoints before time runs out to unlock the license, giving access to the high-difficulty <span className="text-pink-500 font-semibold">Pro Race</span> and the <span className="text-fuchsia-400 font-semibold">Apex Hypercar</span>!
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setShowHelp(false)}
-              className="w-full bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 py-3 rounded-xl text-xs font-bold transition-all text-white mt-2 shadow-[0_0_15px_rgba(6,182,212,0.2)]"
-            >
-              Back to Game
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* PAUSE OVERLAY */}
+      {/* PAUSE MENU OVERLAY (When Esc is pressed in gameplay) */}
       {isPaused && (
-        <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-fadeIn">
-          <div className="bg-slate-900/90 border border-slate-800/85 backdrop-blur-xl p-8 rounded-3xl max-w-md w-full shadow-[0_0_50px_rgba(6,182,212,0.15)] flex flex-col gap-6 text-center animate-scaleIn">
-            <div>
-              <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase">
-                {activeMode === 'race' ? 'Circuit Race' : activeMode === 'license' ? 'License Test' : activeMode === 'tutorial' ? 'Tutorial' : 'Free Roam'}
-              </span>
-              <h2 className="text-3xl font-black italic bg-gradient-to-r from-cyan-400 via-indigo-400 to-pink-500 bg-clip-text text-transparent uppercase tracking-wider mt-1">
-                Game Paused
-              </h2>
+        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-md z-40 flex items-center justify-center p-6 pointer-events-auto">
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col gap-6 animate-scaleIn">
+            {/* Header */}
+            <div className="text-center">
+              <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase">Simulation Paused</span>
+              <h2 className="text-3xl font-black italic text-white tracking-wider mt-1 uppercase">Pause Menu</h2>
             </div>
 
             {/* Time / Laps Stats block */}
@@ -2681,7 +2000,7 @@ export default function Game() {
                   <div className="flex justify-between items-center px-2">
                     <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Best Lap Time</span>
                     <span className="text-xl font-mono font-black text-cyan-400">
-                      {bestLapTime === Infinity ? '--:--.---' : formatTime(bestLapTime)}
+                      {bestLapTime === Infinity ? '--:--.__-' : formatTime(bestLapTime)}
                     </span>
                   </div>
                   <div className="h-px bg-slate-800/85" />
@@ -2738,7 +2057,7 @@ export default function Game() {
                 <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase leading-none block mb-1">
                   SETTINGS
                 </span>
-                
+
                 {/* TPS Rear Mirror Toggle */}
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex flex-col">
@@ -2748,8 +2067,8 @@ export default function Game() {
                   <button
                     onClick={() => setShowMirrorInTPS(!showMirrorInTPS)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${showMirrorInTPS
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                      ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
                       }`}
                   >
                     {showMirrorInTPS ? 'ENABLED' : 'DISABLED'}
@@ -2767,8 +2086,8 @@ export default function Game() {
                   <button
                     onClick={() => setSoundEnabled(!soundEnabled)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${soundEnabled
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                      ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
                       }`}
                   >
                     {soundEnabled ? 'ENABLED' : 'MUTED'}
@@ -2781,18 +2100,17 @@ export default function Game() {
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex flex-col">
                     <span className="text-xs font-bold text-slate-200">Graphics Quality</span>
-                    <span className="text-[9px] text-slate-500">Bloom, anti-aliasing, and speed shaders</span>
+                    <span className="text-[9px] text-slate-505">Bloom, anti-aliasing, and speed shaders</span>
                   </div>
                   <div className="flex gap-1.5">
                     {(['low', 'medium', 'high'] as const).map((q) => (
                       <button
                         key={q}
                         onClick={() => changeGraphicsQuality(q)}
-                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all border uppercase cursor-pointer ${
-                          graphicsQuality === q
-                            ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400 font-extrabold shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
-                        }`}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all border uppercase cursor-pointer ${graphicsQuality === q
+                          ? 'bg-cyan-950/50 border-cyan-800/85 text-cyan-400 font-extrabold shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                          }`}
                       >
                         {q}
                       </button>
@@ -2803,26 +2121,21 @@ export default function Game() {
                 {graphicsQuality !== 'low' && (
                   <>
                     <div className="h-px bg-slate-800/60" />
-                    {/* Bloom Intensity Slider */}
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-slate-200">Bloom Glow Intensity</span>
-                          <span className="text-[9px] text-slate-500">Adjust the neon glow brightness</span>
-                        </div>
-                        <span className="text-xs font-mono font-bold text-cyan-400">
-                          {bloomIntensity.toFixed(2)}
-                        </span>
+                    {/* Bloom Intensity Toggle */}
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col text-left">
+                        <span className="text-xs font-bold text-slate-200">Bloom Glow Effect</span>
+                        <span className="text-[9px] text-slate-505">Toggle environment bloom glow</span>
                       </div>
-                      <input
-                        type="range"
-                        min="0.0"
-                        max="2.0"
-                        step="0.05"
-                        value={bloomIntensity}
-                        onChange={(e) => changeBloomIntensity(parseFloat(e.target.value))}
-                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400 outline-none"
-                      />
+                      <button
+                        onClick={() => changeBloomIntensity(bloomIntensity > 0.17 ? 0.05 : 0.30)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${bloomIntensity > 0.17
+                          ? 'bg-slate-900 border border-slate-700 text-cyan-400 font-black'
+                          : 'bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-350'
+                          }`}
+                      >
+                        {bloomIntensity > 0.17 ? 'ON' : 'OFF'}
+                      </button>
                     </div>
                   </>
                 )}
@@ -2833,8 +2146,8 @@ export default function Game() {
                 <button
                   onClick={() => setShowHelp(!showHelp)}
                   className={`py-3 px-4 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-2 cursor-pointer ${showHelp
-                      ? 'bg-cyan-950/60 border-cyan-800/80 text-cyan-400'
-                      : 'bg-slate-800/60 border-slate-750 text-slate-350 hover:text-white'
+                    ? 'bg-cyan-950/60 border-cyan-800/85 text-cyan-400'
+                    : 'bg-slate-800/60 border-slate-750 text-slate-355 hover:text-white'
                     }`}
                 >
                   <HelpCircle className="w-4 h-4" />
@@ -2854,914 +2167,115 @@ export default function Game() {
         </div>
       )}
 
-      {/* HUD LAYOUT CUSTOMIZER OVERLAY */}
-      {showHUDCustomizer && (
-        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-xl z-[60] flex items-center justify-center p-4 md:p-8 animate-fadeIn">
-          <div className="bg-slate-900/95 border border-slate-800/85 rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-[0_0_50px_rgba(6,182,212,0.2)] flex flex-col p-6 md:p-8 animate-scaleIn">
-            
-            {/* Header */}
-            <div className="flex justify-between items-start pb-4 border-b border-slate-800">
-              <div>
-                <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase">
-                  Interface Designer
-                </span>
-                <h2 className="text-2xl font-black italic bg-gradient-to-r from-cyan-400 via-indigo-400 to-pink-500 bg-clip-text text-transparent uppercase tracking-wider mt-1">
-                  HUD Layout Customizer
-                </h2>
-                <p className="text-slate-400 text-xs mt-1">
-                  Click on the HUD element blocks in the screen mockup or use the checklist to customize your racetrack overlay interface.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowHUDCustomizer(false)}
-                className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                Save & Close
-              </button>
-            </div>
-
-            {/* Content grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-6">
-              
-              {/* Left Column: Visual Mockup (3 cols) */}
-              <div className="lg:col-span-3 flex flex-col justify-center items-center">
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2.5">
-                  Visual Layout Mockup (16:9 Screen)
-                </span>
-                
-                {/* Visual Mockup Container */}
-                <div className="w-full aspect-video bg-[#05070c] border-2 border-slate-805 rounded-2xl relative overflow-hidden flex flex-col justify-between p-4 shadow-inner">
-                  {/* Subtle Scanlines/grid background for tech vibe */}
-                  <div className="absolute inset-0 bg-[linear-gradient(rgba(18,24,38,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(18,24,38,0.2)_1px,transparent_1px)] bg-[size:10px_10px] pointer-events-none" />
-                  
-                  {/* Backdrop car preview (drawn with styling block or simulated path) */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10">
-                    <div className="w-4/5 h-2/3 border border-slate-800/40 rounded-full blur-xl bg-cyan-500/20" />
-                    <div className="absolute bottom-6 w-32 h-16 border-t-2 border-slate-800/40 rounded-t-3xl" />
-                  </div>
-
-                  {/* Top-Center Group: Mirror & Timers */}
-                  <div className="absolute top-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 z-10 w-[180px]">
-                    {/* Mirror Block */}
-                    <button
-                      onClick={() => setHudConfig(prev => ({ ...prev, showMirror: !prev.showMirror }))}
-                      className={`w-full h-8 rounded-lg flex items-center justify-center text-[8px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                        hudConfig.showMirror
-                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" style={{ display: hudConfig.showMirror ? 'block' : 'none' }} />
-                        REAR MIRROR
-                      </div>
-                    </button>
-
-                    {/* Timer Block */}
-                    <button
-                      onClick={() => setHudConfig(prev => ({ ...prev, showLapTimer: !prev.showLapTimer }))}
-                      className={`w-20 h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                        hudConfig.showLapTimer
-                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                      }`}
-                    >
-                      LAP TIMER
-                    </button>
-                  </div>
-
-                  {/* Top-Left Group: Lap, Length, Map */}
-                  <div className="absolute top-3 left-3 flex flex-col items-start gap-1.5 z-10 w-[95px]">
-                    {/* Lap Counter & Length Box */}
-                    <div className="flex gap-1 w-full">
-                      <button
-                        onClick={() => setHudConfig(prev => ({ ...prev, showLap: !prev.showLap }))}
-                        className={`flex-1 h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                          hudConfig.showLap
-                            ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                            : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                        }`}
-                      >
-                        LAP
-                      </button>
-                      <button
-                        onClick={() => setHudConfig(prev => ({ ...prev, showLength: !prev.showLength }))}
-                        className={`flex-1 h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                          hudConfig.showLength
-                            ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                            : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                        }`}
-                      >
-                        LEN
-                      </button>
-                    </div>
-
-                    {/* Minimap */}
-                    <button
-                      onClick={() => setHudConfig(prev => ({ ...prev, showMap: !prev.showMap }))}
-                      className={`w-full aspect-square max-h-[64px] rounded-lg flex flex-col items-center justify-center text-[8px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                        hudConfig.showMap
-                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                      }`}
-                    >
-                      <Map className="w-3.5 h-3.5 mb-1 text-cyan-400 animate-pulse" style={{ display: hudConfig.showMap ? 'block' : 'none' }} />
-                      MINIMAP
-                    </button>
-                  </div>
-
-                  {/* Top-Right Group: Position, Race Stats */}
-                  <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5 z-10 w-[95px]">
-                    {/* Position */}
-                    <button
-                      onClick={() => setHudConfig(prev => ({ ...prev, showPosition: !prev.showPosition }))}
-                      className={`w-full h-6 rounded-md flex items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                        hudConfig.showPosition
-                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                      }`}
-                    >
-                      POSITION
-                    </button>
-
-                    {/* Race Stats (Best/Total Time) */}
-                    <button
-                      onClick={() => setHudConfig(prev => ({ ...prev, showStats: !prev.showStats }))}
-                      className={`w-full h-11 rounded-lg flex flex-col items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                        hudConfig.showStats
-                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                      }`}
-                    >
-                      <Timer className="w-3 h-3 mb-0.5 text-cyan-400" style={{ display: hudConfig.showStats ? 'block' : 'none' }} />
-                      RACE STATS
-                    </button>
-                  </div>
-
-                  {/* Bottom-Left Group: Speedometer & Transmission */}
-                  <div className="absolute bottom-3 left-3 z-10 w-[110px]">
-                    <button
-                      onClick={() => setHudConfig(prev => ({ ...prev, showSpeedometer: !prev.showSpeedometer }))}
-                      className={`w-full h-12 rounded-lg flex flex-col items-center justify-center text-[7px] font-extrabold tracking-wider transition-all border cursor-pointer ${
-                        hudConfig.showSpeedometer
-                          ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                          : 'bg-slate-950/40 border-slate-850 border-dashed text-slate-600 hover:text-slate-400'
-                      }`}
-                    >
-                      <span className="font-mono text-[9px] mb-0.5 text-cyan-400" style={{ display: hudConfig.showSpeedometer ? 'block' : 'none' }}>240 KM/H</span>
-                      SPEEDOMETER
-                    </button>
-                  </div>
-
-                  {/* Interactive Status Indicator Overlay */}
-                  <div className="absolute bottom-3 right-3 text-[8px] font-mono text-slate-500 bg-slate-950/80 px-2 py-1 rounded border border-slate-800">
-                    CLICK TO TOGGLE BLOCKS
-                  </div>
-                </div>
-                
-                <div className="mt-4 flex items-center justify-between w-full">
-                  <div className="text-[10px] font-mono text-slate-400">
-                    Active Elements: {Object.values(hudConfig).filter(Boolean).length} / 8
-                  </div>
-                  <button
-                    onClick={() => {
-                      setHudConfig(DEFAULT_HUD_CONFIG);
-                      setShowMirrorInTPS(false);
-                    }}
-                    className="flex items-center gap-1 text-[10px] text-pink-500 hover:text-pink-400 font-bold bg-transparent border-0 cursor-pointer transition-colors"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    Reset to Default Layout
-                  </button>
-                </div>
-              </div>
-
-              {/* Right Column: Toggle Checklist (2 cols) */}
-              <div className="lg:col-span-2 flex flex-col gap-3 max-h-[45vh] lg:max-h-[50vh] overflow-y-auto pr-1">
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
-                  HUD Elements Checklist
-                </span>
-
-                {/* Lap Counter */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Lap / Gate Counter</span>
-                    <span className="text-[9px] text-slate-500">Shows current gate or lap progress</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showLap: !prev.showLap }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showLap
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                    }`}
-                  >
-                    {hudConfig.showLap ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Track Length */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Track Length</span>
-                    <span className="text-[9px] text-slate-500">Displays total track circuit length</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showLength: !prev.showLength }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showLength
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-355'
-                    }`}
-                  >
-                    {hudConfig.showLength ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Minimap */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Minimap Canvas</span>
-                    <span className="text-[9px] text-slate-500">Renders racetrack shape and player position</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showMap: !prev.showMap }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showMap
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                    }`}
-                  >
-                    {hudConfig.showMap ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Rear Mirror */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Rear View Mirror</span>
-                    <span className="text-[9px] text-slate-500">Centered secondary camera viewport</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showMirror: !prev.showMirror }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showMirror
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                    }`}
-                  >
-                    {hudConfig.showMirror ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Lap Timer */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Lap Timer</span>
-                    <span className="text-[9px] text-slate-500">Live time limit or current lap timer</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showLapTimer: !prev.showLapTimer }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showLapTimer
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                    }`}
-                  >
-                    {hudConfig.showLapTimer ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Race Position */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Race Position</span>
-                    <span className="text-[9px] text-slate-500">Placement rankings tracker vs AI</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showPosition: !prev.showPosition }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showPosition
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                    }`}
-                  >
-                    {hudConfig.showPosition ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Best & Total Stats */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Time Stats Panel</span>
-                    <span className="text-[9px] text-slate-500">Top-right best lap and total race timers</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showStats: !prev.showStats }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showStats
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-355'
-                    }`}
-                  >
-                    {hudConfig.showStats ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Gear & Speedometer */}
-                <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Gear & Speed Box</span>
-                    <span className="text-[9px] text-slate-500">Speed, RPM, throttle and brake inputs</span>
-                  </div>
-                  <button
-                    onClick={() => setHudConfig(prev => ({ ...prev, showSpeedometer: !prev.showSpeedometer }))}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
-                      hudConfig.showSpeedometer
-                        ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                    }`}
-                  >
-                    {hudConfig.showSpeedometer ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-              </div>
-
-            </div>
-
-            {/* Modal Actions */}
-            <div className="mt-8 pt-4 border-t border-slate-800 flex justify-end gap-3">
-              <button
-                onClick={() => setShowHUDCustomizer(false)}
-                className="bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 text-white font-bold py-2.5 px-6 rounded-xl text-xs tracking-wider transition-all shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:scale-[1.02] cursor-pointer flex items-center gap-1.5"
-              >
-                <Check className="w-4 h-4" />
-                Apply Interface Settings
-              </button>
-            </div>
-
-          </div>
+      {/* MAIN GARAGE INTERFACE */}
+      {activeMode === 'garage' && (
+        <div className="absolute inset-0 pointer-events-none z-[70]">
+          <Garage
+            activeGarageTab={activeGarageTab}
+            tuningState={tuningState}
+            setActiveGarageTab={setActiveGarageTab}
+            activeCarId={activeCarId}
+            playerCredits={playerCredits}
+            selectedColor={selectedColor}
+            carUpgrades={carUpgrades}
+            purchasedCars={purchasedCars}
+            hasLicense={hasLicense}
+            selectedBrand={selectedBrand}
+            setSelectedBrand={setSelectedBrand}
+            isTransitioningDrive={isTransitioningDrive}
+            settingsState={settingsState}
+            activeCarName={activeCarName}
+            buyCar={buyCar}
+            selectCar={selectCar}
+            changeCarColor={changeCarColor}
+            equipLevelUpgrade={equipLevelUpgrade}
+            buyUpgrade={buyUpgrade}
+            toggleUpgrade={toggleUpgrade}
+            startRace={startRace}
+            startFreeRoam={startFreeRoam}
+            startTutorial={startTutorial}
+            startLicenseTest={startLicenseTest}
+            handleDriveClick={handleDriveClick}
+            handleBackToGarageClick={handleBackToGarageClick}
+            handleSettingClick={handleSettingClick}
+            handleTuningClick={handleTuningClick}
+            handleExitTuningClick={handleExitTuningClick}
+            placeholderRef={placeholderRef}
+            setActiveMode={setActiveMode}
+          />
         </div>
       )}
 
-      {/* CUSTOM MAP EDITOR OVERLAY */}
-      {activeMode === 'editor' && (
-        <div className="absolute inset-0 pointer-events-none z-30 animate-fadeIn select-none">
-          
-          {/* Floating Left Header */}
-          <div className="absolute top-6 left-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col gap-1 text-slate-100">
-            <span className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Interactive 3D Editor</span>
-            <h2 className="text-xl font-black text-slate-100 tracking-wider">
-              {editorTrackName || 'Untitled Track'}
-            </h2>
-            <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-col gap-2 text-xs text-slate-400 font-mono">
-              <div className="flex justify-between">
-                <span>Nodes:</span>
-                <span className="text-purple-400 font-bold">{editorNodes.length} / 30</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Min Nodes Needed:</span>
-                <span className="text-slate-300">3</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Track Length:</span>
-                <span className="text-purple-400 font-bold">{formatDistance(getTrackLength(editorNodes.map(n => new THREE.Vector3(n.x, 0, n.z))))}</span>
-              </div>
-            </div>
-          </div>
+      {/* DEDICATED SETTINGS PAGE */}
+      <Setting
+        activeGarageTab={activeGarageTab}
+        settingsSubTab={settingsSubTab}
+        setSettingsSubTab={handleSettingsSubTabChange}
+        settingsVisible={settingsVisible}
+        settingsTransitionComplete={settingsTransitionComplete}
+        soundEnabled={soundEnabled}
+        setSoundEnabled={setSoundEnabled}
+        showMirrorInTPS={showMirrorInTPS}
+        setShowMirrorInTPS={setShowMirrorInTPS}
+        graphicsQuality={graphicsQuality}
+        changeGraphicsQuality={changeGraphicsQuality}
+        bloomIntensity={bloomIntensity}
+        changeBloomIntensity={changeBloomIntensity}
+        placeholderRef={placeholderRef}
+        placeholderRect={placeholderRect}
+        hudConfig={hudConfig}
+        setHudConfig={setHudConfig}
+        defaultHudConfig={DEFAULT_HUD_CONFIG}
+        handleSettingBackClick={handleSettingBackClick}
+        keyBindings={keyBindings}
+        onKeyBindingsChange={handleKeyBindingsChange}
+      />
 
-          {/* Floating Left 3D Controls Legend */}
-          <div className="absolute top-[210px] left-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] text-[11px] text-slate-300 leading-relaxed font-mono">
-            <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase mb-2">3D Editor Controls</div>
-            <div className="space-y-1.5 text-[11px]">
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Left Click:</span>
-                <span className="text-right">Place / Select</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Left Drag:</span>
-                <span className="text-right">Move selected item</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Right Drag:</span>
-                <span className="text-right">Rotate 3D Camera</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">WASD keys:</span>
-                <span className="text-right">Fly Camera</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Space / Q:</span>
-                <span className="text-right">Fly Up</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">E:</span>
-                <span className="text-right">Fly Down</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Shift (hold):</span>
-                <span className="text-right">Fast Fly speed</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Double Click:</span>
-                <span className="text-right text-red-400">Delete item</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Floating Property Sidebar */}
-          <div className="w-[380px] absolute right-6 inset-y-6 pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-3xl p-6 flex flex-col justify-between overflow-y-auto shadow-[0_0_40px_rgba(0,0,0,0.6)]">
-            <div className="space-y-6">
-              {selectedNodeIndex !== null && editorNodes[selectedNodeIndex] && (
-                <div className="space-y-1.5 p-3 bg-slate-950/50 border border-purple-500/30 rounded-xl mb-4">
-                  <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase">
-                    <span>Node {selectedNodeIndex} Width</span>
-                    <span className="font-mono">{editorNodes[selectedNodeIndex].width ?? editorRoadWidth}m</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="60"
-                    step="1"
-                    value={editorNodes[selectedNodeIndex].width ?? editorRoadWidth}
-                    onChange={(e) => {
-                      const w = parseInt(e.target.value);
-                      const newNodes = [...editorNodes];
-                      newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], width: w };
-                      setEditorNodes(newNodes);
-                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                    }}
-                    className="w-full accent-purple-500 cursor-pointer"
-                  />
-
-                  <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase mt-3">
-                    <span>Node {selectedNodeIndex} Elevation</span>
-                    <span className="font-mono">{editorNodes[selectedNodeIndex].y ?? 2}m</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="2"
-                    max="35"
-                    step="1"
-                    value={editorNodes[selectedNodeIndex].y ?? 2}
-                    onChange={(e) => {
-                      const yVal = parseInt(e.target.value);
-                      const newNodes = [...editorNodes];
-                      newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], y: yVal };
-                      setEditorNodes(newNodes);
-                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                    }}
-                    className="w-full accent-purple-500 cursor-pointer"
-                  />
-
-                  <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase mt-3">
-                    <span>Node {selectedNodeIndex} Banking</span>
-                    <span className="font-mono">{editorNodes[selectedNodeIndex].banking ?? 0}°</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-45"
-                    max="45"
-                    step="1"
-                    value={editorNodes[selectedNodeIndex].banking ?? 0}
-                    onChange={(e) => {
-                      const bankVal = parseInt(e.target.value);
-                      const newNodes = [...editorNodes];
-                      newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], banking: bankVal };
-                      setEditorNodes(newNodes);
-                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                    }}
-                    className="w-full accent-purple-500 cursor-pointer"
-                  />
-
-                  <button
-                    onClick={() => {
-                      const newNodes = editorNodes.filter((_, idx) => idx !== selectedNodeIndex);
-                      setEditorNodes(newNodes);
-                      setSelectedNodeIndex(null);
-                      saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                    }}
-                    className="w-full mt-3 bg-red-950/60 hover:bg-red-900 border border-red-800/80 hover:border-red-650 text-red-300 hover:text-white py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
-                  >
-                    Delete Selected Node
-                  </button>
-                </div>
-              )}
-
-              {selectedSceneryIndex !== null && editorScenery[selectedSceneryIndex] && (
-                <div className="space-y-1.5 p-3 bg-slate-950/50 border border-green-500/30 rounded-xl mb-4">
-                  <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
-                    <span>{editorScenery[selectedSceneryIndex].type} Scale</span>
-                    <span className="font-mono">{editorScenery[selectedSceneryIndex].scale}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="20"
-                    step="0.5"
-                    value={editorScenery[selectedSceneryIndex].scale}
-                    onChange={(e) => {
-                      const scale = parseFloat(e.target.value);
-                      const newScenery = [...editorScenery];
-                      newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], scale };
-                      setEditorScenery(newScenery);
-                      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
-                    }}
-                    className="w-full accent-green-500 cursor-pointer mb-2"
-                  />
-
-                  {(editorScenery[selectedSceneryIndex].type === 'hill' || editorScenery[selectedSceneryIndex].type === 'mountain') && (
-                    <div className="mt-4 pt-2 border-t border-green-900/30">
-                      <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
-                        <span>Height Scale</span>
-                        <span className="font-mono">{editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}x</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="20"
-                        step="0.5"
-                        value={editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}
-                        onChange={(e) => {
-                          const heightScale = parseFloat(e.target.value);
-                          const newScenery = [...editorScenery];
-                          newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], heightScale };
-                          setEditorScenery(newScenery);
-                          saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
-                        }}
-                        className="w-full accent-green-500 cursor-pointer"
-                      />
-                    </div>
-                  )}
-
-                  <div className="mt-4 pt-2 border-t border-green-900/30">
-                    <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
-                      <span>Rotation</span>
-                      <span className="font-mono">{Math.round((editorScenery[selectedSceneryIndex].rotation ?? 0) * (180 / Math.PI))}°</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="360"
-                      step="5"
-                      value={Math.round((editorScenery[selectedSceneryIndex].rotation ?? 0) * (180 / Math.PI))}
-                      onChange={(e) => {
-                        const rad = parseFloat(e.target.value) * (Math.PI / 180);
-                        const newScenery = [...editorScenery];
-                        newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], rotation: rad };
-                        setEditorScenery(newScenery);
-                        saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
-                      }}
-                      className="w-full accent-green-500 cursor-pointer"
-                    />
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      const newScenery = editorScenery.filter((_, idx) => idx !== selectedSceneryIndex);
-                      setEditorScenery(newScenery);
-                      setSelectedSceneryIndex(null);
-                      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
-                    }}
-                    className="w-full mt-3 bg-red-955/60 hover:bg-red-900 border border-red-800/80 hover:border-red-650 text-red-300 hover:text-white py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
-                  >
-                    Delete Selected Scenery
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Track Design & Setup</h3>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Track Name</label>
-                <input
-                  type="text"
-                  value={editorTrackName}
-                  onChange={(e) => {
-                    setEditorTrackName(e.target.value);
-                    saveCustomTrack(editorNodes, e.target.value, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
-                  }}
-                  placeholder="My Custom Track"
-                  maxLength={24}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors"
-                />
-              </div>
-
-              <div className="space-y-1.5 mt-4">
-                <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Snap to Grid</label>
-                <select
-                  value={snapToGrid}
-                  onChange={(e) => setSnapToGrid(parseInt(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors cursor-pointer"
-                >
-                  <option value={0}>Off (Free Move)</option>
-                  <option value={5}>5m Grid</option>
-                  <option value={10}>10m Grid</option>
-                  <option value={20}>20m Grid</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5 mt-4">
-                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                  <span>Default Node Elevation</span>
-                  <span className="text-purple-400 font-mono">{editorCornerHeight}m</span>
-                </div>
-                <input
-                  type="range"
-                  min="2"
-                  max="35"
-                  step="1"
-                  value={editorCornerHeight}
-                  onChange={(e) => setEditorCornerHeight(parseInt(e.target.value))}
-                  className="w-full accent-purple-500 cursor-pointer"
-                />
-              </div>
-
-              <div className="space-y-1.5 mt-4">
-                <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block">Grid Size (Map Scale)</label>
-                <select
-                  value={editorGridLimit}
-                  onChange={(e) => {
-                    const newLimit = parseInt(e.target.value);
-                    setEditorGridLimit(newLimit);
-                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, newLimit);
-                  }}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none transition-colors cursor-pointer"
-                >
-                  <option value={250}>250m (Total 500m area)</option>
-                  <option value={500}>500m (Total 1.0km area)</option>
-                  <option value={1000}>1000m (Total 2.0km area)</option>
-                  <option value={2000}>2000m (Total 4.0km area)</option>
-                  <option value={3000}>3000m (Total 6.0km area)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5 mt-4">
-                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                  <span>Road Width</span>
-                  <span className="text-purple-400 font-mono">{editorRoadWidth}m</span>
-                </div>
-                <input
-                  type="range"
-                  min="12"
-                  max="40"
-                  step="2"
-                  value={editorRoadWidth}
-                  onChange={(e) => {
-                    const width = parseInt(e.target.value);
-                    setEditorRoadWidth(width);
-                    saveCustomTrack(editorNodes, editorTrackName, width, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                  }}
-                  className="w-full accent-purple-500 cursor-pointer"
-                />
-              </div>
-
-              <div className="space-y-1.5 mt-4">
-                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                  <span>Time Limit (Lap)</span>
-                  <span className="text-purple-400 font-mono">{editorTimeLimit}s</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="120"
-                  step="5"
-                  value={editorTimeLimit}
-                  onChange={(e) => {
-                    const time = parseInt(e.target.value);
-                    setEditorTimeLimit(time);
-                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, time, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                  }}
-                  className="w-full accent-purple-500 cursor-pointer"
-                />
-              </div>
-
-              <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
-                <div className="flex flex-col">
-                  <span className="text-[11px] font-bold text-slate-355">Active Obstacles</span>
-                  <span className="text-[9px] text-slate-500">Spawns barrier cones along paths</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={editorHasObstacles}
-                  onChange={(e) => {
-                    setEditorHasObstacles(e.target.checked);
-                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, e.target.checked, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                  }}
-                  className="w-4 h-4 accent-purple-500 cursor-pointer"
-                />
-              </div>
-
-              <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
-                <div className="flex flex-col">
-                  <span className="text-[11px] font-bold text-slate-355">Trackside Grass</span>
-                  <span className="text-[9px] text-slate-500">Renders grass strips along the curbs</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={editorHaveGrass}
-                  onChange={(e) => {
-                    setEditorHaveGrass(e.target.checked);
-                    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, e.target.checked);
-                  }}
-                  className="w-4 h-4 accent-purple-500 cursor-pointer"
-                />
-              </div>
-
-              {editorHaveGrass && (
-                <div className="space-y-1.5 mt-4">
-                  <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                    <span>Grass Field Width (Length)</span>
-                    <span className="text-purple-400 font-mono">{editorGrassWidth}m</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="2"
-                    max="12"
-                    step="1"
-                    value={editorGrassWidth}
-                    onChange={(e) => {
-                      const width = parseInt(e.target.value);
-                      setEditorGrassWidth(width);
-                      saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, width);
-                    }}
-                    className="w-full accent-purple-500 cursor-pointer"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div>
-              <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-2">Track Presets</h3>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => handleApplyTemplate('oval')}
-                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
-                >
-                  Oval Loop
-                </button>
-                <button
-                  onClick={() => handleApplyTemplate('scurve')}
-                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
-                >
-                  S-Curves
-                </button>
-                <button
-                  onClick={() => handleApplyTemplate('figure8')}
-                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold py-2 rounded-xl transition-all cursor-pointer text-slate-300"
-                >
-                  Figure 8
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider">Vector3 Code Tools</h3>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(
-                      editorNodes.map(n => `new THREE.Vector3(${Math.round(n.x)}, 2, ${Math.round(n.z)})`).join(',\n')
-                    );
-                    alert("Vector3 coordinate code copied to clipboard!");
-                  }}
-                  className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer bg-transparent border-0 font-bold"
-                >
-                  <Copy className="w-3 h-3" /> Copy Code
-                </button>
-              </div>
-
-              <textarea
-                placeholder="Paste new THREE.Vector3(x, 2, z) lines here and click 'Import Code' to load a custom track path..."
-                id="import-export-textarea"
-                className="w-full bg-slate-955 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-[10px] font-mono text-slate-400 outline-none transition-colors h-24 resize-none leading-relaxed"
-              />
-
-              <button
-                onClick={() => {
-                  const txtarea = document.getElementById('import-export-textarea') as HTMLTextAreaElement;
-                  if (txtarea) importTrack(txtarea.value);
-                }}
-                className="w-full bg-slate-955 hover:bg-slate-800 border border-slate-800 py-1.5 rounded-xl text-[10px] font-bold transition-all text-slate-200 cursor-pointer"
-              >
-                Import Code
-              </button>
-            </div>
-
-            <div className="mt-6 space-y-2">
-              <button
-                disabled={editorNodes.length < 3}
-                onClick={launchTestDrive}
-                className={`w-full py-3.5 rounded-xl text-xs font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-2 border cursor-pointer ${editorNodes.length >= 3
-                  ? 'bg-purple-600 hover:bg-purple-500 border-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.35)] hover:shadow-[0_0_20px_rgba(168,85,247,0.55)]'
-                  : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                  }`}
-              >
-                <Play className="w-4 h-4 fill-current" />
-                {editorNodes.length >= 3 ? 'Test Drive Track' : 'Needs Min. 3 Nodes'}
-              </button>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={handleClearAll}
-                  className="bg-slate-955 hover:bg-red-955/40 border border-slate-800 hover:border-red-900/60 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-red-400 transition-all cursor-pointer"
-                >
-                  Clear All
-                </button>
-                <button
-                  onClick={() => {
-                    setActiveMode('garage');
-                    if (livePreview) {
-                      setLivePreview(false);
-                      engineRef.current?.buildGarage();
-                    }
-                  }}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 py-2 rounded-xl text-xs font-bold text-slate-250 transition-all cursor-pointer"
-                >
-                  Close Editor
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Floating Editor Panel */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-3xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col items-center gap-4 w-[620px]">
-            {/* Mode Tab Toggle */}
-            <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 w-full max-w-[320px]">
-              <button
-                onClick={() => setEditorTool('node')}
-                className={`flex-1 text-xs font-extrabold py-2 px-4 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
-                  editorTool === 'node'
-                    ? 'bg-purple-600 text-white shadow-[0_0_10px_rgba(168,85,247,0.3)]'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Track Mode
-              </button>
-              <button
-                onClick={() => setEditorTool('tree1')}
-                className={`flex-1 text-xs font-extrabold py-2 px-4 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
-                  editorTool !== 'node'
-                    ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(16,185,129,0.3)]'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Decorate Mode
-              </button>
-            </div>
-
-            {/* Tools list */}
-            <div className="flex gap-3 justify-center items-center w-full text-slate-300">
-              {editorTool === 'node' ? (
-                // Track Mode: single tool (Node)
-                <button
-                  onClick={() => setEditorTool('node')}
-                  className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border transition-all cursor-pointer w-[100px] h-[95px] justify-between ${
-                    editorTool === 'node'
-                      ? 'bg-purple-950/40 border-purple-500/80 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
-                      : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  {renderToolIcon('node', editorTool === 'node')}
-                  <span className="text-[10px] font-bold tracking-wide">Track Node</span>
-                </button>
-              ) : (
-                // Decorate Mode: scenery tools (tree1, tree2, tree3, rock, mountain, hill, podium)
-                <div className="flex gap-2.5 overflow-x-auto w-full justify-start py-1 px-1">
-                  {[
-                    { id: 'tree1', name: 'Conifer' },
-                    { id: 'tree2', name: 'Oak Tree' },
-                    { id: 'tree3', name: 'Palm Tree' },
-                    { id: 'rock', name: 'Rock' },
-                    { id: 'mountain', name: 'Mountain' },
-                    { id: 'hill', name: 'Hill' },
-                    { id: 'podium', name: 'Grandstand' },
-                  ].map((item) => {
-                    const isActive = editorTool === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => setEditorTool(item.id as any)}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-2xl border transition-all cursor-pointer w-[75px] h-[85px] justify-between shrink-0 ${
-                          isActive
-                            ? 'bg-emerald-950/40 border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
-                            : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
-                        }`}
-                      >
-                        {renderToolIcon(item.id, isActive)}
-                        <span className="text-[9px] font-bold tracking-wide text-center leading-none">{item.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MAP EDITOR PANEL */}
+      <MapEditor
+        activeMode={activeMode}
+        editorNodes={editorNodes}
+        setEditorNodes={setEditorNodes}
+        editorScenery={editorScenery}
+        setEditorScenery={setEditorScenery}
+        editorTool={editorTool}
+        setEditorTool={setEditorTool}
+        editorCornerHeight={editorCornerHeight}
+        setEditorCornerHeight={setEditorCornerHeight}
+        selectedNodeIndex={selectedNodeIndex}
+        setSelectedNodeIndex={setSelectedNodeIndex}
+        selectedSceneryIndex={selectedSceneryIndex}
+        setSelectedSceneryIndex={setSelectedSceneryIndex}
+        editorTrackName={editorTrackName}
+        setEditorTrackName={setEditorTrackName}
+        editorRoadWidth={editorRoadWidth}
+        setEditorRoadWidth={setEditorRoadWidth}
+        editorTimeLimit={editorTimeLimit}
+        setEditorTimeLimit={setEditorTimeLimit}
+        editorHasObstacles={editorHasObstacles}
+        setEditorHasObstacles={setEditorHasObstacles}
+        editorHaveGrass={editorHaveGrass}
+        setEditorHaveGrass={setEditorHaveGrass}
+        editorGrassWidth={editorGrassWidth}
+        setEditorGrassWidth={setEditorGrassWidth}
+        editorGridLimit={editorGridLimit}
+        setEditorGridLimit={setEditorGridLimit}
+        snapToGrid={snapToGrid}
+        setSnapToGrid={setSnapToGrid}
+        livePreview={livePreview}
+        setLivePreview={setLivePreview}
+        saveCustomTrack={saveCustomTrack}
+        importTrack={importTrack}
+        handleClearAll={handleClearAll}
+        handleApplyTemplate={handleApplyTemplate}
+        launchTestDrive={launchTestDrive}
+        exitToGarage={exitToGarage}
+      />
+      {/* Cinematic Blackout Overlay for Drive transition */}
+      <div
+        className={`fixed inset-0 bg-black z-[65] pointer-events-none transition-opacity duration-500 ease-in-out ${isBlackOverlay ? 'opacity-100' : 'opacity-0'
+          }`}
+      />
     </div>
   );
 }

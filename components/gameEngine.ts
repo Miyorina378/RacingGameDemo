@@ -11,8 +11,13 @@ import { TutorialMode } from './modes/TutorialMode';
 import { TRACKS_DATABASE } from './config/TrackDatabase';
 import { Sky } from './objects/Sky';
 import { PostProcessing } from './PostProcessing';
-
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
+import { KeyBindings, DEFAULT_KEY_BINDINGS } from './option';
+import { GameModeName, GameStatus } from './engine/types';
+import { InputController } from './engine/InputController';
+import { createThreeWorld } from './engine/threeWorld';
+import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
+
 export type { CarConfig };
 
 export interface EngineCallbacks {
@@ -45,10 +50,23 @@ export class GameEngine {
   public sky!: Sky;
   public particles!: ParticleSystem;
   public keys: { [key: string]: boolean } = {};
+  public keyBindings: KeyBindings = { ...DEFAULT_KEY_BINDINGS };
+  public activeGarageTab: string | null = null;
+  public tuningState: 'closed' | 'entering' | 'open' | 'exiting' = 'closed';
+  public tuningCameraProgress = 0;
+  private inputController!: InputController;
+  public tuningTheta = 0;
+  public tuningPhi = 0.15;
+  public tuningRadius = 5.5;
+  private isPointerDown = false;
+  private prevPointerX = 0;
+  private prevPointerY = 0;
+  private tuningRadiusInitialized = false;
+  private prevCarLength = 0;
 
   // Gameplay State
-  public activeMode: 'garage' | 'free_roam' | 'license' | 'race' | 'tutorial' | 'editor' = 'garage';
-  
+  public activeMode: GameModeName = 'garage';
+
   // Editor State
   public editorState = {
     nodes: [] as { x: number; z: number; y?: number; width?: number }[],
@@ -70,7 +88,7 @@ export class GameEngine {
     onDragSceneryEnd: null as (() => void) | null,
   };
   public currentModeInstance: GameMode | null = null;
-  public gameStatus: 'idle' | 'countdown' | 'playing' | 'success' | 'failed' = 'idle';
+  public gameStatus: GameStatus = 'idle';
   public gameTimer = 0;
   public isPaused = false;
   public activeTrackId = 'sprint_circuit';
@@ -108,6 +126,12 @@ export class GameEngine {
     this.initThree();
     this.setupInputs();
 
+    // Register window pointer listeners for interactive tuning camera
+    window.addEventListener('pointerdown', this.handlePointerDown);
+    window.addEventListener('pointermove', this.handlePointerMove);
+    window.addEventListener('pointerup', this.handlePointerUp);
+    window.addEventListener('wheel', this.handleWheel, { passive: false });
+
     // Spawn vehicle and particle system
     this.vehicle = new Vehicle(this.currentCarId, this.carColor);
     this.scene.add(this.vehicle.mesh);
@@ -120,68 +144,21 @@ export class GameEngine {
   }
 
   private initThree() {
-    const width = this.canvas.clientWidth;
-    const height = this.canvas.clientHeight;
+    const world = createThreeWorld(this.canvas);
+    this.scene = world.scene;
+    this.camera = world.camera;
+    this.rearCamera = world.rearCamera;
+    this.renderer = world.renderer;
+    this.ambientLight = world.ambientLight;
+    this.dirLight = world.dirLight;
+    this.sky = world.sky;
+    this.postProcessing = world.postProcessing;
+    this.environmentGroup = world.environmentGroup;
 
-    this.scene = new THREE.Scene();
-
-    this.camera = new THREE.PerspectiveCamera(65, width / height, 0.1, 4000);
-    this.rearCamera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: this.canvas,
-      antialias: true,
-      alpha: false,
-    });
-    this.renderer.setSize(width, height, false);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    
-    // Set up HDR Tone Mapping and Color Space for visual consistency
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-    // Lights
-    this.ambientLight = new THREE.AmbientLight(0x24244d, 1.0);
-    this.scene.add(this.ambientLight);
-
-    this.dirLight = new THREE.DirectionalLight(0xffffff, 1.2); // White directional light for realistic road colors
-    this.dirLight.position.set(0, 100, -100);
-    this.dirLight.castShadow = true;
-    
-    // Set up high-res shadow maps and bounding box to follow car
-    this.dirLight.shadow.mapSize.width = 2048;
-    this.dirLight.shadow.mapSize.height = 2048;
-    this.dirLight.shadow.camera.near = 0.5;
-    this.dirLight.shadow.camera.far = 400;
-    
-    const d = 120;
-    this.dirLight.shadow.camera.left = -d;
-    this.dirLight.shadow.camera.right = d;
-    this.dirLight.shadow.camera.top = d;
-    this.dirLight.shadow.camera.bottom = -d;
-    this.dirLight.shadow.bias = -0.0005; // Prevent shadow acne
-
-    this.scene.add(this.dirLight);
-    this.scene.add(this.dirLight.target);
-
-    // Initialize Sky
-    this.sky = new Sky(this.scene, this.renderer, this.ambientLight, this.dirLight);
-
-    // Initialize PostProcessing
-    this.postProcessing = new PostProcessing(this.renderer, this.scene, this.camera);
-
-    // Setup environments group
-    this.environmentGroup = new THREE.Group();
-    this.scene.add(this.environmentGroup);
-
-    // Resize listener
     window.addEventListener('resize', this.handleResize);
   }
 
-  private handleResize = () => {
+  public handleResize = () => {
     if (!this.canvas) return;
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
@@ -194,22 +171,20 @@ export class GameEngine {
   };
 
   private setupInputs() {
-    window.addEventListener('keydown', (e) => {
-      this.keys[e.key.toLowerCase()] = true;
-      if (e.key.toLowerCase() === 'r' && this.activeMode !== 'garage' && !this.isPaused) {
-        this.resetCar();
-      }
-      if (e.key.toLowerCase() === 'z' && this.activeMode !== 'garage' && !this.isPaused) {
+    this.inputController = new InputController({
+      keys: this.keys,
+      getKeyBindings: () => this.keyBindings,
+      getActiveMode: () => this.activeMode,
+      isPaused: () => this.isPaused,
+      resetCar: () => this.resetCar(),
+      toggleCameraView: () => {
         this.cameraViewMode = this.cameraViewMode === 'chase' ? 'driver' : 'chase';
         if (this.cameraViewMode === 'chase') {
           this.camera.up.set(0, 1, 0);
         }
       }
     });
-
-    window.addEventListener('keyup', (e) => {
-      this.keys[e.key.toLowerCase()] = false;
-    });
+    this.inputController.connect();
   }
 
   // --- STATE SWITCHING / FACTORY ---
@@ -235,44 +210,7 @@ export class GameEngine {
   }
 
   public applyShadowsToScene() {
-    this.scene.traverse((child) => {
-      if (child instanceof THREE.Mesh || child instanceof THREE.InstancedMesh) {
-        // Exclude particle system meshes which use Basic material and don't need lighting
-        if (child.material && (child.material as any).type === 'MeshBasicMaterial') {
-          // Check if it's the black grid floor background (MeshBasicMaterial but we want it to receive shadows)
-          const isGroundGrid = child.geometry && child.geometry.type === 'PlaneGeometry' && (child.material as any).color && (child.material as any).color.getHex() === 0x0a0a14;
-          if (!isGroundGrid) {
-            child.castShadow = false;
-            child.receiveShadow = false;
-            return;
-          }
-        }
-
-        // Road, grass ground, lines and curbs should only receive shadows
-        const isFlatGround = child.name === 'ground' || 
-          (child.geometry && (child.geometry.type === 'BufferGeometry' || child.geometry.type === 'PlaneGeometry') && 
-           child.material && 
-           ((child.material as any).color && 
-            ((child.material as any).color.getHex() === 0x1f1f23 || // road
-             (child.material as any).color.getHex() === 0x7bb369 || // grass
-             (child.material as any).color.getHex() === 0x0a0a14 || // floor grid background
-             (child.material as any).color.getHex() === 0xeeeeee || // lines
-             (child.material as any).color.getHex() === 0xffcc00)));  // center dashed line
-        
-        if (isFlatGround) {
-          child.receiveShadow = true;
-          child.castShadow = false;
-        } else if (child instanceof THREE.InstancedMesh && child.material && (child.material as any).customProgramCacheKey && (child.material as any).customProgramCacheKey() === 'grass_leaves') {
-          // Grass blades only receive shadows for high performance (casting thousands of tiny shadows is extremely slow)
-          child.receiveShadow = true;
-          child.castShadow = false;
-        } else {
-          // Buildings, ramps, concrete walls, fences, fence posts, vehicles, crystals, checkpoints cast & receive shadows
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      }
-    });
+    applyShadowsToScene(this.scene);
   }
 
   private snapCameraBehindCar() {
@@ -288,7 +226,7 @@ export class GameEngine {
       const localLookDir = new THREE.Vector3(offset.x * scale, offset.y * scale, (offset.z + 10.0) * scale);
       const worldLookTarget = localLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
       this.camera.lookAt(worldLookTarget);
-      
+
       const localUp = new THREE.Vector3(0, 1, 0);
       const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
       this.camera.up.copy(worldUp);
@@ -555,6 +493,13 @@ export class GameEngine {
     // Decay checkpoint flash intensity
     this.checkpointFlash = Math.max(0.0, this.checkpointFlash - deltaTime * 2.2);
 
+    // Smoothly transition camera progress based on tuningState
+    if (this.tuningState === 'entering' || this.tuningState === 'open') {
+      this.tuningCameraProgress = Math.min(1.0, this.tuningCameraProgress + deltaTime * 2.0);
+    } else {
+      this.tuningCameraProgress = Math.max(0.0, this.tuningCameraProgress - deltaTime * 2.0);
+    }
+
     if (!this.isPaused) {
       // 1. Delegate tick to active mode instance
       if (this.currentModeInstance) {
@@ -635,7 +580,7 @@ export class GameEngine {
     this.renderer.setViewport(0, 0, width, height);
     this.renderer.setScissor(0, 0, width, height);
     this.renderer.setScissorTest(false);
-    
+
     if (this.postProcessing) {
       this.postProcessing.render(deltaTime);
     } else {
@@ -695,20 +640,55 @@ export class GameEngine {
       return;
     }
     if (this.activeMode === 'garage') {
-      const orbitSpeed = 0.0003;
-      const orbitRadius = 9;
-      const time = Date.now() * orbitSpeed;
+      if (this.tuningState !== 'closed') {
+        this.camera.up.set(0, 1, 0);
 
-      this.camera.position.set(
-        Math.sin(time) * orbitRadius,
-        4.0,
-        Math.cos(time) * orbitRadius
-      );
-      this.camera.lookAt(0, 0.9, 0);
+        // Calculate dynamic dimensions of the vehicle to position camera correctly
+        const box = new THREE.Box3().setFromObject(this.vehicle.mesh);
+        const size = box.getSize(new THREE.Vector3());
+        const carLength = size.z > 0.5 ? size.z : 4.8;
+        const carHeight = size.y > 0.5 ? size.y : 1.2;
+
+        const aspect = this.camera.aspect;
+        let zoomFactor = 1.0;
+        if (aspect < 1) {
+          zoomFactor = Math.min(1.8, 1.0 / aspect);
+        }
+
+        // Initialize base tuning camera position / radius
+        if (!this.tuningRadiusInitialized || this.prevCarLength !== carLength) {
+          this.tuningRadius = (carLength * 0.75);
+          this.tuningTheta = 0; // Front view by default
+          this.tuningPhi = 0.15; // Slightly elevated front view
+          this.tuningRadiusInitialized = true;
+          this.prevCarLength = carLength;
+        }
+
+        const activeRadius = this.tuningRadius * zoomFactor;
+
+        // Calculate position in spherical coordinates centered around (0, carHeight * 0.4, 0)
+        const targetX = Math.sin(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
+        const targetY = (carHeight * 0.4) + Math.sin(this.tuningPhi) * activeRadius;
+        const targetZ = Math.cos(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
+
+        this.camera.position.set(targetX, targetY, targetZ);
+        this.camera.lookAt(0, carHeight * 0.4, 0);
+      } else {
+        const orbitSpeed = 0.0003;
+        const orbitRadius = 9;
+        const time = Date.now() * orbitSpeed;
+
+        this.camera.position.set(
+          Math.sin(time) * orbitRadius,
+          4.0,
+          Math.cos(time) * orbitRadius
+        );
+        this.camera.lookAt(0, 0.9, 0);
+      }
     } else {
       if (this.cameraViewMode === 'driver') {
         this.vehicle.mesh.updateMatrixWorld(true);
-        
+
         const config = CARS_DATABASE.find(c => c.id === this.currentCarId) || CARS_DATABASE[0];
         const offset = config.driverCameraOffset || { x: 0, y: 1.05, z: 0.8 };
         const scale = config.visualScale !== undefined ? config.visualScale : 1.0;
@@ -725,7 +705,7 @@ export class GameEngine {
         this.camera.up.copy(worldUp);
       } else {
         this.camera.up.set(0, 1, 0);
-        
+
         const followDist = 8.5;
         const heightOffset = 3.6;
 
@@ -751,20 +731,82 @@ export class GameEngine {
     // Update rear view camera
     if (this.activeMode !== 'garage' && this.rearCamera && this.vehicle) {
       this.vehicle.mesh.updateMatrixWorld(true);
-      
+
       const localRearCamPos = new THREE.Vector3(0, 1.15, -0.2);
       const worldRearCamPos = localRearCamPos.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
       this.rearCamera.position.copy(worldRearCamPos);
-      
+
       const localRearLookDir = new THREE.Vector3(0, 1.15, -20.0);
       const worldRearLookTarget = localRearLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
       this.rearCamera.lookAt(worldRearLookTarget);
-      
+
       const localUp = new THREE.Vector3(0, 1, 0);
       const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
       this.rearCamera.up.copy(worldUp);
     }
   }
+
+  private handlePointerDown = (e: PointerEvent) => {
+    if (this.activeMode !== 'garage' || this.tuningState === 'closed') return;
+    
+    const rect = this.canvas.getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+      this.isPointerDown = true;
+      this.prevPointerX = e.clientX;
+      this.prevPointerY = e.clientY;
+      try {
+        this.canvas.setPointerCapture(e.pointerId);
+      } catch (err) {}
+    }
+  };
+
+  private handlePointerMove = (e: PointerEvent) => {
+    if (!this.isPointerDown || this.activeMode !== 'garage' || this.tuningState === 'closed') return;
+    
+    const deltaX = e.clientX - this.prevPointerX;
+    const deltaY = e.clientY - this.prevPointerY;
+    
+    this.prevPointerX = e.clientX;
+    this.prevPointerY = e.clientY;
+    
+    this.tuningTheta -= deltaX * 0.005;
+    this.tuningPhi = Math.max(0.02, Math.min(Math.PI / 2.2, this.tuningPhi + deltaY * 0.005));
+  };
+
+  private handlePointerUp = (e: PointerEvent) => {
+    if (this.isPointerDown) {
+      this.isPointerDown = false;
+      try {
+        this.canvas.releasePointerCapture(e.pointerId);
+      } catch (err) {}
+    }
+  };
+
+  private handleWheel = (e: WheelEvent) => {
+    if (this.activeMode !== 'garage' || this.tuningState === 'closed') return;
+    
+    const rect = this.canvas.getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+      e.preventDefault();
+      
+      const zoomAmount = e.deltaY * 0.005;
+      
+      const box = new THREE.Box3().setFromObject(this.vehicle.mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const carLength = size.z > 0.5 ? size.z : 4.8;
+      
+      const minRadius = carLength * 0.4;
+      const maxRadius = carLength * 2.5;
+      
+      this.tuningRadius = Math.max(minRadius, Math.min(maxRadius, this.tuningRadius + zoomAmount * carLength * 0.1));
+    }
+  };
 
   public destroy() {
     if (this.animationFrameId) {
@@ -773,26 +815,22 @@ export class GameEngine {
 
     this.resetGameplayTimer();
 
+    if (this.inputController) {
+      this.inputController.disconnect();
+    }
+
+    window.removeEventListener('pointerdown', this.handlePointerDown);
+    window.removeEventListener('pointermove', this.handlePointerMove);
+    window.removeEventListener('pointerup', this.handlePointerUp);
+    window.removeEventListener('wheel', this.handleWheel);
+
     window.removeEventListener('resize', this.handleResize);
 
     if (this.currentModeInstance) {
       this.currentModeInstance.cleanup();
     }
 
-    // Traversal geometry disposals
-    this.scene.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) {
-          if (Array.isArray(obj.material)) {
-            obj.material.forEach((mat) => mat.dispose());
-          } else {
-            obj.material.dispose();
-          }
-        }
-      }
-    });
-
+    disposeSceneObjects(this.scene);
     this.renderer.dispose();
   }
 }

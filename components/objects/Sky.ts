@@ -262,6 +262,16 @@ export class Sky {
     }
   }
 
+  public getTimeOfDayVal(): number {
+    return this.uTimeOfDayVal;
+  }
+
+  public setVisible(visible: boolean) {
+    if (this.skyMesh) {
+      this.skyMesh.visible = visible;
+    }
+  }
+
   public updateSkyPosition(cameraPosition: THREE.Vector3) {
     // Recenter sky dome around camera position so it acts as an infinite background
     if (this.skyMesh) {

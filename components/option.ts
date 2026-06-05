@@ -7,6 +7,7 @@ export interface HUDConfig {
   showPosition: boolean;
   showStats: boolean;
   showSpeedometer: boolean;
+  speedUnit?: 'kmh' | 'mph';
 }
 
 export const DEFAULT_HUD_CONFIG: HUDConfig = {
@@ -18,12 +19,14 @@ export const DEFAULT_HUD_CONFIG: HUDConfig = {
   showPosition: true,
   showStats: true,
   showSpeedometer: true,
+  speedUnit: 'kmh',
 };
 
 const STORAGE_KEYS = {
   HUD_CONFIG: 'cyberdrive_hud_config',
   MIRROR_TPS: 'cyberdrive_mirror_tps',
   SOUND_ENABLED: 'cyberdrive_sound_enabled',
+  KEY_BINDINGS: 'cyberdrive_key_bindings',
 };
 
 const isClient = typeof window !== 'undefined';
@@ -82,5 +85,40 @@ export function saveSoundEnabled(value: boolean): void {
     localStorage.setItem(STORAGE_KEYS.SOUND_ENABLED, String(value));
   } catch (e) {
     console.error('Failed to save sound setting:', e);
+  }
+}
+
+export interface KeyBindings {
+  accelerate: string;
+  brake: string;
+  steerLeft: string;
+  steerRight: string;
+  handbrake: string;
+}
+
+export const DEFAULT_KEY_BINDINGS: KeyBindings = {
+  accelerate: 'w',
+  brake: 's',
+  steerLeft: 'a',
+  steerRight: 'd',
+  handbrake: ' ',
+};
+
+export function loadKeyBindings(): KeyBindings {
+  if (!isClient) return DEFAULT_KEY_BINDINGS;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.KEY_BINDINGS);
+    return saved ? JSON.parse(saved) : DEFAULT_KEY_BINDINGS;
+  } catch (e) {
+    return DEFAULT_KEY_BINDINGS;
+  }
+}
+
+export function saveKeyBindings(bindings: KeyBindings): void {
+  if (!isClient) return;
+  try {
+    localStorage.setItem(STORAGE_KEYS.KEY_BINDINGS, JSON.stringify(bindings));
+  } catch (e) {
+    console.error('Failed to save key bindings:', e);
   }
 }
