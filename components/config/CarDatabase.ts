@@ -1,3 +1,15 @@
+export interface TorquePoint {
+  rpm: number;
+  torque: number;
+}
+
+export interface DifferentialConfig {
+  accelLock: number;      // 0.0 = open diff, 1.0 = fully locked under throttle
+  decelLock: number;      // locking under braking / lift
+  preload?: number;       // baseline locking with no strong input
+  awdFrontBias?: number;  // AWD torque split, 0.40 = 40% front / 60% rear
+}
+
 export interface CarConfig {
   id: string;
   name: string;
@@ -7,7 +19,6 @@ export interface CarConfig {
   acceleration: number;
   handling: number;
   price: number;
-  unlocked: boolean;
   color: string;
   tier: 'Entry Tier' | 'Sport Tier' | 'Hyper Tier' | 'Legendary Tier';
   requiresLicense: boolean;
@@ -19,6 +30,24 @@ export interface CarConfig {
   dragCoeff: number;
   driveType: 'FWD' | 'RWD' | 'AWD';
   brakingRate?: number;
+  wheelbase?: number;
+  trackWidth?: number;
+  cgHeight?: number;
+  yawInertia?: number;
+  frontWeightDistribution?: number;
+  dragCoefficient?: number;
+  liftCoefficient?: number;
+  frontalArea?: number;
+  tireGripFront?: number;
+  tireGripRear?: number;
+  corneringStiffnessFront?: number;
+  corneringStiffnessRear?: number;
+  torqueCurve?: TorquePoint[];
+  brakeForce?: number;
+  maxSteeringAngle?: number;
+  rollingResistanceCoefficient?: number;
+  differential?: DifferentialConfig;
+  shiftUpMph?: number[];   // index 0 = gear 1 -> 2, index 1 = 2 -> 3, etc.
 
   // Optional transmission overrides
   gearRatios?: number[];
@@ -51,7 +80,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 1,
     handling: 6,
     price: 0,
-    unlocked: true,
     color: '#e11d48',
     tier: 'Entry Tier',
     requiresLicense: false,
@@ -72,7 +100,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 4.5,
     handling: 6.2,
     price: 600,
-    unlocked: false,
     color: '#06b6d4',
     tier: 'Entry Tier',
     requiresLicense: false,
@@ -93,7 +120,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 4.8,
     handling: 6.5,
     price: 800,
-    unlocked: false,
     color: '#f43f5e',
     tier: 'Entry Tier',
     requiresLicense: false,
@@ -114,7 +140,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 5.0,
     handling: 6.4,
     price: 950,
-    unlocked: false,
     color: '#22c55e',
     tier: 'Entry Tier',
     requiresLicense: false,
@@ -135,7 +160,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 5.8,
     handling: 6.8,
     price: 1100,
-    unlocked: false,
     color: '#eab308',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -156,7 +180,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 6.0,
     handling: 7.2,
     price: 1300,
-    unlocked: false,
     color: '#22c55e',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -177,7 +200,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 7.0,
     handling: 7.0,
     price: 1500,
-    unlocked: false,
     color: '#06b6d4',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -198,7 +220,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 6.5,
     handling: 8.5,
     price: 1800,
-    unlocked: false,
     color: '#f97316',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -219,7 +240,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 7.2,
     handling: 7.4,
     price: 2000,
-    unlocked: false,
     color: '#eab308',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -240,7 +260,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 7.4,
     handling: 7.1,
     price: 2200,
-    unlocked: false,
     color: '#f43f5e',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -261,7 +280,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 7.6,
     handling: 7.6,
     price: 2500,
-    unlocked: false,
     color: '#eab308',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -282,7 +300,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 7.8,
     handling: 7.8,
     price: 2800,
-    unlocked: false,
     color: '#8b5cf6',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -303,7 +320,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 8.0,
     handling: 6.6,
     price: 3000,
-    unlocked: false,
     color: '#8b5cf6',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -324,7 +340,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 8.2,
     handling: 7.5,
     price: 3500,
-    unlocked: false,
     color: '#f97316',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -345,7 +360,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 9.0,
     handling: 9.0,
     price: 4000,
-    unlocked: false,
     color: '#d946ef',
     tier: 'Hyper Tier',
     requiresLicense: true,
@@ -366,7 +380,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 9.2,
     handling: 9.2,
     price: 4800,
-    unlocked: false,
     color: '#06b6d4',
     tier: 'Hyper Tier',
     requiresLicense: true,
@@ -387,7 +400,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 9.4,
     handling: 9.4,
     price: 5500,
-    unlocked: false,
     color: '#f43f5e',
     tier: 'Hyper Tier',
     requiresLicense: true,
@@ -408,7 +420,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 9.6,
     handling: 9.5,
     price: 6000,
-    unlocked: false,
     color: '#0f172a',
     tier: 'Hyper Tier',
     requiresLicense: true,
@@ -429,7 +440,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 9.8,
     handling: 9.3,
     price: 6500,
-    unlocked: false,
     color: '#e11d48',
     tier: 'Hyper Tier',
     requiresLicense: true,
@@ -450,7 +460,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 10.2,
     handling: 9.6,
     price: 8000,
-    unlocked: false,
     color: '#d946ef',
     tier: 'Legendary Tier',
     requiresLicense: true,
@@ -471,7 +480,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 10.6,
     handling: 9.8,
     price: 9500,
-    unlocked: false,
     color: '#d946ef',
     tier: 'Legendary Tier',
     requiresLicense: true,
@@ -492,7 +500,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 10.4,
     handling: 10.2,
     price: 11000,
-    unlocked: false,
     color: '#22c55e',
     tier: 'Legendary Tier',
     requiresLicense: true,
@@ -513,7 +520,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 11.2,
     handling: 10.5,
     price: 12000,
-    unlocked: false,
     color: '#1e293b',
     tier: 'Legendary Tier',
     requiresLicense: true,
@@ -534,7 +540,6 @@ export const CARS_DATABASE: CarConfig[] = [
     acceleration: 6.6,
     handling: 8.2,
     price: 2500,
-    unlocked: false,
     color: '#e2e8f0',
     tier: 'Sport Tier',
     requiresLicense: false,
@@ -550,5 +555,60 @@ export const CARS_DATABASE: CarConfig[] = [
     visualScale: 3,
     driverCameraOffset: { x: 0, y: 0.5, z: 0.3 },
     character: { weightDistribution: 0.50, rearGripMultiplier: 0.92, yawInertia: 0.85, oversteerResistance: 0.48 }
+  },
+  {
+    id: 'ford_gt_2006',
+    name: 'Ford GT 2006',
+    brand: 'Ford',
+    speed: 10.5,
+    acceleration: 9.8,
+    handling: 8.8,
+    price: 0,
+    color: '#0033cc',
+    tier: 'Hyper Tier',
+    requiresLicense: false,
+    maxSpeed: 330,
+    accelerationRate: 0.42,
+    handlingRate: 0.057,
+    dragCoeff: 0.0000055,
+    driveType: 'RWD',
+    hasSpoiler: false,
+    boosterColor: 0xffaa00,
+    maxRpm: 6500,
+    baseMass: 1580,
+    wheelbase: 2.71,
+    trackWidth: 1.62,
+    cgHeight: 0.44,
+    yawInertia: 3200,
+    frontWeightDistribution: 0.43,
+    dragCoefficient: 0.39,
+    frontalArea: 1.88,
+    liftCoefficient: 0.16,
+    tireGripFront: 1.08,
+    tireGripRear: 1.20,
+    corneringStiffnessFront: 7.0,
+    corneringStiffnessRear: 7.25,
+    brakeForce: 18000,
+    maxSteeringAngle: 0.52,
+    rollingResistanceCoefficient: 0.013,
+    differential: {
+      accelLock: 0.42,
+      decelLock: 0.18,
+      preload: 0.08
+    },
+    gearRatios: [0, 2.61, 1.71, 1.23, 0.94, 0.77, 0.63],
+    finalDrive: 3.36,
+    wheelRadius: 0.335,
+    shiftUpMph: [53, 84, 121, 158, 196],
+    torqueCurve: [
+      { rpm: 1000, torque: 430 },
+      { rpm: 2500, torque: 610 },
+      { rpm: 3750, torque: 678 },
+      { rpm: 5200, torque: 650 },
+      { rpm: 6500, torque: 590 }
+    ],
+    visualScale: 1.5,
+    driverCameraOffset: { x: 0, y: 1, z: 1 },
+    character: { weightDistribution: 0.43, rearGripMultiplier: 1.12, yawInertia: 1.05, oversteerResistance: 0.62 }
   }
 ];

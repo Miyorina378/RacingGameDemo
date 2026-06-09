@@ -5,6 +5,14 @@ import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOu
 import * as THREE from 'three';
 import { CARS_DATABASE, CarConfig } from '../config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig } from '../config/TrackDatabase';
+import {
+  LICENSE_TESTS_BY_TIER,
+  LICENSE_TIERS,
+  LicenseProgress,
+  LicenseTier,
+  getLicenseTierCompletion,
+  isLicenseTestUnlocked
+} from '../config/LicenseDatabase';
 
 // Custom Icons
 const RacingFlagsIcon = ({ className }: { className?: string }) => (
@@ -355,12 +363,13 @@ interface GarageProps {
   carUpgrades: { [carId: string]: any };
   purchasedCars: string[];
   hasLicense: boolean;
+  licenseProgress: LicenseProgress;
   selectedBrand: string;
   setSelectedBrand: (brand: string) => void;
   isTransitioningDrive: boolean;
   settingsState: string;
   activeCarName: string;
-  
+
   // Handlers
   buyCar: (car: CarConfig) => void;
   selectCar: (carId: string) => void;
@@ -371,7 +380,7 @@ interface GarageProps {
   startRace: (trackId?: string) => void;
   startFreeRoam: () => void;
   startTutorial: () => void;
-  startLicenseTest: () => void;
+  startLicenseTest: (testId?: string) => void;
   handleDriveClick: () => void;
   handleBackToGarageClick: () => void;
   handleSettingClick: () => void;
@@ -391,6 +400,7 @@ export default function Garage({
   carUpgrades,
   purchasedCars,
   hasLicense,
+  licenseProgress,
   selectedBrand,
   setSelectedBrand,
   isTransitioningDrive,
@@ -417,6 +427,33 @@ export default function Garage({
 
   const getCarUpgradesSafe = (carId: string) => {
     return carUpgrades[carId] || JSON.parse(JSON.stringify(DEFAULT_UPGRADES));
+  };
+
+  const licenseTierStyles: Record<LicenseTier, { accent: string; icon: string; button: string; done: string }> = {
+    bronze: {
+      accent: 'text-amber-600',
+      icon: 'bg-amber-950/35 border-amber-900/40',
+      button: 'bg-amber-700 hover:bg-amber-600 text-white',
+      done: 'bg-amber-950/50 border-amber-700 text-amber-300'
+    },
+    silver: {
+      accent: 'text-zinc-300',
+      icon: 'bg-zinc-800/70 border-zinc-600/60',
+      button: 'bg-zinc-200 hover:bg-white text-zinc-950',
+      done: 'bg-zinc-800 border-zinc-500 text-zinc-100'
+    },
+    gold: {
+      accent: 'text-yellow-400',
+      icon: 'bg-yellow-950/35 border-yellow-800/50',
+      button: 'bg-yellow-500 hover:bg-yellow-400 text-zinc-950',
+      done: 'bg-yellow-950/50 border-yellow-600 text-yellow-200'
+    },
+    platinum: {
+      accent: 'text-cyan-300',
+      icon: 'bg-cyan-950/35 border-cyan-800/50',
+      button: 'bg-cyan-500 hover:bg-cyan-400 text-zinc-950',
+      done: 'bg-cyan-950/50 border-cyan-600 text-cyan-200'
+    }
   };
 
   return (
@@ -501,14 +538,24 @@ export default function Garage({
                     <div className="absolute right-0 top-0 bottom-0 w-[30%] group-hover:w-[40%] overflow-hidden pointer-events-none z-0 transition-all duration-500 ease-in-out">
                       <svg className="w-[150%] h-[150%] absolute -left-[25%] -top-[25%] transform skew-x-12 opacity-70 group-hover:opacity-100 transition-all duration-500 ease-in-out" preserveAspectRatio="none">
                         <defs>
-                          <pattern id="drive-checkers" width="16" height="16" patternUnits="userSpaceOnUse">
+                          <pattern id="drive-checkers" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="translate(0, 0)">
+                            <animateTransform attributeName="patternTransform" type="translate" from="0,0" to="16,0" dur="1.2s" repeatCount="indefinite" />
                             <rect width="8" height="8" fill="#e11d48" />
                             <rect x="8" width="8" height="8" fill="#09090b" />
                             <rect y="8" width="8" height="8" fill="#09090b" />
                             <rect x="8" y="8" width="8" height="8" fill="#e11d48" />
                           </pattern>
+                          <filter id="checkers-wave" x="-20%" y="-20%" width="140%" height="140%">
+                            <feTurbulence type="fractalNoise" baseFrequency="0.02 0.0" numOctaves="1" stitchTiles="stitch" x="0" y="0" width="50" height="100%" result="noise" />
+                            <feTile in="noise" result="tiledNoise" />
+                            <feOffset dx="0" dy="0" in="tiledNoise" result="offsetNoise">
+                              <animate attributeName="dx" from="0" to="-50" dur="1.5s" repeatCount="indefinite" />
+                            </feOffset>
+                            <feColorMatrix type="matrix" values="0 0 0 0 0.5   0 1 0 0 0   0 0 1 0 0   0 0 0 1 0" in="offsetNoise" result="neutralXNoise" />
+                            <feDisplacementMap in="SourceGraphic" in2="neutralXNoise" scale="15" xChannelSelector="R" yChannelSelector="G" />
+                          </filter>
                         </defs>
-                        <rect width="100%" height="100%" fill="url(#drive-checkers)" />
+                        <rect width="100%" height="100%" fill="url(#drive-checkers)" filter="url(#checkers-wave)" />
                       </svg>
                     </div>
                   )}
@@ -675,7 +722,7 @@ export default function Garage({
                             }`}
                         >
                           {isSuperLocked
-                            ? 'Requires A-License'
+                            ? 'Requires Bronze License'
                             : canAfford
                               ? `Purchase Vehicle (-${car.price} CR)`
                               : 'Insufficient Credits'}
@@ -762,28 +809,79 @@ export default function Garage({
                 </button>
               </div>
 
-              {/* License A-Test */}
-              <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-3 mb-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
-                      <Award className="w-5 h-5 text-rose-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-white text-base">License A-Test</h3>
-                      <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">TIME TRIAL</span>
-                    </div>
+              {/* License Academy */}
+              <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
+                    <Award className="w-5 h-5 text-rose-500" />
                   </div>
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    Maneuver through checkpoint rings in under 35 seconds. Unlocks high-speed Hypercar Races.
-                  </p>
+                  <div>
+                    <h3 className="font-extrabold text-white text-base">License Academy</h3>
+                    <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">40 TESTS</span>
+                  </div>
                 </div>
-                <button
-                  onClick={startLicenseTest}
-                  className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Start License Test
-                </button>
+
+                <div className="grid grid-cols-1 gap-3 max-h-[260px] overflow-y-auto pr-1">
+                  {LICENSE_TIERS.map((tier) => {
+                    const tests = LICENSE_TESTS_BY_TIER[tier.id];
+                    const completed = getLicenseTierCompletion(licenseProgress, tier.id);
+                    const styles = licenseTierStyles[tier.id];
+                    const nextTest = tests.find((test) =>
+                      !licenseProgress[test.tier][test.testNumber - 1] && isLicenseTestUnlocked(test, licenseProgress)
+                    );
+
+                    return (
+                      <div key={tier.id} className="bg-zinc-950 border border-zinc-850 p-3 rounded-xl">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${styles.icon}`}>
+                              <Award className={`w-4 h-4 ${styles.accent}`} />
+                            </div>
+                            <div>
+                              <div className="text-xs font-extrabold text-white uppercase">{tier.name}</div>
+                              <div className="text-[9px] font-mono text-zinc-500">{completed}/10 COMPLETE</div>
+                            </div>
+                          </div>
+                          {completed === 10 && (
+                            <span className={`text-[9px] font-black px-2 py-1 rounded-lg border ${styles.done}`}>
+                              COMPLETE
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[10px] text-zinc-500 leading-relaxed mb-3">
+                          {tier.description}
+                        </p>
+                        <div className="text-[9px] font-mono uppercase tracking-wider text-zinc-400 mb-3">
+                          {nextTest ? `Next: ${nextTest.lesson}` : 'Tier exam complete'}
+                        </div>
+
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {tests.map((test) => {
+                            const isComplete = licenseProgress[test.tier][test.testNumber - 1];
+                            const isUnlocked = isLicenseTestUnlocked(test, licenseProgress);
+                            return (
+                              <button
+                                key={test.id}
+                                disabled={!isUnlocked}
+                                onClick={() => startLicenseTest(test.id)}
+                                title={test.name}
+                                className={`h-9 rounded-lg border text-[10px] font-black transition-all flex items-center justify-center ${isComplete
+                                  ? styles.done
+                                  : isUnlocked
+                                    ? `${styles.button} border-transparent cursor-pointer`
+                                    : 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed'
+                                  }`}
+                              >
+                                {isComplete ? <Check className="w-3.5 h-3.5" /> : isUnlocked ? test.testNumber : <Lock className="w-3 h-3" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -874,15 +972,14 @@ export default function Garage({
 
           {/* LEFT SIDE: Viewport area (static car view - no box, car sits on background) */}
           <div
-            className={`w-[25%] pointer-events-none relative flex flex-col items-stretch justify-end z-10 ${
-              tuningState === 'entering' ? 'animate-slideInLeft' : tuningState === 'exiting' ? 'animate-slideOutLeft' : ''
-            }`}
+            className={`w-[25%] pointer-events-none relative flex flex-col items-stretch justify-end z-10 ${tuningState === 'entering' ? 'animate-slideInLeft' : tuningState === 'exiting' ? 'animate-slideOutLeft' : ''
+              }`}
           >
             <div
               ref={placeholderRef}
               className="absolute inset-0 pointer-events-auto"
             />
-            
+
             <div className="relative mb-8 ml-8 bg-zinc-950/90 border border-zinc-800 backdrop-blur-md px-6 py-4 rounded-2xl pointer-events-auto select-none flex flex-col gap-1 shadow-xl z-20 w-fit">
               <span className="text-[10px] font-extrabold tracking-widest text-rose-500 uppercase leading-none">Vehicle Focus</span>
               <h3 className="text-base font-black text-white uppercase mt-1 leading-none">{activeCarName}</h3>
@@ -892,9 +989,8 @@ export default function Garage({
 
           {/* RIGHT SIDE: Upgrades Panel */}
           <div
-            className={`w-[75%] p-6 flex flex-col gap-6 overflow-hidden z-10 ${
-              tuningState === 'entering' ? 'animate-slideInRight' : tuningState === 'exiting' ? 'animate-slideOutRight' : ''
-            }`}
+            className={`w-[75%] p-6 flex flex-col gap-6 overflow-hidden z-10 ${tuningState === 'entering' ? 'animate-slideInRight' : tuningState === 'exiting' ? 'animate-slideOutRight' : ''
+              }`}
           >
             {/* Header */}
             <div className="flex justify-between items-center pb-4 border-b border-zinc-900 shrink-0">
@@ -958,7 +1054,7 @@ export default function Garage({
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {group.items.map((item) => {
                       const upgradesForCar = getCarUpgradesSafe(activeCarId);
-                      
+
                       if (item.type === 'level') {
                         const levelItem = item as any;
                         const equippedLvl = getEquippedLevel(upgradesForCar, levelItem);

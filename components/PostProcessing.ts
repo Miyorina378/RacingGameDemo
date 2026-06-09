@@ -72,6 +72,20 @@ const CustomEffectsShader = {
   `
 };
 
+export interface GraphicsFeatures {
+  shadows: boolean;
+  bloom: boolean;
+  vignette: boolean;
+  fxaa: boolean;
+}
+
+// Preset definitions mapping tier names to feature flags
+export const QUALITY_PRESETS: Record<'low' | 'medium' | 'high', GraphicsFeatures> = {
+  low:    { shadows: false, bloom: false, vignette: false, fxaa: false },
+  medium: { shadows: true,  bloom: true,  vignette: false, fxaa: false },
+  high:   { shadows: true,  bloom: true,  vignette: true,  fxaa: true  },
+};
+
 export class PostProcessing {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -84,10 +98,14 @@ export class PostProcessing {
   private effectsPass?: ShaderPass;
   private outputPass!: OutputPass;
 
+  // Keep quality for backward compat / bloom strength scaling
   private quality: 'low' | 'medium' | 'high' = 'high';
   private bloomIntensity: number = 1.1;
   private width: number;
   private height: number;
+
+  // Individual feature flags
+  public features: GraphicsFeatures = { shadows: true, bloom: true, vignette: true, fxaa: true };
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     this.renderer = renderer;
@@ -106,15 +124,28 @@ export class PostProcessing {
       if (savedBloom !== null) {
         this.bloomIntensity = parseFloat(savedBloom);
       }
+      // Load individual feature flags (override preset if saved)
+      const savedFeatures = localStorage.getItem('cyberdrive_graphics_features');
+      if (savedFeatures) {
+        try {
+          const parsed = JSON.parse(savedFeatures);
+          this.features = { ...this.features, ...parsed };
+        } catch { /* use defaults */ }
+      } else {
+        // Initialize from quality preset
+        this.features = { ...QUALITY_PRESETS[this.quality] };
+      }
     }
 
-    this.applyQualitySettingsToRenderer();
+    this.applyShadowSettings();
     this.initComposer();
   }
 
   private initComposer() {
-    if (this.quality === 'low') {
-      // In low quality, we render directly to the screen (no composer)
+    const needsComposer = this.features.bloom || this.features.vignette || this.features.fxaa;
+
+    if (!needsComposer) {
+      // No post-processing needed, render directly
       return;
     }
 
@@ -133,18 +164,8 @@ export class PostProcessing {
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
 
-    // 2. Bloom Pass
-    if (this.quality === 'medium') {
-      // Moderate bloom settings for medium tier
-      this.bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(this.width, this.height),
-        this.bloomIntensity * 0.8,  // Strength
-        0.4,  // Radius
-        0.25  // Threshold
-      );
-      this.composer.addPass(this.bloomPass);
-    } else if (this.quality === 'high') {
-      // Rich bloom settings for high tier
+    // 2. Bloom Pass (if enabled)
+    if (this.features.bloom) {
       this.bloomPass = new UnrealBloomPass(
         new THREE.Vector2(this.width, this.height),
         this.bloomIntensity,  // Strength
@@ -152,13 +173,17 @@ export class PostProcessing {
         0.18  // Threshold
       );
       this.composer.addPass(this.bloomPass);
+    }
 
-      // 3. Custom Effects Pass (vignette, chromatic aberration, flash)
+    // 3. Custom Effects Pass - vignette + chromatic aberration (if enabled)
+    if (this.features.vignette) {
       this.effectsPass = new ShaderPass(CustomEffectsShader);
       this.effectsPass.uniforms.uResolution.value.set(this.width, this.height);
       this.composer.addPass(this.effectsPass);
+    }
 
-      // 4. FXAA Pass (Anti-aliasing)
+    // 4. FXAA Pass (if enabled)
+    if (this.features.fxaa) {
       this.fxaaPass = new FXAAPass();
       this.fxaaPass.setSize(this.width, this.height);
       this.composer.addPass(this.fxaaPass);
@@ -169,40 +194,71 @@ export class PostProcessing {
     this.composer.addPass(this.outputPass);
   }
 
-  private applyQualitySettingsToRenderer() {
-    if (this.quality === 'low') {
-      this.renderer.shadowMap.enabled = false;
-      this.scene.traverse((child) => {
-        if (child instanceof THREE.DirectionalLight || child instanceof THREE.SpotLight) {
-          child.castShadow = false;
-        }
-      });
-    } else {
+  private applyShadowSettings() {
+    if (this.features.shadows) {
       this.renderer.shadowMap.enabled = true;
       this.scene.traverse((child) => {
         if (child instanceof THREE.DirectionalLight || child instanceof THREE.SpotLight) {
           child.castShadow = true;
         }
       });
+    } else {
+      this.renderer.shadowMap.enabled = false;
+      this.scene.traverse((child) => {
+        if (child instanceof THREE.DirectionalLight || child instanceof THREE.SpotLight) {
+          child.castShadow = false;
+        }
+      });
     }
   }
 
+  /**
+   * Set quality via preset tier (backward compat). Maps to feature flags.
+   */
   public setQuality(quality: 'low' | 'medium' | 'high') {
-    if (this.quality === quality) return;
     this.quality = quality;
     if (typeof window !== 'undefined') {
       localStorage.setItem('cyberdrive_graphics_quality', quality);
     }
+    const preset = QUALITY_PRESETS[quality];
+    this.setFeatures(preset);
+  }
 
-    this.applyQualitySettingsToRenderer();
+  /**
+   * Set individual graphics features. Only reconstructs composer if post-processing flags change.
+   */
+  public setFeatures(features: Partial<GraphicsFeatures>) {
+    const prev = { ...this.features };
+    this.features = { ...this.features, ...features };
 
-    // Reconstruct composer with the new quality settings
-    this.disposeComposer();
-    this.initComposer();
+    // Persist
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('cyberdrive_graphics_features', JSON.stringify(this.features));
+    }
+
+    // Handle shadows separately (no recompose needed)
+    if (features.shadows !== undefined && features.shadows !== prev.shadows) {
+      this.applyShadowSettings();
+    }
+
+    // Check if any post-processing flag changed
+    const ppChanged =
+      prev.bloom !== this.features.bloom ||
+      prev.vignette !== this.features.vignette ||
+      prev.fxaa !== this.features.fxaa;
+
+    if (ppChanged) {
+      this.disposeComposer();
+      this.initComposer();
+    }
   }
 
   public getQuality(): 'low' | 'medium' | 'high' {
     return this.quality;
+  }
+
+  public getFeatures(): GraphicsFeatures {
+    return { ...this.features };
   }
 
   public setBloomIntensity(intensity: number) {
@@ -211,11 +267,7 @@ export class PostProcessing {
       localStorage.setItem('cyberdrive_bloom_intensity', intensity.toString());
     }
     if (this.bloomPass) {
-      if (this.quality === 'medium') {
-        this.bloomPass.strength = intensity * 0.8;
-      } else {
-        this.bloomPass.strength = intensity;
-      }
+      this.bloomPass.strength = intensity;
     }
   }
 
@@ -239,20 +291,19 @@ export class PostProcessing {
   }
 
   public update(deltaTime: number, speed: number, isDrifting: boolean, driftPoints: number, isBoosting: boolean, checkpointFlash: number, timeOfDayVal: number = 1.0) {
-    if (this.quality === 'low') return;
+    // Skip if no composer (all post-processing off)
+    if (!this.composer) return;
 
     // Dynamically adjust bloom parameters based on time of day (daylight vs night)
     if (this.bloomPass) {
-      const isHigh = this.quality === 'high';
-      const baseThreshold = isHigh ? 0.18 : 0.25;
+      const baseThreshold = 0.18;
       
-      // Interpolate threshold: higher in afternoon (0.85) to prevent sky/ground glow, lower at night (0.18/0.25)
+      // Interpolate threshold: higher in afternoon (0.85) to prevent sky/ground glow, lower at night
       this.bloomPass.threshold = THREE.MathUtils.lerp(0.85, baseThreshold, timeOfDayVal);
       
       // Interpolate strength: softer in afternoon (50% strength) to prevent blinding, full at night
       const strengthFactor = THREE.MathUtils.lerp(0.5, 1.0, timeOfDayVal);
-      const baseStrength = isHigh ? this.bloomIntensity : this.bloomIntensity * 0.8;
-      this.bloomPass.strength = baseStrength * strengthFactor;
+      this.bloomPass.strength = this.bloomIntensity * strengthFactor;
     }
 
     if (!this.effectsPass) return;
@@ -279,7 +330,7 @@ export class PostProcessing {
   }
 
   public render(deltaTime: number) {
-    if (this.quality === 'low') {
+    if (!this.composer) {
       this.renderer.render(this.scene, this.camera);
     } else {
       this.composer.render(deltaTime);

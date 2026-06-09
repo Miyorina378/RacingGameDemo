@@ -50,6 +50,14 @@ import GameOverlays from './ui/GameOverlays';
 import HelpModal from './ui/HelpModal';
 import HUDCustomizer from './ui/HUDCustomizer';
 import MapEditor from './ui/MapEditor';
+import { GraphicsFeatures, QUALITY_PRESETS } from './PostProcessing';
+import {
+  DEFAULT_LICENSE_TEST_ID,
+  LicenseProgress,
+  createDefaultLicenseProgress,
+  hasAnyLicense,
+  loadLicenseProgress
+} from './config/LicenseDatabase';
 
 const RacingFlagsIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -488,6 +496,8 @@ export default function Game() {
   const [activeCarId, setActiveCarId] = useState<string>('starter');
   const [playerCredits, setPlayerCredits] = useState<number>(500);
   const [hasLicense, setHasLicense] = useState<boolean>(false);
+  const [licenseProgress, setLicenseProgress] = useState<LicenseProgress>(() => createDefaultLicenseProgress(false));
+  const [activeLicenseTestId, setActiveLicenseTestId] = useState<string>(DEFAULT_LICENSE_TEST_ID);
   const [purchasedCars, setPurchasedCars] = useState<string[]>(['starter']);
   const [activeTrackId, setActiveTrackId] = useState<string>('sprint_circuit');
 
@@ -540,11 +550,35 @@ export default function Game() {
     return 'high';
   });
 
+  // Individual Graphics Feature Flags
+  const [graphicsFeatures, setGraphicsFeatures] = useState<GraphicsFeatures>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('cyberdrive_graphics_features');
+      if (saved) {
+        try { return { ...QUALITY_PRESETS['high'], ...JSON.parse(saved) }; } catch { /* fallback */ }
+      }
+      const q = localStorage.getItem('cyberdrive_graphics_quality');
+      if (q === 'low' || q === 'medium' || q === 'high') return { ...QUALITY_PRESETS[q] };
+    }
+    return { ...QUALITY_PRESETS['high'] };
+  });
+
   const changeGraphicsQuality = (quality: 'low' | 'medium' | 'high') => {
     setGraphicsQuality(quality);
     localStorage.setItem('cyberdrive_graphics_quality', quality);
+    const preset = QUALITY_PRESETS[quality];
+    setGraphicsFeatures({ ...preset });
     if (engineRef.current && engineRef.current.postProcessing) {
       engineRef.current.postProcessing.setQuality(quality);
+    }
+  };
+
+  const changeGraphicsFeature = (feature: keyof GraphicsFeatures, value: boolean) => {
+    const updated = { ...graphicsFeatures, [feature]: value };
+    setGraphicsFeatures(updated);
+    localStorage.setItem('cyberdrive_graphics_features', JSON.stringify(updated));
+    if (engineRef.current && engineRef.current.postProcessing) {
+      engineRef.current.postProcessing.setFeatures({ [feature]: value });
     }
   };
 
@@ -566,6 +600,73 @@ export default function Game() {
     }
   };
 
+  // Screen Brightness State
+  const [brightness, setBrightness] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const b = localStorage.getItem('cyberdrive_brightness');
+      if (b !== null) {
+        const val = parseInt(b, 10);
+        if (val >= 0 && val <= 10) return val;
+      }
+    }
+    return 5;
+  });
+
+  const changeBrightness = (val: number) => {
+    setBrightness(val);
+    localStorage.setItem('cyberdrive_brightness', val.toString());
+  };
+
+  // Audio Volume State
+  const [masterVolume, setMasterVolume] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('cyberdrive_master_volume');
+      if (v !== null) {
+        const val = parseInt(v, 10);
+        if (val >= 0 && val <= 100) return val;
+      }
+    }
+    return 80;
+  });
+
+  const changeMasterVolume = (val: number) => {
+    setMasterVolume(val);
+    localStorage.setItem('cyberdrive_master_volume', val.toString());
+  };
+
+  const [musicVolume, setMusicVolume] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('cyberdrive_music_volume');
+      if (v !== null) {
+        const val = parseInt(v, 10);
+        if (val >= 0 && val <= 100) return val;
+      }
+    }
+    return 70;
+  });
+
+  const changeMusicVolume = (val: number) => {
+    setMusicVolume(val);
+    localStorage.setItem('cyberdrive_music_volume', val.toString());
+  };
+
+  const [sfxVolume, setSfxVolume] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('cyberdrive_sfx_volume');
+      if (v !== null) {
+        const val = parseInt(v, 10);
+        if (val >= 0 && val <= 100) return val;
+      }
+    }
+    return 90;
+  });
+
+  const changeSfxVolume = (val: number) => {
+    setSfxVolume(val);
+    localStorage.setItem('cyberdrive_sfx_volume', val.toString());
+  };
+
+
   const handleKeyBindingsChange = (newBindings: KeyBindings) => {
     setKeyBindings(newBindings);
     saveKeyBindings(newBindings);
@@ -580,7 +681,7 @@ export default function Game() {
   // UI Tabs
   const [activeGarageTab, setActiveGarageTab] = useState<null | 'drive' | 'dealer' | 'tuning' | 'setting'>(null);
   const [tuningState, setTuningState] = useState<'closed' | 'entering' | 'open' | 'exiting'>('closed');
-  const [settingsSubTab, setSettingsSubTab] = useState<'graphics' | 'control' | 'layout'>('graphics');
+  const [settingsSubTab, setSettingsSubTab] = useState<'audio' | 'graphics' | 'control' | 'layout'>('graphics');
 
   // Shrink Canvas Preview states & ref
   const placeholderRef = useRef<HTMLDivElement>(null);
@@ -615,12 +716,14 @@ export default function Game() {
     if (placeholderRef.current) ro.observe(placeholderRef.current);
 
     window.addEventListener('resize', updateRect);
+    window.addEventListener('scroll', updateRect, true);
     updateRect(); // initial attempt
 
     return () => {
       alive = false;
       ro.disconnect();
       window.removeEventListener('resize', updateRect);
+      window.removeEventListener('scroll', updateRect, true);
     };
   }, [activeGarageTab, settingsSubTab, settingsState, tuningState]);
 
@@ -667,13 +770,14 @@ export default function Game() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedCredits = localStorage.getItem('cyberdrive_credits');
-      const savedLicense = localStorage.getItem('cyberdrive_license');
       const savedCars = localStorage.getItem('cyberdrive_cars');
       const savedColor = localStorage.getItem('cyberdrive_color');
       const savedActiveCar = localStorage.getItem('cyberdrive_active_car');
+      const loadedLicenseProgress = loadLicenseProgress();
 
       if (savedCredits) setPlayerCredits(parseInt(savedCredits));
-      if (savedLicense) setHasLicense(savedLicense === 'true');
+      setLicenseProgress(loadedLicenseProgress);
+      setHasLicense(hasAnyLicense(loadedLicenseProgress));
       if (savedCars) setPurchasedCars(JSON.parse(savedCars));
       if (savedColor) setSelectedColor(savedColor);
       if (savedActiveCar) setActiveCarId(savedActiveCar);
@@ -849,8 +953,13 @@ export default function Game() {
           // Sync license state from engine to React UI
           if (engineRef.current) {
             setHasLicense(engineRef.current.hasLicense);
+            setLicenseProgress(engineRef.current.licenseProgress);
           }
         }
+      },
+      onLicenseProgressChange: (progress: LicenseProgress, unlocked: boolean) => {
+        setLicenseProgress(progress);
+        setHasLicense(unlocked);
       },
       onDriftCompleted: (points: number) => {
         setRecentDriftGain(points);
@@ -864,6 +973,7 @@ export default function Game() {
     // Sync initial states to engine from localStorage to avoid React state timing race conditions
     let initialCredits = playerCredits;
     let initialLicense = hasLicense;
+    let initialLicenseProgress = licenseProgress;
     let initialCarId = activeCarId;
     let initialColor = selectedColor;
     let initialUpgrades = DEFAULT_UPGRADES;
@@ -874,11 +984,10 @@ export default function Game() {
         initialCredits = parseInt(savedCredits, 10);
         setPlayerCredits(initialCredits);
       }
-      const savedLicense = localStorage.getItem('cyberdrive_license');
-      if (savedLicense) {
-        initialLicense = savedLicense === 'true';
-        setHasLicense(initialLicense);
-      }
+      initialLicenseProgress = loadLicenseProgress();
+      initialLicense = hasAnyLicense(initialLicenseProgress);
+      setLicenseProgress(initialLicenseProgress);
+      setHasLicense(initialLicense);
       const savedActiveCar = localStorage.getItem('cyberdrive_active_car');
       if (savedActiveCar) {
         initialCarId = savedActiveCar;
@@ -903,6 +1012,7 @@ export default function Game() {
 
     engine.playerCredits = initialCredits;
     engine.hasLicense = initialLicense;
+    engine.licenseProgress = initialLicenseProgress;
     engine.keyBindings = loadKeyBindings();
     engine.setActiveCar(initialCarId, initialColor, initialUpgrades);
 
@@ -1157,11 +1267,12 @@ export default function Game() {
     }
   };
 
-  const startLicenseTest = () => {
+  const startLicenseTest = (testId: string = activeLicenseTestId) => {
     if (engineRef.current) {
       engineRef.current.isPaused = false;
       setIsPaused(false);
-      engineRef.current.buildLicenseTest();
+      engineRef.current.buildLicenseTest(testId);
+      setActiveLicenseTestId(engineRef.current.activeLicenseTestId);
       setActiveMode('license');
     }
   };
@@ -1318,7 +1429,7 @@ export default function Game() {
     }
   };
 
-  const handleSettingsSubTabChange = (tab: 'graphics' | 'control' | 'layout') => {
+  const handleSettingsSubTabChange = (tab: 'audio' | 'graphics' | 'control' | 'layout') => {
     setNoTransition(true);
     setSettingsSubTab(tab);
     setTimeout(() => {
@@ -1851,7 +1962,12 @@ export default function Game() {
   const scaleY = placeholderRect ? placeholderRect.height / screenHeight : 1;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden font-sans text-white select-none bg-slate-950">
+    <div
+      className="relative w-screen h-screen overflow-hidden font-sans text-white select-none bg-slate-950"
+      style={{
+        filter: `brightness(${0.4 + (brightness / 5.0) * 0.6})`
+      }}
+    >
       {/* 3D Canvas Wrapper (decouples CSS transitions from WebGL canvas drawing buffer resizing) */}
       <div
         id="canvas-container"
@@ -1938,6 +2054,7 @@ export default function Game() {
         raceResults={raceResults}
         placement={placement}
         activeTrackId={activeTrackId}
+        activeLicenseTestId={activeLicenseTestId}
         exitToGarage={exitToGarage}
         startLicenseTest={startLicenseTest}
         startRace={startRace}
@@ -2180,6 +2297,7 @@ export default function Game() {
             carUpgrades={carUpgrades}
             purchasedCars={purchasedCars}
             hasLicense={hasLicense}
+            licenseProgress={licenseProgress}
             selectedBrand={selectedBrand}
             setSelectedBrand={setSelectedBrand}
             isTransitioningDrive={isTransitioningDrive}
@@ -2219,6 +2337,8 @@ export default function Game() {
         setShowMirrorInTPS={setShowMirrorInTPS}
         graphicsQuality={graphicsQuality}
         changeGraphicsQuality={changeGraphicsQuality}
+        graphicsFeatures={graphicsFeatures}
+        changeGraphicsFeature={changeGraphicsFeature}
         bloomIntensity={bloomIntensity}
         changeBloomIntensity={changeBloomIntensity}
         placeholderRef={placeholderRef}
@@ -2229,6 +2349,14 @@ export default function Game() {
         handleSettingBackClick={handleSettingBackClick}
         keyBindings={keyBindings}
         onKeyBindingsChange={handleKeyBindingsChange}
+        brightness={brightness}
+        changeBrightness={changeBrightness}
+        masterVolume={masterVolume}
+        changeMasterVolume={changeMasterVolume}
+        musicVolume={musicVolume}
+        changeMusicVolume={changeMusicVolume}
+        sfxVolume={sfxVolume}
+        changeSfxVolume={changeSfxVolume}
       />
 
       {/* MAP EDITOR PANEL */}

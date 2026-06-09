@@ -17,6 +17,19 @@ import { GameModeName, GameStatus } from './engine/types';
 import { InputController } from './engine/InputController';
 import { createThreeWorld } from './engine/threeWorld';
 import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
+import {
+  DEFAULT_LICENSE_TEST_ID,
+  LicenseProgress,
+  completeLicenseTest,
+  createDefaultLicenseProgress,
+  getLicenseTestById,
+  getLicenseTierCompletion,
+  hasAnyLicense,
+  isLicenseTestUnlocked,
+  isTierComplete,
+  loadLicenseProgress,
+  saveLicenseProgress
+} from './config/LicenseDatabase';
 
 export type { CarConfig };
 
@@ -28,6 +41,7 @@ export interface EngineCallbacks {
   onCheckpointChange: (activeCheckpoint: number, totalCheckpoints: number) => void;
   onGameStatus: (status: 'idle' | 'countdown' | 'playing' | 'success' | 'failed', message?: string, results?: any[]) => void;
   onDriftCompleted: (earnedCredits: number) => void;
+  onLicenseProgressChange?: (progress: LicenseProgress, hasLicense: boolean) => void;
   onPlacementChange?: (placement: number, totalParticipants: number) => void;
   onVehicleStatsChange?: (speed: number, rpm: number, gear: number, isShifting: boolean, throttle: number, brake: number) => void;
   onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
@@ -97,6 +111,8 @@ export class GameEngine {
   // Player Stats
   public playerCredits = 500;
   public hasLicense = false;
+  public licenseProgress: LicenseProgress = createDefaultLicenseProgress(false);
+  public activeLicenseTestId = DEFAULT_LICENSE_TEST_ID;
   public currentCarId = 'starter';
   public carColor = '#f43f5e';
 
@@ -119,8 +135,8 @@ export class GameEngine {
     if (typeof window !== 'undefined') {
       const savedCredits = localStorage.getItem('cyberdrive_credits');
       if (savedCredits) this.playerCredits = parseInt(savedCredits, 10);
-      const savedLicense = localStorage.getItem('cyberdrive_license');
-      if (savedLicense) this.hasLicense = savedLicense === 'true';
+      this.licenseProgress = loadLicenseProgress();
+      this.hasLicense = hasAnyLicense(this.licenseProgress);
     }
 
     this.initThree();
@@ -263,9 +279,15 @@ export class GameEngine {
     this.changeMode('free_roam', new FreeRoamMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
-  public buildLicenseTest() {
+  public buildLicenseTest(testId: string = this.activeLicenseTestId) {
+    const testConfig = getLicenseTestById(testId) || getLicenseTestById(DEFAULT_LICENSE_TEST_ID);
+    if (!testConfig) return;
+    if (!isLicenseTestUnlocked(testConfig, this.licenseProgress)) return;
+
+    this.activeLicenseTestId = testConfig.id;
     this.sky.updateTimeOfDay('afternoon');
-    this.changeMode('license', new LicenseMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
+    if (testConfig.time) this.sky.updateTimeOfDay(testConfig.time);
+    this.changeMode('license', new LicenseMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, testConfig.id));
   }
 
   public buildRaceTrack(trackId: string = 'sprint_circuit') {
@@ -384,10 +406,21 @@ export class GameEngine {
     let message = '';
 
     if (this.activeMode === 'license') {
-      this.hasLicense = true;
-      creditsReward = 500;
-      message = 'LICENSE A UNLOCKED! Unlocked high tier racing. +500 cr';
-      if (typeof window !== 'undefined') localStorage.setItem('cyberdrive_license', 'true');
+      const testConfig = getLicenseTestById(this.activeLicenseTestId);
+      if (!testConfig) return;
+
+      const wasAlreadyComplete = this.licenseProgress[testConfig.tier][testConfig.testNumber - 1];
+      this.licenseProgress = completeLicenseTest(this.licenseProgress, testConfig);
+      this.hasLicense = hasAnyLicense(this.licenseProgress);
+      saveLicenseProgress(this.licenseProgress);
+
+      creditsReward = wasAlreadyComplete ? Math.round(testConfig.baseReward * 0.25) : testConfig.baseReward;
+      const tierProgress = getLicenseTierCompletion(this.licenseProgress, testConfig.tier);
+      const tierName = testConfig.tier.toUpperCase();
+      message = isTierComplete(this.licenseProgress, testConfig.tier)
+        ? `${tierName} LICENSE COMPLETE! All 10 tests passed. +${creditsReward} cr`
+        : `${testConfig.name.toUpperCase()} PASSED! ${tierProgress}/10 ${tierName} tests complete. +${creditsReward} cr`;
+      this.callbacks.onLicenseProgressChange?.(this.licenseProgress, this.hasLicense);
     } else if (this.activeMode === 'tutorial') {
       creditsReward = 200;
       message = 'TUTORIAL COMPLETED! You learned how to drive. +200 cr';

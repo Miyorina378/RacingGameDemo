@@ -3,15 +3,23 @@
 import React from 'react';
 import { Coins, Check, RotateCcw } from 'lucide-react';
 
+interface RaceResult {
+  pos: number;
+  car: string;
+  time: number;
+  isPlayer?: boolean;
+}
+
 interface GameOverlaysProps {
   gameStatus: 'idle' | 'countdown' | 'playing' | 'success' | 'failed';
   statusMessage: string;
   activeMode: string;
-  raceResults: any[] | null;
+  raceResults: RaceResult[] | null;
   placement: number;
   activeTrackId: string;
+  activeLicenseTestId: string;
   exitToGarage: () => void;
-  startLicenseTest: () => void;
+  startLicenseTest: (testId?: string) => void;
   startRace: (trackId?: string) => void;
   startTutorial: () => void;
 }
@@ -30,6 +38,7 @@ export default function GameOverlays({
   raceResults,
   placement,
   activeTrackId,
+  activeLicenseTestId,
   exitToGarage,
   startLicenseTest,
   startRace,
@@ -158,7 +167,7 @@ export default function GameOverlays({
             <div className="mt-8 flex flex-col gap-3">
               <button
                 onClick={() => {
-                  if (activeMode === 'license') startLicenseTest();
+                  if (activeMode === 'license') startLicenseTest(activeLicenseTestId);
                   else if (activeMode === 'race') startRace(activeTrackId);
                   else if (activeMode === 'tutorial') startTutorial();
                 }}
@@ -193,7 +202,7 @@ export default function GameOverlays({
           <div className="mt-8 flex flex-col gap-3">
             <button
               onClick={() => {
-                if (activeMode === 'license') startLicenseTest();
+                if (activeMode === 'license') startLicenseTest(activeLicenseTestId);
                 else if (activeMode === 'race') startRace(activeTrackId);
                 else if (activeMode === 'tutorial') startTutorial();
               }}

@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { BaseMode } from './BaseMode';
 import { Checkpoint } from '../objects/Checkpoint';
-import { TRACKS_DATABASE } from '../config/TrackDatabase';
+import { DEFAULT_LICENSE_TEST_ID, getLicenseTestById } from '../config/LicenseDatabase';
+import { GameEngine } from '../gameEngine';
+import { Vehicle } from '../objects/Vehicle';
+import { ParticleSystem } from '../objects/ParticleSystem';
 
 export class LicenseMode extends BaseMode {
   public checkpoints: Checkpoint[] = [];
@@ -10,6 +13,20 @@ export class LicenseMode extends BaseMode {
   private pathVectors: THREE.Vector3[] = [];
   private startPos = new THREE.Vector3();
   private startYaw = 0;
+  private licenseTestId: string;
+
+  constructor(
+    engine: GameEngine,
+    scene: THREE.Scene,
+    vehicle: Vehicle,
+    particles: ParticleSystem,
+    environmentGroup: THREE.Group,
+    keys: { [key: string]: boolean },
+    licenseTestId: string = DEFAULT_LICENSE_TEST_ID
+  ) {
+    super(engine, scene, vehicle, particles, environmentGroup, keys);
+    this.licenseTestId = licenseTestId;
+  }
 
   public resetVehicle() {
     this.vehicle.reset(this.startPos, this.startYaw);
@@ -19,15 +36,11 @@ export class LicenseMode extends BaseMode {
     this.clearEnvironment();
     this.particles.clear();
     
-    // Load track configuration from database
-    const trackConfig = TRACKS_DATABASE.find(t => t.id === 'license');
+    const trackConfig = getLicenseTestById(this.licenseTestId);
     if (!trackConfig) {
-      throw new Error("License track config not found in TrackDatabase.");
+      throw new Error("License test config not found in LicenseDatabase.");
     }
-    this.pathVectors = trackConfig.path.map(p => {
-      if (p instanceof THREE.Vector3 || (p as any).isVector3) return p as THREE.Vector3;
-      return (p as any).pos as THREE.Vector3;
-    });
+    this.pathVectors = trackConfig.path.map(p => p instanceof THREE.Vector3 ? p : p.pos);
 
     // Position car at the first marker facing the second marker
     const startPt = this.pathVectors[0];

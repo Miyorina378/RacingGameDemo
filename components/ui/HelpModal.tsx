@@ -53,10 +53,10 @@ export default function HelpModal({ showHelp, setShowHelp }: HelpModalProps) {
           <div>
             <h4 className="font-bold text-slate-100 flex items-center gap-2 mb-1.5 text-left">
               <span className="w-1.5 h-3 bg-pink-500 rounded" />
-              A-License Unlock
+              License Academy
             </h4>
             <p className="text-slate-400 leading-relaxed text-left">
-              Start the <span className="text-yellow-400 font-semibold">License Test</span>, which is a timed gate navigation. Complete all checkpoints before time runs out to unlock the license, giving access to the high-difficulty <span className="text-pink-500 font-semibold">Pro Race</span> and the <span className="text-fuchsia-400 font-semibold">Apex Hypercar</span>!
+              Complete Bronze, Silver, Gold, and Platinum license tests to unlock harder racing tiers and high-end cars.
             </p>
           </div>
         </div>

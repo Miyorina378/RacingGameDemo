@@ -38,7 +38,7 @@ export interface TrackConfig {
 export const TRACKS_DATABASE: TrackConfig[] = [
   {
     id: 'license',
-    name: 'License A-Test',
+    name: 'Bronze License Trial',
     description: 'Pass through all checkpoint rings within the time limit. Unlocks the Pro Race and Hypercars.',
     timeLimit: 35,
     roadWidth: 18,
@@ -90,7 +90,7 @@ export const TRACKS_DATABASE: TrackConfig[] = [
   {
     id: 'pro_race',
     name: 'Pro Hyper-Race',
-    description: 'Complex 3-lap winding track with active obstacles. Requires A-License.',
+    description: 'Complex 3-lap winding track with active obstacles. Requires Bronze License.',
     timeLimit: 45,
     roadWidth: 18,
     hasObstacles: false,
@@ -163,7 +163,7 @@ export const TRACKS_DATABASE: TrackConfig[] = [
   {
     id: 'tokyo_megaloop',
     name: 'Tokyo Megaloop',
-    description: 'A massive, extra-wide high-speed 3-lap loop highway. Ideal for testing top speeds. Requires A-License.',
+    description: 'A massive, extra-wide high-speed 3-lap loop highway. Ideal for testing top speeds. Requires Bronze License.',
     timeLimit: 55,
     roadWidth: 22,
     hasObstacles: false,
