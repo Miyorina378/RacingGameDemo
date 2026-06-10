@@ -548,6 +548,7 @@ export default function Setting({
                   </span>
 
                   {[
+                    { keys: ['SHIFT'], action: 'HALF-PEDAL CONTROL', desc: 'Caps keyboard throttle and braking inputs to 50% for precise traction and cornering control.' },
                     { keys: ['R'], action: 'RESET VEHICLE', desc: 'Resets the car back to the nearest checkpoint or track node if you crash or get stuck.' },
                     { keys: ['V', 'Z'], action: 'CAMERA TOGGLE', desc: 'Cycle between multiple viewing modes: Chase Cam (Third-person), Hood Cam, and Bumper Cam.' },
                     { keys: ['ESC'], action: 'PAUSE GAME', desc: 'Pauses the simulation run, displaying the pause menu and settings overlay.' },

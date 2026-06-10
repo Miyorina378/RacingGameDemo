@@ -1388,10 +1388,21 @@ export class Vehicle {
     const turnLeft = keys['a'] || keys['arrowleft'];
     const turnRight = keys['d'] || keys['arrowright'];
     const handbrake = !!keys[' '] || !!keys['space'] || !!keys['spacebar'];
+    const isShiftPressed = !!keys['shift'];
 
-    const throttleValue = typeof keys['throttleAnalog'] === 'number' ? keys['throttleAnalog'] : (throttle ? 1.0 : 0.0);
-    const reverseValue = typeof keys['reverseAnalog'] === 'number' ? keys['reverseAnalog'] : (reverse ? 1.0 : 0.0);
+    let throttleValue = typeof keys['throttleAnalog'] === 'number' ? keys['throttleAnalog'] : (throttle ? 1.0 : 0.0);
+    let reverseValue = typeof keys['reverseAnalog'] === 'number' ? keys['reverseAnalog'] : (reverse ? 1.0 : 0.0);
     const turnInput = typeof keys['steerAnalog'] === 'number' ? keys['steerAnalog'] : ((turnLeft ? 1 : 0) - (turnRight ? 1 : 0));
+
+    // Capping keyboard throttle and brake inputs to 50% if the Shift key is held
+    if (isShiftPressed) {
+      if (typeof keys['throttleAnalog'] !== 'number' && throttle) {
+        throttleValue = 0.5;
+      }
+      if (typeof keys['reverseAnalog'] !== 'number' && reverse) {
+        reverseValue = 0.5;
+      }
+    }
 
     return { throttleValue, reverseValue, turnInput, handbrake };
   }

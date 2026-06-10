@@ -429,6 +429,52 @@ export default function Garage({
     return carUpgrades[carId] || JSON.parse(JSON.stringify(DEFAULT_UPGRADES));
   };
 
+  const handleExitClick = () => {
+    // If Tauri
+    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+      try {
+        (window as any).__TAURI__.process.exit(0);
+        return;
+      } catch (e) {
+        try {
+          (window as any).__TAURI__.window.getCurrent().close();
+          return;
+        } catch (err) {}
+      }
+    }
+
+    // If Electron / custom ipcRenderer
+    if (typeof window !== 'undefined' && (window as any).ipcRenderer) {
+      try {
+        (window as any).ipcRenderer.send('exit-app');
+        return;
+      } catch (e) {}
+    }
+    if (typeof window !== 'undefined' && (window as any).electron) {
+      try {
+        (window as any).electron.send('exit-app');
+        return;
+      } catch (e) {}
+      try {
+        (window as any).electron.ipcRenderer.send('exit-app');
+        return;
+      } catch (e) {}
+    }
+
+    // NW.js
+    if (typeof window !== 'undefined' && (window as any).nw) {
+      try {
+        (window as any).nw.App.quit();
+        return;
+      } catch (e) {}
+    }
+
+    // Standard window.close fallback
+    if (typeof window !== 'undefined') {
+      window.close();
+    }
+  };
+
   const licenseTierStyles: Record<LicenseTier, { accent: string; icon: string; button: string; done: string }> = {
     bronze: {
       accent: 'text-amber-600',
@@ -496,6 +542,12 @@ export default function Garage({
               icon: MechanicalGearIcon,
               onClick: handleSettingClick,
             },
+            {
+              id: 'exit',
+              label: 'EXIT',
+              icon: LogOut,
+              onClick: handleExitClick,
+            },
           ].map((item, index) => {
             const isActive = activeGarageTab === item.id;
             const isDrive = item.id === 'drive';
@@ -507,6 +559,7 @@ export default function Garage({
             else if (index === 1) baseClass = '-translate-x-[10%]';
             else if (index === 2) baseClass = '-translate-x-[20%]';
             else if (index === 3) baseClass = '-translate-x-[30%]';
+            else if (index === 4) baseClass = '-translate-x-[40%]';
 
             return (
               <div
@@ -520,7 +573,9 @@ export default function Garage({
                         ? 'delay-[200ms]'
                         : index === 2
                           ? 'delay-[300ms]'
-                          : 'delay-[400ms]'
+                          : index === 3
+                            ? 'delay-[400ms]'
+                            : 'delay-[500ms]'
                   }`}
               >
                 <button
