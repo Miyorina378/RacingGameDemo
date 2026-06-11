@@ -1346,7 +1346,7 @@ export class Vehicle {
     this.maxSteeringAngle = config.maxSteeringAngle ?? (config.id === 'driftmaster' ? 0.68 : isTruck ? 0.48 : isHyper || isLegendary ? 0.50 : 0.56);
     this.rollingResistanceCoefficient = config.rollingResistanceCoefficient ?? (isTruck ? 0.018 : 0.014);
     this.shiftUpMph = config.shiftUpMph ?? [];
-    this.brakeForce = config.brakeForce ?? this.mass * (8.4 + this.brakingRate * 2.0 + this.upgrades.brake.level * 0.9);
+    this.brakeForce = config.brakeForce ?? this.mass * (10.2 + this.brakingRate * 1.4 + this.upgrades.brake.level * 1.1);
     this.yawInertia = config.yawInertia ?? (
       this.mass * (this.wheelBase * this.wheelBase + this.trackWidth * this.trackWidth) / 12 * this.character.yawInertia
     );
@@ -1507,6 +1507,32 @@ export class Vehicle {
     
     // Suspension upgrade improves grip slightly
     return baseGrip + this.upgrades.suspensionLevel * 0.03;
+  }
+
+  /**
+   * Estimate axle grip from the two tire contact patches instead of treating the
+   * whole axle as one tire. This keeps the model performant while making lateral
+   * weight transfer reduce total grip like a real car: the loaded outside tire
+   * gains less grip than the unloaded inside tire loses.
+   */
+  private computeAxleGripLimit(
+    gripCoeff: number,
+    axleLoad: number,
+    lateralTransfer: number
+  ): number {
+    const halfLoad = axleLoad * 0.5;
+    const transfer = THREE.MathUtils.clamp(Math.abs(lateralTransfer) * 0.5, 0, halfLoad * 0.92);
+    const insideLoad = Math.max(1, halfLoad - transfer);
+    const outsideLoad = Math.max(1, halfLoad + transfer);
+    const referenceLoad = Math.max(1, this.mass * GRAVITY * 0.25);
+
+    const tireLimit = (load: number) => {
+      const loadRatio = load / referenceLoad;
+      const loadSensitivity = THREE.MathUtils.clamp(1.08 - 0.16 * (loadRatio - 1.0), 0.72, 1.18);
+      return gripCoeff * load * loadSensitivity;
+    };
+
+    return tireLimit(insideLoad) + tireLimit(outsideLoad);
   }
 
   /**
@@ -1675,11 +1701,12 @@ export class Vehicle {
     // Store for external access
     this.rearSlipAngle = Math.abs(rearSlipAngle);
 
+    const frontLateralTransfer = lateralTransfer * THREE.MathUtils.clamp(frontWeight / Math.max(totalWeight, 1), 0, 1);
+    const rearLateralTransfer = lateralTransfer * THREE.MathUtils.clamp(rearWeight / Math.max(totalWeight, 1), 0, 1);
+
     // --- TIRE GRIP MODIFIERS ---
-    const lateralTransferRatio = THREE.MathUtils.clamp(lateralTransfer / Math.max(totalWeight, 1), 0, 0.45);
-    const loadSensitivity = 1.0 - lateralTransferRatio * 0.18;
-    let frontGrip = baseGripCoeff * this.tireGripFront * loadSensitivity;
-    let rearGrip = baseGripCoeff * this.tireGripRear * loadSensitivity;
+    let frontGrip = baseGripCoeff * this.tireGripFront;
+    let rearGrip = baseGripCoeff * this.tireGripRear;
 
     // Handbrake: dramatically reduce rear grip to initiate drift
     if (handbrake) {
@@ -1690,7 +1717,7 @@ export class Vehicle {
     const throttleDrop = this.prevThrottleValue - throttleValue;
     if (throttleDrop > 0.4 && absForward > 20 && Math.abs(turnInput) > 0.15) {
       const liftOffSeverity = throttleDrop * (1.0 - this.character.oversteerResistance) * (1.0 - this.frontWeightDistribution);
-      rearGrip *= (1.0 - liftOffSeverity * 0.5);
+      rearGrip *= (1.0 - liftOffSeverity * 0.28);
     }
 
     // Power oversteer for RWD: excess throttle on rear tires reduces their lateral grip
@@ -1700,8 +1727,8 @@ export class Vehicle {
       const speedOversteerScale = absForward < 10
         ? 1.5 - (absForward / 10) * 0.5
         : THREE.MathUtils.clamp(1.0 - ((absForward - 10) / 45) * 0.72, 0.28, 1.0);
-      const powerOversteerFactor = (1.0 - this.character.rearGripMultiplier * 0.7) * throttleValue * 0.45 * speedOversteerScale;
-      rearGrip *= Math.max(0.1, 1.0 - powerOversteerFactor);
+      const powerOversteerFactor = (1.0 - this.character.rearGripMultiplier * 0.7) * throttleValue * 0.25 * speedOversteerScale;
+      rearGrip *= Math.max(0.25, 1.0 - powerOversteerFactor);
     }
 
     // ESC: boost rear grip when sliding
@@ -1744,7 +1771,8 @@ export class Vehicle {
     // Braking force
     let brakeForce = 0;
     if (reverseValue > 0.01 && local.forward > 0.5) {
-      brakeForce = -this.brakeForce * reverseValue;
+      const brakePressure = 1.0 - Math.pow(1.0 - THREE.MathUtils.clamp(reverseValue, 0, 1), 1.65);
+      brakeForce = -this.brakeForce * brakePressure;
     } else if (reverseValue > 0.01 && local.forward <= 0.5) {
       // Reversing (uses engine torque in 1st/reverse gear instead of accelerationRate)
       if (local.forward > -12.0) { // Limit reverse speed to ~43 km/h
@@ -1811,8 +1839,8 @@ export class Vehicle {
       rearDrive *= 0.05;
     }
 
-    const frontMaxGrip = frontGrip * frontWeight;
-    const rearMaxGrip = rearGrip * rearWeight;
+    let frontMaxGrip = this.computeAxleGripLimit(frontGrip, frontWeight, frontLateralTransfer);
+    let rearMaxGrip = this.computeAxleGripLimit(rearGrip, rearWeight, rearLateralTransfer);
     const frontDriveGripLimit = frontMaxGrip * (0.86 + diffLock * 0.12);
     const rearDriveGripLimit = rearMaxGrip * (0.86 + diffLock * 0.12);
 
@@ -1885,9 +1913,15 @@ export class Vehicle {
       }
     }
 
+    frontMaxGrip = this.computeAxleGripLimit(frontGrip, frontWeight, frontLateralTransfer);
+    rearMaxGrip = this.computeAxleGripLimit(rearGrip, rearWeight, rearLateralTransfer);
+
+    const frontEffectiveGrip = frontMaxGrip / Math.max(frontWeight, 1);
+    const rearEffectiveGrip = rearMaxGrip / Math.max(rearWeight, 1);
+
     // --- LATERAL FORCES (Pacejka-lite) ---
-    let frontLatForce = -computeLateralForce(frontSlipAngle, frontGrip, frontWeight, this.corneringStiffnessFront);
-    let rearLatForce = -computeLateralForce(rearSlipAngle, rearGrip, rearWeight, this.corneringStiffnessRear);
+    let frontLatForce = -computeLateralForce(frontSlipAngle, frontEffectiveGrip, frontWeight, this.corneringStiffnessFront);
+    let rearLatForce = -computeLateralForce(rearSlipAngle, rearEffectiveGrip, rearWeight, this.corneringStiffnessRear);
 
     // Dampen lateral forces at very low speeds
     const lowSpeedDampener = Math.min(1.0, absForward / 4.0);
@@ -1917,8 +1951,8 @@ export class Vehicle {
     }
 
     // --- COMBINED GRIP CIRCLE using updated grip values ---
-    const updatedFrontMaxGrip = frontGrip * frontWeight;
-    const updatedRearMaxGrip = rearGrip * rearWeight;
+    const updatedFrontMaxGrip = this.computeAxleGripLimit(frontGrip, frontWeight, frontLateralTransfer);
+    const updatedRearMaxGrip = this.computeAxleGripLimit(rearGrip, rearWeight, rearLateralTransfer);
 
     const frontCombined = combinedGripCircle(frontLatForce, frontLongForce, updatedFrontMaxGrip);
     frontLatForce = frontCombined.lateral;

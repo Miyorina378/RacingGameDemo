@@ -593,24 +593,20 @@ export default function Garage({
                     <div className="absolute right-0 top-0 bottom-0 w-[30%] group-hover:w-[40%] overflow-hidden pointer-events-none z-0 transition-all duration-500 ease-in-out">
                       <svg className="w-[150%] h-[150%] absolute -left-[25%] -top-[25%] transform skew-x-12 opacity-70 group-hover:opacity-100 transition-all duration-500 ease-in-out" preserveAspectRatio="none">
                         <defs>
-                          <pattern id="drive-checkers" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="translate(0, 0)">
-                            <animateTransform attributeName="patternTransform" type="translate" from="0,0" to="16,0" dur="1.2s" repeatCount="indefinite" />
-                            <rect width="8" height="8" fill="#e11d48" />
-                            <rect x="8" width="8" height="8" fill="#09090b" />
-                            <rect y="8" width="8" height="8" fill="#09090b" />
-                            <rect x="8" y="8" width="8" height="8" fill="#e11d48" />
+                          <pattern id="drive-checkers" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="translate(0, 0)">
+                            <rect width="10" height="10" fill="#e11d48" />
+                            <rect x="10" width="10" height="10" fill="#09090b" />
+                            <rect y="10" width="10" height="10" fill="#09090b" />
+                            <rect x="10" y="10" width="10" height="10" fill="#e11d48" />
                           </pattern>
                           <filter id="checkers-wave" x="-20%" y="-20%" width="140%" height="140%">
-                            <feTurbulence type="fractalNoise" baseFrequency="0.02 0.0" numOctaves="1" stitchTiles="stitch" x="0" y="0" width="50" height="100%" result="noise" />
-                            <feTile in="noise" result="tiledNoise" />
-                            <feOffset dx="0" dy="0" in="tiledNoise" result="offsetNoise">
-                              <animate attributeName="dx" from="0" to="-50" dur="1.5s" repeatCount="indefinite" />
-                            </feOffset>
-                            <feColorMatrix type="matrix" values="0 0 0 0 0.5   0 1 0 0 0   0 0 1 0 0   0 0 0 1 0" in="offsetNoise" result="neutralXNoise" />
-                            <feDisplacementMap in="SourceGraphic" in2="neutralXNoise" scale="15" xChannelSelector="R" yChannelSelector="G" />
+                            <feTurbulence type="fractalNoise" baseFrequency="0.02 0.003" numOctaves="1" seed="2" result="sineWave" />
+                            <feDisplacementMap in="SourceGraphic" in2="sineWave" scale="25" xChannelSelector="R" yChannelSelector="G" />
                           </filter>
                         </defs>
-                        <rect width="100%" height="100%" fill="url(#drive-checkers)" filter="url(#checkers-wave)" />
+                        <g filter="url(#checkers-wave)">
+                          <rect className="animate-checkers-move" width="120%" height="100%" fill="url(#drive-checkers)" />
+                        </g>
                       </svg>
                     </div>
                   )}

@@ -138,3 +138,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes checkersMove {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-20px, 0, 0);
+  }
+}
+
+.animate-checkers-move {
+  width: calc(100% + 20px);
+  animation: checkersMove 1.4s linear infinite;
+  will-change: transform;
+}
+
