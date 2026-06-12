@@ -20,6 +20,8 @@
   --animate-slideInRight: slideInRight 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-slideOutRight: slideOutRight 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-fadeOut: fadeOut 0.7s ease-out forwards;
+  --animate-glowPulseCyan: glowPulseCyan 2s infinite alternate;
+  --animate-glowPulseRose: glowPulseRose 2s infinite alternate;
 
   @keyframes fadeIn {
     from {
@@ -124,6 +126,30 @@
       opacity: 0;
     }
   }
+
+  @keyframes glowPulseCyan {
+    from {
+      box-shadow: 0 0 15px rgba(6, 182, 212, 0.15);
+      border-color: rgba(6, 182, 212, 0.3);
+    }
+
+    to {
+      box-shadow: 0 0 35px rgba(6, 182, 212, 0.45);
+      border-color: rgba(6, 182, 212, 0.85);
+    }
+  }
+
+  @keyframes glowPulseRose {
+    from {
+      box-shadow: 0 0 15px rgba(244, 63, 94, 0.15);
+      border-color: rgba(244, 63, 94, 0.3);
+    }
+
+    to {
+      box-shadow: 0 0 35px rgba(244, 63, 94, 0.45);
+      border-color: rgba(244, 63, 94, 0.85);
+    }
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -143,6 +169,7 @@ body {
   from {
     transform: translate3d(0, 0, 0);
   }
+
   to {
     transform: translate3d(-20px, 0, 0);
   }
@@ -154,3 +181,169 @@ body {
   will-change: transform;
 }
 
+/* Dealer button car */
+.dealer-three-car {
+  width: 76px;
+  height: 44px;
+  opacity: 0.66;
+  transform: translate(-50%, -50%);
+  transition: opacity 300ms ease, filter 300ms ease;
+  filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.18));
+}
+
+.dealer-three-car canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.group:hover .dealer-three-car {
+  opacity: 1;
+  filter: drop-shadow(0 0 18px rgba(244, 63, 94, 0.35));
+}
+
+/* Dealer city map */
+.dealer-map-bg {
+  background:
+    linear-gradient(115deg, transparent 0 38%, rgba(244, 63, 94, 0.18) 38% 39%, transparent 39% 100%),
+    linear-gradient(28deg, transparent 0 44%, rgba(6, 182, 212, 0.16) 44% 45%, transparent 45% 100%),
+    linear-gradient(152deg, transparent 0 58%, rgba(234, 179, 8, 0.12) 58% 59%, transparent 59% 100%),
+    linear-gradient(rgba(63, 63, 70, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(63, 63, 70, 0.12) 1px, transparent 1px),
+    radial-gradient(circle at 50% 48%, rgba(39, 39, 42, 0.72), rgba(9, 9, 11, 0.96) 58%);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    44px 44px,
+    44px 44px,
+    100% 100%;
+}
+
+.dealer-map-bg::before,
+.dealer-map-bg::after {
+  content: "";
+  position: absolute;
+  inset: 9% 7%;
+  border: 1px solid rgba(113, 113, 122, 0.14);
+  clip-path: polygon(8% 18%, 46% 8%, 91% 24%, 82% 72%, 56% 91%, 15% 78%);
+}
+
+.dealer-map-bg::after {
+  inset: 20% 14%;
+  border-color: rgba(244, 63, 94, 0.16);
+  clip-path: polygon(14% 44%, 34% 16%, 72% 25%, 86% 58%, 55% 84%, 22% 70%);
+}
+
+/* Exit button walker */
+
+.exit-person-runner {
+  transform: translate(-50%, -50%) scale(1.4);
+  transform-origin: 50% 85%;
+  transition: transform 1000ms cubic-bezier(0.2, 0.72, 0.2, 1);
+  will-change: transform;
+}
+
+.group:hover .exit-person-runner {
+  transform: translate(calc(-50% + 60px), -50%) scale(1.4);
+}
+
+.exit-person {
+  display: block;
+  opacity: 0.85;
+  transform-origin: 50% 85%;
+  transition: opacity 50ms ease-out;
+  will-change: opacity, transform;
+}
+
+.group:hover .exit-person {
+  animation: exitPersonStep 500ms steps(2, end) infinite;
+  opacity: 0;
+  transition-delay: 200ms;
+  transition-duration: 240ms;
+}
+
+@keyframes exitPersonStep {
+
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+
+  50% {
+    transform: translateY(-1px) rotate(2deg);
+  }
+}
+
+@keyframes exitTrailFade {
+  0% {
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 0.95;
+  }
+
+  74% {
+    opacity: 0.75;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+
+/* Smoke puffs */
+.group:hover .exit-smoke-puff {
+  animation: smokePuff 0.9s ease-out forwards;
+}
+
+.group:hover .exit-smoke-1 {
+  animation-delay: 0.5s;
+}
+
+.group:hover .exit-smoke-2 {
+  animation-delay: 0.65s;
+}
+
+.group:hover .exit-smoke-3 {
+  animation-delay: 0.8s;
+}
+
+@keyframes smokePuff {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) translateY(0);
+  }
+
+  30% {
+    opacity: 0.8;
+    transform: scale(1) translateY(-4px);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.8) translateY(-14px);
+  }
+}
+
+/* Tuning button tools animation */
+
+.tuning-screwdriver {
+  transform: translate(-50%, -50%) rotate(0deg);
+  transition: transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.tuning-wrench {
+  transform: translate(-50%, -50%) rotate(0deg);
+  transition: transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.group:hover .tuning-screwdriver {
+  transform: translate(calc(-50% - 12px), -50%) rotate(-45deg) scale(1.1);
+}
+
+.group:hover .tuning-wrench {
+  transform: translate(calc(-50% + 12px), -50%) rotate(45deg) scale(1.1);
+}

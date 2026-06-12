@@ -489,6 +489,7 @@ export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const quickPlayOriginalCarRef = useRef<string | null>(null);
 
   // Synced States with Engine
   const [activeMode, setActiveMode] = useState<'garage' | 'free_roam' | 'license' | 'race' | 'tutorial' | 'editor'>('garage');
@@ -1295,6 +1296,30 @@ export default function Game() {
     }
   };
 
+  const startQuickPlayRace = (carId: string, trackId: string) => {
+    const track = TRACKS_DATABASE.find(t => t.id === trackId);
+    if (!track) return;
+
+    quickPlayOriginalCarRef.current = activeCarId;
+
+    setActiveTrackId(trackId);
+    setPlacement(1);
+    setPrevPlacement(1);
+    setPlacementShift(null);
+    setRaceResults(null);
+    if (engineRef.current) {
+      engineRef.current.isPaused = false;
+      setIsPaused(false);
+      
+      const carDb = CARS_DATABASE.find(c => c.id === carId);
+      const colorToUse = carDb ? carDb.color : selectedColor;
+
+      engineRef.current.setActiveCar(carId, colorToUse, DEFAULT_UPGRADES);
+      engineRef.current.buildRaceTrack(trackId);
+      setActiveMode('race');
+    }
+  };
+
   const exitToGarage = () => {
     if (engineRef.current) {
       engineRef.current.isPaused = false;
@@ -1309,6 +1334,13 @@ export default function Game() {
       setPrevPlacement(placement);
       setPlacementShift(null);
       setRaceResults(null);
+
+      if (quickPlayOriginalCarRef.current) {
+        const originalCarId = quickPlayOriginalCarRef.current;
+        quickPlayOriginalCarRef.current = null;
+        const activeUpgrades = getCarUpgrades(originalCarId);
+        engineRef.current.setActiveCar(originalCarId, selectedColor, activeUpgrades);
+      }
     }
   };
 
@@ -2310,6 +2342,7 @@ export default function Game() {
             buyUpgrade={buyUpgrade}
             toggleUpgrade={toggleUpgrade}
             startRace={startRace}
+            startQuickPlayRace={startQuickPlayRace}
             startFreeRoam={startFreeRoam}
             startTutorial={startTutorial}
             startLicenseTest={startLicenseTest}

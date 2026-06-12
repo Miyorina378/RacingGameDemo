@@ -1,10 +1,11 @@
 'use client';
 
-import React from 'react';
-import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map, Trophy } from 'lucide-react';
 import * as THREE from 'three';
 import { CARS_DATABASE, CarConfig } from '../config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig } from '../config/TrackDatabase';
+import { Vehicle } from '../objects/Vehicle';
 import {
   LICENSE_TESTS_BY_TIER,
   LICENSE_TIERS,
@@ -56,6 +57,196 @@ const MechanicalGearIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const DealerThreeCarIcon = ({ car }: { car: CarConfig }) => {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 40);
+    camera.position.set(3.2, 2.0, 5.2);
+    camera.lookAt(0, 0.55, 0);
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    mount.appendChild(renderer.domElement);
+
+    const paint = new THREE.Color('#ff0258');
+    const silhouetteMat = new THREE.MeshBasicMaterial({
+      color: paint,
+    });
+    const blackMat = new THREE.MeshBasicMaterial({
+      color: 0x050507,
+    });
+    const displayRoot = new THREE.Group();
+    displayRoot.rotation.y = -0.55;
+    displayRoot.rotation.x = -0.08;
+    scene.add(displayRoot);
+
+    const iconVehicle = new Vehicle(car.id, car.color);
+    iconVehicle.mesh.rotation.y = 269.8;
+    displayRoot.add(iconVehicle.mesh);
+
+    const localBox = new THREE.Box3();
+    const meshBox = new THREE.Box3();
+    const rootInverse = new THREE.Matrix4();
+    const relativeMatrix = new THREE.Matrix4();
+    const blackPartByMesh = new WeakMap<THREE.Mesh, boolean>();
+
+    const applySilhouetteMaterials = () => {
+      iconVehicle.mesh.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        const materialNames = Array.isArray(object.material)
+          ? object.material.map((material) => material.name.toLowerCase()).join(' ')
+          : object.material.name.toLowerCase();
+        const objectPathName = (() => {
+          const names: string[] = [];
+          let current: THREE.Object3D | null = object;
+          while (current) {
+            if (current.name) names.push(current.name.toLowerCase());
+            current = current.parent;
+          }
+          return names.join(' ');
+        })();
+        const hasDarkSourceColor = materials.some((material) => {
+          if (!('color' in material) || !(material.color instanceof THREE.Color)) return false;
+          return material.color.r < 0.36 && material.color.g < 0.36 && material.color.b < 0.36;
+        });
+        const hasGlassMaterial = materials.some((material) => {
+          const transmission = 'transmission' in material && typeof material.transmission === 'number' ? material.transmission : 0;
+          return material.transparent || material.opacity < 0.95 || transmission > 0.1;
+        });
+        const isTire =
+          objectPathName.includes('tire') ||
+          objectPathName.includes('tyre') ||
+          objectPathName.includes('wheel') ||
+          materialNames.includes('tire') ||
+          materialNames.includes('tyre') ||
+          materialNames.includes('rubber');
+        const isWindow =
+          objectPathName.includes('window') ||
+          objectPathName.includes('glass') ||
+          objectPathName.includes('windshield') ||
+          objectPathName.includes('windscreen') ||
+          materialNames.includes('window') ||
+          materialNames.includes('glass') ||
+          materialNames.includes('windshield') ||
+          materialNames.includes('windscreen') ||
+          hasGlassMaterial;
+        const isBlackPart = blackPartByMesh.get(object) ?? (isTire || isWindow || hasDarkSourceColor);
+        blackPartByMesh.set(object, isBlackPart);
+
+        object.material = isBlackPart ? blackMat : silhouetteMat;
+      });
+    };
+
+    const getVehicleLocalBox = () => {
+      localBox.makeEmpty();
+      iconVehicle.mesh.updateWorldMatrix(true, true);
+      rootInverse.copy(iconVehicle.mesh.matrixWorld).invert();
+
+      iconVehicle.mesh.traverse((object) => {
+        if (!(object instanceof THREE.Mesh) || !object.geometry) return;
+        if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+        if (!object.geometry.boundingBox) return;
+
+        relativeMatrix.multiplyMatrices(rootInverse, object.matrixWorld);
+        meshBox.copy(object.geometry.boundingBox).applyMatrix4(relativeMatrix);
+        localBox.union(meshBox);
+      });
+
+      return localBox;
+    };
+
+    const fitVehicleToIcon = () => {
+      iconVehicle.mesh.scale.setScalar(1);
+      iconVehicle.mesh.position.set(0, 0, 0);
+      applySilhouetteMaterials();
+      iconVehicle.mesh.updateMatrixWorld(true);
+      const box = getVehicleLocalBox();
+      if (box.isEmpty()) return;
+
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+
+      const maxSize = Math.max(size.x, size.y, size.z, 0.1);
+      const scale = 5.25 / maxSize;
+      iconVehicle.mesh.scale.setScalar(scale);
+      iconVehicle.mesh.position.set(-center.x * scale, -box.min.y * scale - 0.55, -center.z * scale);
+    };
+    fitVehicleToIcon();
+
+    const ambient = new THREE.AmbientLight(0xffffff, 1.15);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xffffff, 2.5);
+    key.position.set(2.5, 4, 3);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(paint, 2.2);
+    rim.position.set(-3, 1.5, -2.5);
+    scene.add(rim);
+
+    const floor = new THREE.Mesh(
+      new THREE.CircleGeometry(2.35, 40),
+      new THREE.MeshBasicMaterial({ color: paint, transparent: true, opacity: 0.12 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.02;
+    scene.add(floor);
+
+    const resize = () => {
+      const width = 112;
+      const height = 64;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    };
+    resize();
+
+    let frameId = 0;
+    let lastTime = performance.now();
+    const spinRate = (Math.PI * 2) / 5.4;
+
+    const animate = (time: number) => {
+      const delta = Math.min((time - lastTime) / 1000, 0.05);
+      lastTime = time;
+      const button = mount.closest('button');
+      const isHovering = !!button?.matches(':hover');
+      fitVehicleToIcon();
+
+      if (isHovering) {
+        displayRoot.rotation.y += spinRate * delta;
+      } else {
+        const target = -0.55;
+        displayRoot.rotation.y += (target - displayRoot.rotation.y) * Math.min(delta * 5, 1);
+      }
+
+      renderer.render(scene, camera);
+      frameId = requestAnimationFrame(animate);
+    };
+    frameId = requestAnimationFrame(animate);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      renderer.dispose();
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach((material) => material.dispose());
+        }
+      });
+      renderer.domElement.remove();
+    };
+  }, [car.id, car.color, car.hasSpoiler]);
+
+  return <div ref={mountRef} className="dealer-three-car absolute left-[80%] top-1/2 z-10" aria-hidden="true" />;
+};
+
 const PAINT_SWATCHES = [
   { name: 'Rose Red', hex: '#f43f5e' },
   { name: 'Cyber Cyan', hex: '#06b6d4' },
@@ -65,6 +256,259 @@ const PAINT_SWATCHES = [
   { name: 'Sunset Orange', hex: '#f97316' },
   { name: 'Deep Purple', hex: '#8b5cf6' }
 ];
+
+type DealerCityId = 'east' | 'west' | 'north' | 'south';
+
+const DEALER_CITIES: Array<{
+  id: DealerCityId;
+  name: string;
+  region: string;
+  description: string;
+  brands: string[];
+  accent: string;
+}> = [
+    {
+      id: 'east',
+      name: 'East City',
+      region: 'Far East Imports',
+      description: 'Japanese, Korean, and Chinese performance cars.',
+      brands: ['Toyota', 'Nissan', 'Honda'],
+      accent: 'rose',
+    },
+    {
+      id: 'west',
+      name: 'West City',
+      region: 'Far West Brands',
+      description: 'American and European road machines.',
+      brands: ['Ford', 'Tesla', 'Porsche', 'Ferrari', 'Audi', 'Chevrolet'],
+      accent: 'cyan',
+    },
+    {
+      id: 'north',
+      name: 'North City',
+      region: 'Cold Line Exchange',
+      description: 'Reserved for future northern specialist dealers.',
+      brands: [],
+      accent: 'blue',
+    },
+    {
+      id: 'south',
+      name: 'South City',
+      region: 'Coastal Auto Market',
+      description: 'Reserved for future southern specialist dealers.',
+      brands: [],
+      accent: 'amber',
+    },
+  ];
+
+const getDealerCityCars = (city: DealerCityId | null) => {
+  if (!city) return [];
+  const cityConfig = DEALER_CITIES.find((item) => item.id === city);
+  if (!cityConfig || cityConfig.brands.length === 0) return [];
+  return CARS_DATABASE.filter((car) => cityConfig.brands.includes(car.brand));
+};
+
+const getDealerCityClasses = (accent: string) => {
+  if (accent === 'cyan') {
+    return {
+      icon: 'bg-cyan-950/40 border-cyan-900/50 text-cyan-300',
+      glow: 'hover:border-cyan-500/55 hover:shadow-[0_0_28px_rgba(6,182,212,0.16)]',
+      text: 'text-cyan-300',
+    };
+  }
+  if (accent === 'blue') {
+    return {
+      icon: 'bg-blue-950/40 border-blue-900/50 text-blue-300',
+      glow: 'hover:border-blue-500/55 hover:shadow-[0_0_28px_rgba(59,130,246,0.16)]',
+      text: 'text-blue-300',
+    };
+  }
+  if (accent === 'amber') {
+    return {
+      icon: 'bg-amber-950/35 border-amber-900/45 text-amber-300',
+      glow: 'hover:border-amber-500/55 hover:shadow-[0_0_28px_rgba(245,158,11,0.16)]',
+      text: 'text-amber-300',
+    };
+  }
+
+  return {
+    icon: 'bg-rose-950/40 border-rose-900/50 text-rose-300',
+    glow: 'hover:border-rose-500/55 hover:shadow-[0_0_28px_rgba(244,63,94,0.16)]',
+    text: 'text-rose-300',
+  };
+};
+
+const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | null }) => {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x050507, 8, 22);
+
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 60);
+    camera.position.set(0, 8.5, 11);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    mount.appendChild(renderer.domElement);
+
+    const mapRoot = new THREE.Group();
+    mapRoot.rotation.x = -0.08;
+    scene.add(mapRoot);
+
+    const cityColors: Record<DealerCityId, number> = {
+      east: 0xff0258,
+      west: 0x06b6d4,
+      north: 0x3b82f6,
+      south: 0xf59e0b,
+    };
+    const cityPositions: Record<DealerCityId, THREE.Vector3> = {
+      east: new THREE.Vector3(-3.8, 0, -2.2),
+      west: new THREE.Vector3(3.7, 0, -1.7),
+      north: new THREE.Vector3(-1.1, 0, 2.7),
+      south: new THREE.Vector3(2.0, 0, 2.3),
+    };
+
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(10.8, 0.12, 7.2),
+      new THREE.MeshBasicMaterial({ color: 0x09090b, transparent: true, opacity: 0.84 })
+    );
+    base.position.y = -0.08;
+    mapRoot.add(base);
+
+    const grid = new THREE.GridHelper(12, 24, 0x3f3f46, 0x27272a);
+    grid.position.y = 0.01;
+    mapRoot.add(grid);
+
+    const roadMat = new THREE.MeshBasicMaterial({ color: 0x18181b, transparent: true, opacity: 0.9 });
+    const glowMats = Object.fromEntries(
+      DEALER_CITIES.map((city) => [
+        city.id,
+        new THREE.MeshBasicMaterial({
+          color: cityColors[city.id],
+          transparent: true,
+          opacity: selectedCity === city.id || selectedCity === null ? 0.34 : 0.12,
+        }),
+      ])
+    ) as Record<DealerCityId, THREE.MeshBasicMaterial>;
+
+    const makeRoad = (x: number, z: number, width: number, depth: number, rotation = 0) => {
+      const road = new THREE.Mesh(new THREE.BoxGeometry(width, 0.04, depth), roadMat);
+      road.position.set(x, 0.04, z);
+      road.rotation.y = rotation;
+      mapRoot.add(road);
+      return road;
+    };
+
+    makeRoad(0, 0.15, 8.7, 0.22, -0.12);
+    makeRoad(-1.4, 0.2, 0.22, 5.4, 0.32);
+    makeRoad(2.2, 0.08, 0.22, 5.7, -0.52);
+    makeRoad(-0.2, 2.4, 6.8, 0.2, 0.17);
+    makeRoad(0.7, -2.0, 7.0, 0.2, -0.24);
+
+    const cityGroups: Partial<Record<DealerCityId, THREE.Group>> = {};
+    DEALER_CITIES.forEach((city) => {
+      const cityGroup = new THREE.Group();
+      const position = cityPositions[city.id];
+      cityGroup.position.copy(position);
+      cityGroups[city.id] = cityGroup;
+
+      const isActive = selectedCity === city.id || selectedCity === null;
+      const color = cityColors[city.id];
+
+      const pad = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.92, 1.08, 0.16, 6),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.42 : 0.16 })
+      );
+      pad.position.y = 0.12;
+      pad.rotation.y = Math.PI / 6;
+      cityGroup.add(pad);
+
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(1.08, 0.035, 8, 36),
+        glowMats[city.id]
+      );
+      ring.position.y = 0.24;
+      ring.rotation.x = Math.PI / 2;
+      cityGroup.add(ring);
+
+      const buildingMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.72 : 0.25 });
+      const darkMat = new THREE.MeshBasicMaterial({ color: 0x111113, transparent: true, opacity: 0.88 });
+      const blockOffsets = [
+        [-0.34, -0.18, 0.58],
+        [0.2, 0.08, 0.88],
+        [0.48, -0.32, 0.42],
+        [-0.1, 0.42, 0.64],
+      ];
+      blockOffsets.forEach(([x, z, height], index) => {
+        const mat = index % 2 === 0 ? buildingMat : darkMat;
+        const block = new THREE.Mesh(new THREE.BoxGeometry(0.32, height, 0.32), mat);
+        block.position.set(x, 0.24 + height / 2, z);
+        cityGroup.add(block);
+      });
+
+      mapRoot.add(cityGroup);
+    });
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xffffff, 1.35);
+    key.position.set(2, 5, 4);
+    scene.add(key);
+
+    const resize = () => {
+      const rect = mount.getBoundingClientRect();
+      const width = Math.max(1, rect.width);
+      const height = Math.max(1, rect.height);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    let frameId = 0;
+    const startTime = performance.now();
+    const animate = (time: number) => {
+      const t = (time - startTime) / 1000;
+      mapRoot.rotation.y = Math.sin(t * 0.18) * 0.05;
+
+      DEALER_CITIES.forEach((city, index) => {
+        const group = cityGroups[city.id];
+        if (!group) return;
+        const target = selectedCity === city.id || selectedCity === null ? 1 : 0.86;
+        const pulse = 1 + Math.sin(t * 1.4 + index) * 0.035;
+        group.scale.setScalar(target * pulse);
+        group.position.y = Math.sin(t * 1.2 + index * 0.7) * 0.04;
+      });
+
+      renderer.render(scene, camera);
+      frameId = requestAnimationFrame(animate);
+    };
+    frameId = requestAnimationFrame(animate);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', resize);
+      renderer.dispose();
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach((material) => material.dispose());
+        }
+      });
+      renderer.domElement.remove();
+    };
+  }, [selectedCity]);
+
+  return <div ref={mountRef} className="absolute inset-0" aria-hidden="true" />;
+};
 
 const DEFAULT_UPGRADES = {
   mufflers: 0,
@@ -378,6 +822,7 @@ interface GarageProps {
   buyUpgrade: (item: any, cost: number) => void;
   toggleUpgrade: (item: any) => void;
   startRace: (trackId?: string) => void;
+  startQuickPlayRace: (carId: string, trackId: string) => void;
   startFreeRoam: () => void;
   startTutorial: () => void;
   startLicenseTest: (testId?: string) => void;
@@ -413,6 +858,7 @@ export default function Garage({
   buyUpgrade,
   toggleUpgrade,
   startRace,
+  startQuickPlayRace,
   startFreeRoam,
   startTutorial,
   startLicenseTest,
@@ -424,6 +870,38 @@ export default function Garage({
   placeholderRef,
   setActiveMode,
 }: GarageProps) {
+
+  // Local states for Drive Sub-modes
+  const [driveSubMode, setDriveSubMode] = useState<null | 'quickplay' | 'career'>(null);
+  const [quickPlayStep, setQuickPlayStep] = useState<'car' | 'map'>('car');
+  const [quickPlayCarId, setQuickPlayCarId] = useState<string | null>(null);
+  const [quickPlaySelectedBrand, setQuickPlaySelectedBrand] = useState<string>('All');
+  const [dealerCity, setDealerCity] = useState<DealerCityId | null>(null);
+
+  // Reset drive submode states when tab changes from drive
+  React.useEffect(() => {
+    if (activeGarageTab !== 'drive') {
+      setDriveSubMode(null);
+      setQuickPlayStep('car');
+      setQuickPlayCarId(null);
+      setQuickPlaySelectedBrand('All');
+    }
+  }, [activeGarageTab]);
+
+  React.useEffect(() => {
+    if (activeGarageTab !== 'dealer') {
+      setDealerCity(null);
+      if (selectedBrand !== 'All') setSelectedBrand('All');
+    }
+  }, [activeGarageTab, selectedBrand, setSelectedBrand]);
+
+  const handleBackToGarage = () => {
+    setDriveSubMode(null);
+    setQuickPlayStep('car');
+    setQuickPlayCarId(null);
+    setQuickPlaySelectedBrand('All');
+    handleBackToGarageClick();
+  };
 
   const getCarUpgradesSafe = (carId: string) => {
     return carUpgrades[carId] || JSON.parse(JSON.stringify(DEFAULT_UPGRADES));
@@ -439,7 +917,7 @@ export default function Garage({
         try {
           (window as any).__TAURI__.window.getCurrent().close();
           return;
-        } catch (err) {}
+        } catch (err) { }
       }
     }
 
@@ -448,17 +926,17 @@ export default function Garage({
       try {
         (window as any).ipcRenderer.send('exit-app');
         return;
-      } catch (e) {}
+      } catch (e) { }
     }
     if (typeof window !== 'undefined' && (window as any).electron) {
       try {
         (window as any).electron.send('exit-app');
         return;
-      } catch (e) {}
+      } catch (e) { }
       try {
         (window as any).electron.ipcRenderer.send('exit-app');
         return;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // NW.js
@@ -466,7 +944,7 @@ export default function Garage({
       try {
         (window as any).nw.App.quit();
         return;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Standard window.close fallback
@@ -502,10 +980,14 @@ export default function Garage({
     }
   };
 
+  const activeCarConfig = CARS_DATABASE.find((car) => car.id === activeCarId) || CARS_DATABASE[0];
+  const dealerCityConfig = DEALER_CITIES.find((city) => city.id === dealerCity);
+  const dealerCars = getDealerCityCars(dealerCity);
+
   return (
     <>
       {/* TOP STATUS BAR */}
-      {activeGarageTab !== 'drive' && (
+      {activeGarageTab !== 'drive' && activeGarageTab !== 'dealer' && (
         <div
           className={`absolute left-12 top-8 z-10 flex items-center gap-4 text-xs font-black tracking-widest bg-zinc-950/80 border border-zinc-800 backdrop-blur-md py-2.5 px-5 rounded-xl shadow-lg pointer-events-auto transition-all duration-700 ${(isTransitioningDrive || settingsState !== 'closed') ? '-translate-x-[350px] opacity-0' : 'translate-x-0 opacity-100 delay-[200ms]'
             }`}
@@ -528,7 +1010,7 @@ export default function Garage({
               id: 'dealer',
               label: 'DEALER',
               icon: S2000Icon,
-              onClick: () => setActiveGarageTab(activeGarageTab === 'dealer' ? null : 'dealer'),
+              onClick: () => setActiveGarageTab('dealer'),
             },
             {
               id: 'tuning',
@@ -551,7 +1033,11 @@ export default function Garage({
           ].map((item, index) => {
             const isActive = activeGarageTab === item.id;
             const isDrive = item.id === 'drive';
-            const isHidden = isTransitioningDrive || settingsState !== 'closed';
+            const isDealer = item.id === 'dealer';
+            const isExit = item.id === 'exit';
+            const isTuning = item.id === 'tuning';
+            const isSetting = item.id === 'setting';
+            const isHidden = isTransitioningDrive || settingsState !== 'closed' || activeGarageTab === 'dealer';
 
             // Ladder offsets: index * 10% left, static on hover
             let baseClass = '';
@@ -610,6 +1096,74 @@ export default function Garage({
                       </svg>
                     </div>
                   )}
+
+                  {isDealer && (
+                    <div className="absolute right-0 top-0 bottom-0 w-full overflow-hidden pointer-events-none z-0 transform skew-x-12">
+                      <DealerThreeCarIcon car={activeCarConfig} />
+                    </div>
+                  )}
+
+                  {isTuning && (
+                    <div className="absolute right-0 top-0 bottom-0 w-full overflow-hidden pointer-events-none z-0 transform skew-x-12">
+                      <img
+                        src="/icon/wrench.svg"
+                        alt=""
+                        className="tuning-wrench absolute left-[82.5%] top-1/2 w-[100px] h-[56px] opacity-50 group-hover:opacity-100 transition-opacity duration-300 origin-center will-change-transform"
+                        draggable={false}
+                      />
+                      <img
+                        src="/icon/screwdriver.svg"
+                        alt=""
+                        className="tuning-screwdriver absolute left-[90%] top-1/2 w-[100px] h-[56px] opacity-50 group-hover:opacity-100 transition-opacity duration-300 origin-center will-change-transform"
+                        draggable={false}
+                      />
+                    </div>
+                  )}
+
+                  {isSetting && (
+                    <div className="absolute right-0 top-0 bottom-0 w-full overflow-hidden pointer-events-none z-0 transform skew-x-12">
+                      <div className="absolute left-[84%] top-1/2 h-[60px] w-[60px] -translate-x-1/2 -translate-y-1/2">
+                        <img
+                          src="/icon/setting_gear.svg"
+                          alt=""
+                          className="h-full w-full scale-200 origin-center opacity-55 transition-opacity duration-300 will-change-transform group-hover:animate-[spin_1.8s_linear_infinite] group-hover:opacity-100"
+                          draggable={false}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {isExit && (
+                    <div className="absolute right-0 top-0 bottom-0 w-full overflow-hidden pointer-events-none z-0 transform skew-x-12">
+                      {/* Door - stays put on the right edge */}
+                      <img
+                        src="/icon/exit_door.svg"
+                        alt=""
+                        className="absolute right-[-10%] top-[-5%] z-25 h-[115%] w-auto opacity-60 scale-85 transition-opacity duration-300 group-hover:opacity-100"
+                        draggable={false}
+                      />
+                      {/* Person - sits at 70% from the left side */}
+                      <div className="exit-person-runner absolute left-[70%] top-[67.5%] z-20 h-[90%] w-auto">
+                        <div className="exit-trail pointer-events-none" aria-hidden="true">
+                          <span></span>
+                          <span></span>
+                          <span></span>
+                        </div>
+                        <img
+                          src="/icon/exit_person.svg"
+                          alt=""
+                          className="exit-person h-full w-auto scale-95"
+                          draggable={false}
+                        />
+                      </div>
+                      {/* Smoke puffs */}
+                      <div className="absolute right-[8%] top-[56%] z-30 -translate-y-1/2 opacity-0 transition-opacity delay-500 duration-500 group-hover:opacity-100">
+                        <div className="exit-smoke-puff exit-smoke-1 pointer-events-none absolute -top-1.5 left-0 h-2.5 w-2.5 rounded-full bg-[radial-gradient(circle,rgba(200,200,200,0.7)_0%,rgba(160,160,160,0)_70%)] opacity-0"></div>
+                        <div className="exit-smoke-puff exit-smoke-2 pointer-events-none absolute top-0.5 -left-2 h-2.5 w-2.5 rounded-full bg-[radial-gradient(circle,rgba(200,200,200,0.7)_0%,rgba(160,160,160,0)_70%)] opacity-0"></div>
+                        <div className="exit-smoke-puff exit-smoke-3 pointer-events-none absolute -top-3 left-1 h-2.5 w-2.5 rounded-full bg-[radial-gradient(circle,rgba(200,200,200,0.7)_0%,rgba(160,160,160,0)_70%)] opacity-0"></div>
+                      </div>
+                    </div>
+                  )}
                 </button>
               </div>
             );
@@ -617,37 +1171,109 @@ export default function Garage({
         </div>
       )}
 
-      {/* FLOATING DETAILS PANEL */}
-      {activeGarageTab && activeGarageTab !== 'drive' && activeGarageTab !== 'setting' && activeGarageTab !== 'tuning' && (
+      {/* DEDICATED DEALER CITY MAP */}
+      {activeGarageTab === 'dealer' && (
         <div
-          className="absolute right-[388px] top-12 bottom-12 w-[460px] z-10 flex flex-col p-6 bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 rounded-3xl shadow-2xl pointer-events-auto transition-all duration-500 overflow-y-auto"
+          className="absolute inset-0 z-10 overflow-hidden bg-zinc-950 pointer-events-auto animate-fadeIn"
         >
+          <DealerCityMapScene selectedCity={dealerCity} />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(244,63,94,0.16),transparent_24%),radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.14),transparent_28%),linear-gradient(90deg,rgba(9,9,11,0.92),rgba(9,9,11,0.72))]" aria-hidden="true" />
+          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-zinc-950 to-transparent" aria-hidden="true" />
+          <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-zinc-950 to-transparent" aria-hidden="true" />
+
           {/* TAB: DEALER */}
           {activeGarageTab === 'dealer' && (
-            <div className="flex flex-col gap-4 animate-fadeIn text-left">
-              <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
-                <h2 className="text-sm font-black text-white tracking-wider uppercase">DEALERSHIP</h2>
-                <span className="text-[9px] text-zinc-500 font-mono">SELECT OR PURCHASE CARS</span>
-              </div>
-
-              {/* Brand Filter */}
-              <div className="flex gap-1.5 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent shrink-0">
-                {['All', 'Toyota', 'Ford', 'Nissan', 'Tesla', 'Porsche', 'Ferrari', 'Audi', 'Chevrolet'].map((brand) => (
+            <div className="relative z-10 flex h-full min-h-0 flex-col gap-6 p-8 animate-fadeIn text-left">
+              <div className="flex shrink-0 justify-between items-center pb-4 border-b border-zinc-800/80">
+                <div>
+                  <h2 className="text-2xl font-black text-white tracking-wider uppercase">
+                    {dealerCityConfig ? dealerCityConfig.name : 'DEALER CITY SELECT'}
+                  </h2>
+                  <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-[0.25em]">
+                    {dealerCityConfig ? dealerCityConfig.region : 'CHOOSE WHERE TO BUY CARS'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {dealerCityConfig && (
+                    <button
+                      onClick={() => setDealerCity(null)}
+                      className="px-3 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-[9px] font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
+                    >
+                      CITY MAP
+                    </button>
+                  )}
                   <button
-                    key={brand}
-                    onClick={() => setSelectedBrand(brand)}
-                    className={`px-3 py-1.5 text-[9px] font-bold rounded-lg whitespace-nowrap transition-all border cursor-pointer ${selectedBrand === brand
-                      ? 'bg-zinc-100 border-zinc-100 text-zinc-950'
-                      : 'bg-transparent border-zinc-850 text-zinc-400 hover:text-zinc-200'
-                      }`}
+                    onClick={() => {
+                      setDealerCity(null);
+                      setActiveGarageTab(null);
+                    }}
+                    className="px-3 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-[9px] font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
                   >
-                    {brand}
+                    BACK
                   </button>
-                ))}
+                </div>
               </div>
 
-              <div className="flex flex-col gap-4">
-                {CARS_DATABASE.filter((car) => selectedBrand === 'All' || car.brand === selectedBrand).map((car) => {
+              {!dealerCityConfig && (
+                <div className="relative mx-auto grid w-full max-w-5xl flex-1 min-h-0 content-center grid-cols-2 gap-5 py-4">
+                  {DEALER_CITIES.map((city) => {
+                    const cityCars = getDealerCityCars(city.id);
+                    const cityClasses = getDealerCityClasses(city.accent);
+
+                    return (
+                      <button
+                        key={city.id}
+                        onClick={() => setDealerCity(city.id)}
+                        className={`group relative min-h-[240px] overflow-hidden rounded-2xl border border-zinc-850 bg-zinc-950/65 p-5 text-left backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:bg-zinc-900/75 ${cityClasses.glow}`}
+                      >
+                        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
+                        <div className="relative z-10 flex h-full flex-col justify-between gap-5">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${cityClasses.icon}`}>
+                              <Map className="h-5 w-5" />
+                            </div>
+                            <div className="text-right">
+                              <div className={`text-2xl font-black font-mono ${cityClasses.text}`}>{cityCars.length}</div>
+                              <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Cars</div>
+                            </div>
+                          </div>
+                          <div>
+                            <h3 className="text-2xl font-black uppercase tracking-wide text-white transition-colors group-hover:text-zinc-100">
+                              {city.name}
+                            </h3>
+                            <div className={`mt-1 text-[10px] font-black uppercase tracking-[0.24em] ${cityClasses.text}`}>
+                              {city.region}
+                            </div>
+                            <p className="mt-3 text-xs leading-relaxed text-zinc-400">
+                              {city.description}
+                            </p>
+                            <div className="mt-4 flex flex-wrap gap-1.5">
+                              {(city.brands.length > 0 ? city.brands : ['Coming Soon']).map((brand) => (
+                                <span key={brand} className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+                                  {brand}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {dealerCityConfig && dealerCars.length === 0 && (
+                <div className="mx-auto mt-10 w-full max-w-xl rounded-2xl border border-zinc-850 bg-zinc-950/70 p-8 text-center backdrop-blur-md">
+                  <h3 className="text-lg font-black uppercase tracking-wide text-white">No Cars Stocked Yet</h3>
+                  <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                    This city is open, but its dealer inventory has not arrived yet.
+                  </p>
+                </div>
+              )}
+
+              {dealerCityConfig && dealerCars.length > 0 && (
+                <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-6 pr-2 xl:grid-cols-2">
+                {dealerCars.map((car) => {
                   const isUnlocked = purchasedCars.includes(car.id);
                   const isActive = activeCarId === car.id;
                   const canAfford = playerCredits >= car.price;
@@ -782,234 +1408,518 @@ export default function Garage({
                     </div>
                   );
                 })}
-              </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
-
       {/* DEDICATED DRIVE MODES INTERFACE */}
       {activeGarageTab === 'drive' && (
         <div
           className={`absolute inset-0 z-10 flex items-center justify-center p-8 bg-zinc-950/40 backdrop-blur-md pointer-events-auto transition-all duration-700 ${isTransitioningDrive ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}
         >
-          <div className="w-full max-w-4xl flex flex-col gap-6 text-left">
-            <div className="flex justify-between items-center pb-4 border-b border-zinc-900">
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-extrabold tracking-[0.4em] text-rose-500 uppercase italic">
-                  VELOCITY
-                </span>
-                <h2 className="text-2xl font-black text-white tracking-wider uppercase">
-                  DRIVING CHALLENGES
-                </h2>
-              </div>
-              <button
-                onClick={handleBackToGarageClick}
-                className="px-5 py-2.5 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
-              >
-                BACK TO GARAGE
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Driving School */}
-              <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-3 mb-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
-                      <HelpCircle className="w-5 h-5 text-rose-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-white text-base">Driving School</h3>
-                      <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">TUTORIAL</span>
-                    </div>
+          <div className="w-full max-w-4xl flex flex-col gap-6 text-left h-full max-h-[620px] justify-center">
+            {/* 1. Mode Selection Screen */}
+            {driveSubMode === null && (
+              <>
+                <div className="flex justify-between items-center pb-4 border-b border-zinc-900 shrink-0">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-extrabold tracking-[0.4em] text-rose-500 uppercase italic">
+                      VELOCITY
+                    </span>
+                    <h2 className="text-2xl font-black text-white tracking-wider uppercase">
+                      SELECT MODE
+                    </h2>
                   </div>
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    Learn acceleration, braking, yaw physics, and drifting. Rewards <span className="text-amber-500 font-bold font-mono">+200 Credits</span>.
-                  </p>
-                </div>
-                <button
-                  onClick={startTutorial}
-                  className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Start Training
-                </button>
-              </div>
-
-              {/* Free Roam */}
-              <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-3 mb-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
-                      <Compass className="w-5 h-5 text-rose-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-white text-base">Free Roam</h3>
-                      <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">OPEN WORLD</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    Explore the test course, practice jumps, and chain drift combinations to earn passive credit payouts.
-                  </p>
-                </div>
-                <button
-                  onClick={startFreeRoam}
-                  className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Enter Open World
-                </button>
-              </div>
-
-              {/* License Academy */}
-              <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
-                    <Award className="w-5 h-5 text-rose-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-extrabold text-white text-base">License Academy</h3>
-                    <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">40 TESTS</span>
-                  </div>
+                  <button
+                    onClick={handleBackToGarage}
+                    className="px-5 py-2.5 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
+                  >
+                    BACK TO GARAGE
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 max-h-[260px] overflow-y-auto pr-1">
-                  {LICENSE_TIERS.map((tier) => {
-                    const tests = LICENSE_TESTS_BY_TIER[tier.id];
-                    const completed = getLicenseTierCompletion(licenseProgress, tier.id);
-                    const styles = licenseTierStyles[tier.id];
-                    const nextTest = tests.find((test) =>
-                      !licenseProgress[test.tier][test.testNumber - 1] && isLicenseTestUnlocked(test, licenseProgress)
-                    );
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 my-auto py-4">
+                  {/* Quick Play Card */}
+                  <button
+                    onClick={() => {
+                      setDriveSubMode('quickplay');
+                      setQuickPlayStep('car');
+                      setQuickPlayCarId(null);
+                    }}
+                    className="group relative border border-zinc-855 bg-zinc-900/40 hover:bg-zinc-900/70 p-8 rounded-3xl flex flex-col justify-between text-left transition-all duration-300 transform hover:-translate-y-1.5 hover:animate-glowPulseCyan h-80 cursor-pointer overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/0 via-cyan-500/0 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
 
-                    return (
-                      <div key={tier.id} className="bg-zinc-950 border border-zinc-850 p-3 rounded-xl">
-                        <div className="flex items-center justify-between gap-3 mb-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${styles.icon}`}>
-                              <Award className={`w-4 h-4 ${styles.accent}`} />
-                            </div>
-                            <div>
-                              <div className="text-xs font-extrabold text-white uppercase">{tier.name}</div>
-                              <div className="text-[9px] font-mono text-zinc-500">{completed}/10 COMPLETE</div>
-                            </div>
-                          </div>
-                          {completed === 10 && (
-                            <span className={`text-[9px] font-black px-2 py-1 rounded-lg border ${styles.done}`}>
-                              COMPLETE
-                            </span>
-                          )}
-                        </div>
-
-                        <p className="text-[10px] text-zinc-500 leading-relaxed mb-3">
-                          {tier.description}
-                        </p>
-                        <div className="text-[9px] font-mono uppercase tracking-wider text-zinc-400 mb-3">
-                          {nextTest ? `Next: ${nextTest.lesson}` : 'Tier exam complete'}
-                        </div>
-
-                        <div className="grid grid-cols-5 gap-1.5">
-                          {tests.map((test) => {
-                            const isComplete = licenseProgress[test.tier][test.testNumber - 1];
-                            const isUnlocked = isLicenseTestUnlocked(test, licenseProgress);
-                            return (
-                              <button
-                                key={test.id}
-                                disabled={!isUnlocked}
-                                onClick={() => startLicenseTest(test.id)}
-                                title={test.name}
-                                className={`h-9 rounded-lg border text-[10px] font-black transition-all flex items-center justify-center ${isComplete
-                                  ? styles.done
-                                  : isUnlocked
-                                    ? `${styles.button} border-transparent cursor-pointer`
-                                    : 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed'
-                                  }`}
-                              >
-                                {isComplete ? <Check className="w-3.5 h-3.5" /> : isUnlocked ? test.testNumber : <Lock className="w-3 h-3" />}
-                              </button>
-                            );
-                          })}
-                        </div>
+                    <div className="flex flex-col gap-4">
+                      <div className="w-14 h-14 rounded-2xl bg-cyan-950/40 border border-cyan-900/50 flex items-center justify-center group-hover:scale-110 group-hover:border-cyan-500/40 group-hover:bg-cyan-950/65 transition-all duration-300">
+                        <Play className="w-6 h-6 text-cyan-400 fill-cyan-400/20 group-hover:text-cyan-300 group-hover:fill-cyan-300/40 transition-colors" />
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-2">
-              {/* Map Editor */}
-              <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-3 mb-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
-                      <Map className="w-5 h-5 text-rose-500" />
+                      <div>
+                        <h3 className="text-2xl font-black text-white tracking-wide uppercase group-hover:text-cyan-300 transition-colors">
+                          Quick Play
+                        </h3>
+                        <p className="text-[10px] font-extrabold tracking-[0.2em] text-cyan-400 uppercase mt-1">
+                          No Restrictions
+                        </p>
+                      </div>
+                      <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mt-1">
+                        Drive any car in the game immediately on any circuit. Cars use stock configuration. Races do not award credits.
+                      </p>
                     </div>
-                    <div>
-                      <h3 className="font-extrabold text-white text-base">Custom Map Editor</h3>
-                      <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">3D BUILDER</span>
+
+                    <div className="flex items-center gap-1.5 text-xs font-black tracking-widest text-cyan-400 group-hover:translate-x-1.5 transition-transform duration-300">
+                      CHOOSE VEHICLE &rarr;
                     </div>
-                  </div>
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    Design layout elevation, banking, and scenery objects. Test drive instantly with custom settings.
-                  </p>
+                  </button>
+
+                  {/* Career Mode Card */}
+                  <button
+                    onClick={() => setDriveSubMode('career')}
+                    className="group relative border border-zinc-855 bg-zinc-900/40 hover:bg-zinc-900/70 p-8 rounded-3xl flex flex-col justify-between text-left transition-all duration-300 transform hover:-translate-y-1.5 hover:animate-glowPulseRose h-80 cursor-pointer overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-rose-500/0 via-rose-500/0 to-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+                    <div className="flex flex-col gap-4">
+                      <div className="w-14 h-14 rounded-2xl bg-rose-950/40 border border-rose-900/50 flex items-center justify-center group-hover:scale-110 group-hover:border-rose-500/40 group-hover:bg-rose-950/65 transition-all duration-300">
+                        <Trophy className="w-6 h-6 text-rose-550 group-hover:text-rose-400 transition-colors" />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-black text-white tracking-wide uppercase group-hover:text-rose-400 transition-colors">
+                          Career Mode
+                        </h3>
+                        <p className="text-[10px] font-extrabold tracking-[0.2em] text-rose-500 uppercase mt-1">
+                          Championships & School
+                        </p>
+                      </div>
+                      <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mt-1">
+                        Complete Driving School, earn Licenses, and race in Circuits using your owned cars. Earn credits to buy and tune cars.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-xs font-black tracking-widest text-rose-500 group-hover:translate-x-1.5 transition-transform duration-300">
+                      ENTER CAREER &rarr;
+                    </div>
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    setActiveMode('editor');
-                    setActiveGarageTab(null);
-                  }}
-                  className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Open Map Editor
-                </button>
-              </div>
+              </>
+            )}
 
-              {/* Circuit Racing Selection List (Span 2 cols) */}
-              <div className="md:col-span-2 bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col gap-3 max-h-[300px] overflow-y-auto">
-                <span className="text-[10px] font-bold text-rose-500 tracking-wider uppercase">CIRCUIT RACING CHALLENGES</span>
-
-                <div className="flex flex-col gap-3">
-                  {TRACKS_DATABASE.filter((t) => t.id !== 'license' && t.id !== 'custom').map((track) => {
-                    const isLocked = track.requiresLicense && !hasLicense;
-                    const length = getTrackLength(track.path.map((p) => ('isVector3' in p ? p : p.pos)));
-                    return (
-                      <div
-                        key={track.id}
-                        className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl flex items-center justify-between gap-4"
+            {/* 2. Quick Play Mode */}
+            {driveSubMode === 'quickplay' && (
+              <>
+                {/* 2a. Quick Play Car Selection */}
+                {quickPlayStep === 'car' && (
+                  <>
+                    <div className="flex justify-between items-center pb-4 border-b border-zinc-900 shrink-0">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-extrabold tracking-[0.4em] text-cyan-400 uppercase italic">
+                          QUICK PLAY
+                        </span>
+                        <h2 className="text-2xl font-black text-white tracking-wider uppercase">
+                          SELECT VEHICLE
+                        </h2>
+                      </div>
+                      <button
+                        onClick={() => setDriveSubMode(null)}
+                        className="px-5 py-2.5 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
                       >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-extrabold text-white text-sm">{track.name}</h4>
-                            {isLocked && <Lock className="w-3.5 h-3.5 text-zinc-550" />}
+                        BACK
+                      </button>
+                    </div>
+
+                    {/* Brand Filter */}
+                    <div className="flex gap-1.5 overflow-x-auto pb-2 shrink-0">
+                      {['All', 'Toyota', 'Ford', 'Nissan', 'Tesla', 'Porsche', 'Ferrari', 'Audi', 'Chevrolet'].map((brand) => (
+                        <button
+                          key={brand}
+                          onClick={() => setQuickPlaySelectedBrand(brand)}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border ${quickPlaySelectedBrand === brand
+                            ? 'bg-cyan-950/40 border-cyan-500 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                            : 'bg-zinc-900 border-zinc-855 text-zinc-400 hover:text-zinc-300'
+                            }`}
+                        >
+                          {brand}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pr-1 flex-1 py-1">
+                      {CARS_DATABASE.filter((car) => quickPlaySelectedBrand === 'All' || car.brand === quickPlaySelectedBrand).map((car) => (
+                        <div
+                          key={car.id}
+                          className="bg-zinc-900/40 border border-zinc-850 p-4 rounded-2xl flex flex-col justify-between gap-3"
+                        >
+                          <div>
+                            <div className="flex justify-between items-start">
+                              <h3 className="font-extrabold text-white text-sm">
+                                {car.brand} {car.name}
+                              </h3>
+                            </div>
+                            <div className="flex gap-2 items-center mt-1">
+                              <span className="text-[9px] font-bold tracking-wider uppercase text-cyan-400">
+                                {car.tier}
+                              </span>
+                              <span className="text-zinc-700 text-[9px] font-bold">•</span>
+                              <span className="text-[9px] font-bold tracking-wider uppercase text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-850">
+                                {car.driveType}
+                              </span>
+                            </div>
                           </div>
-                          <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed">
-                            {track.description}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2.5">
-                          <div className="text-right">
-                            <span className={`text-[10px] font-mono font-bold block ${!isLocked ? 'text-amber-500' : 'text-zinc-550'}`}>
-                              +{track.baseReward} CR
-                            </span>
-                            <span className="text-[9px] font-mono text-zinc-550">{formatDistance(length)}</span>
+
+                          {/* Spec bars (Stock Stats) */}
+                          <div className="flex flex-col gap-2 mt-0.5 bg-zinc-950/50 p-3 rounded-xl border border-zinc-900">
+                            {/* Speed */}
+                            <div>
+                              <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
+                                <span>TOP SPEED</span>
+                                <span>{Math.round(car.speed * 10)}%</span>
+                              </div>
+                              <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                <div
+                                  className="absolute left-0 top-0 h-full bg-cyan-500 transition-all duration-300"
+                                  style={{ width: `${Math.min(100, car.speed * 10)}%` }}
+                                />
+                              </div>
+                            </div>
+                            {/* Acceleration */}
+                            <div>
+                              <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
+                                <span>ACCELERATION</span>
+                                <span>{Math.round(car.acceleration * 10)}%</span>
+                              </div>
+                              <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                <div
+                                  className="absolute left-0 top-0 h-full bg-cyan-500 transition-all duration-300"
+                                  style={{ width: `${Math.min(100, car.acceleration * 10)}%` }}
+                                />
+                              </div>
+                            </div>
+                            {/* Handling */}
+                            <div>
+                              <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
+                                <span>HANDLING</span>
+                                <span>{Math.round(car.handling * 10)}%</span>
+                              </div>
+                              <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                <div
+                                  className="absolute left-0 top-0 h-full bg-cyan-500 transition-all duration-300"
+                                  style={{ width: `${Math.min(100, car.handling * 10)}%` }}
+                                />
+                              </div>
+                            </div>
                           </div>
+
                           <button
-                            disabled={isLocked}
-                            onClick={() => startRace(track.id)}
-                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${!isLocked
-                              ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
-                              : 'bg-zinc-900 border border-zinc-800 text-zinc-500 cursor-not-allowed'
-                              }`}
+                            onClick={() => {
+                              setQuickPlayCarId(car.id);
+                              setQuickPlayStep('map');
+                            }}
+                            className="w-full py-2 rounded-xl text-xs font-black bg-cyan-600 hover:bg-cyan-500 text-white transition-all cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.1)] hover:shadow-[0_0_15px_rgba(6,182,212,0.2)]"
                           >
-                            {!isLocked ? 'Enter' : 'Locked'}
+                            SELECT CAR
                           </button>
                         </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* 2b. Quick Play Map Selection */}
+                {quickPlayStep === 'map' && (
+                  <>
+                    <div className="flex justify-between items-center pb-4 border-b border-zinc-900 shrink-0">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-extrabold tracking-[0.4em] text-cyan-400 uppercase italic">
+                            QUICK PLAY
+                          </span>
+                          {(() => {
+                            const chosenCar = CARS_DATABASE.find(c => c.id === quickPlayCarId);
+                            return chosenCar ? (
+                              <span className="text-[9px] font-bold tracking-wider text-zinc-400 bg-zinc-900 border border-zinc-850 px-2.5 py-0.5 rounded-lg uppercase">
+                                Vehicle: {chosenCar.brand} {chosenCar.name}
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
+                        <h2 className="text-2xl font-black text-white tracking-wider uppercase">
+                          SELECT CIRCUIT
+                        </h2>
                       </div>
-                    );
-                  })}
+                      <button
+                        onClick={() => setQuickPlayStep('car')}
+                        className="px-5 py-2.5 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
+                      >
+                        BACK
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col gap-3 overflow-y-auto pr-1 flex-1 py-1">
+                      {TRACKS_DATABASE.filter((t) => t.id !== 'license' && t.id !== 'custom').map((track) => {
+                        const length = getTrackLength(track.path.map((p) => ('isVector3' in p ? p : p.pos)));
+                        return (
+                          <div
+                            key={track.id}
+                            className="bg-zinc-900/40 border border-zinc-850 p-4 rounded-2xl flex items-center justify-between gap-4"
+                          >
+                            <div className="flex-1 text-left">
+                              <h4 className="font-extrabold text-white text-sm">{track.name}</h4>
+                              <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed">
+                                {track.description}
+                              </p>
+                            </div>
+                            <div className="flex flex-col items-end gap-2.5">
+                              <div className="text-right">
+                                <span className="text-[10px] font-mono font-bold block text-zinc-500">
+                                  0 CR (Quick Play)
+                                </span>
+                                <span className="text-[9px] font-mono text-zinc-555">{formatDistance(length)}</span>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  if (quickPlayCarId) {
+                                    startQuickPlayRace(quickPlayCarId, track.id);
+                                  }
+                                }}
+                                className="px-5 py-2 rounded-xl text-xs font-black bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer transition-all shadow-[0_0_10px_rgba(6,182,212,0.1)] hover:shadow-[0_0_15px_rgba(6,182,212,0.25)]"
+                              >
+                                RACE
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {/* 3. Career Mode Screen */}
+            {driveSubMode === 'career' && (
+              <>
+                <div className="flex justify-between items-center pb-4 border-b border-zinc-900 shrink-0">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-extrabold tracking-[0.4em] text-rose-500 uppercase italic">
+                      VELOCITY
+                    </span>
+                    <h2 className="text-2xl font-black text-white tracking-wider uppercase">
+                      CAREER CHALLENGES
+                    </h2>
+                  </div>
+                  <button
+                    onClick={() => setDriveSubMode(null)}
+                    className="px-5 py-2.5 border border-zinc-850 hover:border-zinc-750 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-rose-500 rounded-xl transition-all cursor-pointer"
+                  >
+                    BACK
+                  </button>
                 </div>
-              </div>
-            </div>
+
+                <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-6 py-1 scrollbar-thin">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
+                    {/* Driving School */}
+                    <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-between gap-4 text-left">
+                      <div>
+                        <div className="flex items-center gap-3 mb-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
+                            <HelpCircle className="w-5 h-5 text-rose-500" />
+                          </div>
+                          <div>
+                            <h3 className="font-extrabold text-white text-base">Driving School</h3>
+                            <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">TUTORIAL</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed text-left">
+                          Learn acceleration, braking, yaw physics, and drifting. Rewards <span className="text-amber-500 font-bold font-mono">+200 Credits</span>.
+                        </p>
+                      </div>
+                      <button
+                        onClick={startTutorial}
+                        className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Start Training
+                      </button>
+                    </div>
+
+                    {/* Free Roam */}
+                    <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-between gap-4 text-left">
+                      <div>
+                        <div className="flex items-center gap-3 mb-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
+                            <Compass className="w-5 h-5 text-rose-500" />
+                          </div>
+                          <div>
+                            <h3 className="font-extrabold text-white text-base">Free Roam</h3>
+                            <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">OPEN WORLD</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed text-left">
+                          Explore the test course, practice jumps, and chain drift combinations to earn passive credit payouts.
+                        </p>
+                      </div>
+                      <button
+                        onClick={startFreeRoam}
+                        className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Enter Open World
+                      </button>
+                    </div>
+
+                    {/* License Academy */}
+                    <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col gap-4 text-left">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
+                          <Award className="w-5 h-5 text-rose-500" />
+                        </div>
+                        <div>
+                          <h3 className="font-extrabold text-white text-base">License Academy</h3>
+                          <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">40 TESTS</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 max-h-[260px] overflow-y-auto pr-1">
+                        {LICENSE_TIERS.map((tier) => {
+                          const tests = LICENSE_TESTS_BY_TIER[tier.id];
+                          const completed = getLicenseTierCompletion(licenseProgress, tier.id);
+                          const styles = licenseTierStyles[tier.id];
+                          const nextTest = tests.find((test) =>
+                            !licenseProgress[test.tier][test.testNumber - 1] && isLicenseTestUnlocked(test, licenseProgress)
+                          );
+
+                          return (
+                            <div key={tier.id} className="bg-zinc-950 border border-zinc-855 p-3 rounded-xl text-left">
+                              <div className="flex items-center justify-between gap-3 mb-3">
+                                <div className="flex items-center gap-2.5">
+                                  <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${styles.icon}`}>
+                                    <Award className={`w-4 h-4 ${styles.accent}`} />
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-extrabold text-white uppercase">{tier.name}</div>
+                                    <div className="text-[9px] font-mono text-zinc-550">{completed}/10 COMPLETE</div>
+                                  </div>
+                                </div>
+                                {completed === 10 && (
+                                  <span className={`text-[9px] font-black px-2 py-1 rounded-lg border ${styles.done}`}>
+                                    COMPLETE
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="text-[10px] text-zinc-500 leading-relaxed mb-3">
+                                {tier.description}
+                              </p>
+                              <div className="text-[9px] font-mono uppercase tracking-wider text-zinc-400 mb-3">
+                                {nextTest ? `Next: ${nextTest.lesson}` : 'Tier exam complete'}
+                              </div>
+
+                              <div className="grid grid-cols-5 gap-1.5">
+                                {tests.map((test) => {
+                                  const isComplete = licenseProgress[test.tier][test.testNumber - 1];
+                                  const isUnlocked = isLicenseTestUnlocked(test, licenseProgress);
+                                  return (
+                                    <button
+                                      key={test.id}
+                                      disabled={!isUnlocked}
+                                      onClick={() => startLicenseTest(test.id)}
+                                      title={test.name}
+                                      className={`h-9 rounded-lg border text-[10px] font-black transition-all flex items-center justify-center ${isComplete
+                                        ? styles.done
+                                        : isUnlocked
+                                          ? `${styles.button} border-transparent cursor-pointer`
+                                          : 'bg-zinc-900 border-zinc-800 text-zinc-650 cursor-not-allowed'
+                                        }`}
+                                    >
+                                      {isComplete ? <Check className="w-3.5 h-3.5" /> : isUnlocked ? test.testNumber : <Lock className="w-3 h-3" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0 mt-2">
+                    {/* Map Editor */}
+                    <div className="bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-between gap-4 text-left">
+                      <div>
+                        <div className="flex items-center gap-3 mb-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
+                            <Map className="w-5 h-5 text-rose-500" />
+                          </div>
+                          <div>
+                            <h3 className="font-extrabold text-white text-base">Custom Map Editor</h3>
+                            <span className="text-[9px] font-bold text-rose-500 tracking-wider uppercase">3D BUILDER</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed text-left font-normal">
+                          Design layout elevation, banking, and scenery objects. Test drive instantly with custom settings.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setActiveMode('editor');
+                          setActiveGarageTab(null);
+                        }}
+                        className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Open Map Editor
+                      </button>
+                    </div>
+
+                    {/* Circuit Racing Selection List (Span 2 cols) */}
+                    <div className="md:col-span-2 bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl flex flex-col gap-3 max-h-[300px] overflow-y-auto text-left">
+                      <span className="text-[10px] font-bold text-rose-500 tracking-wider uppercase text-left">CIRCUIT RACING CHALLENGES</span>
+
+                      <div className="flex flex-col gap-3">
+                        {TRACKS_DATABASE.filter((t) => t.id !== 'license' && t.id !== 'custom').map((track) => {
+                          const isLocked = track.requiresLicense && !hasLicense;
+                          const length = getTrackLength(track.path.map((p) => ('isVector3' in p ? p : p.pos)));
+                          return (
+                            <div
+                              key={track.id}
+                              className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl flex items-center justify-between gap-4"
+                            >
+                              <div className="flex-1 text-left">
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-extrabold text-white text-sm">{track.name}</h4>
+                                  {isLocked && <Lock className="w-3.5 h-3.5 text-zinc-550" />}
+                                </div>
+                                <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed text-left font-normal">
+                                  {track.description}
+                                </p>
+                              </div>
+                              <div className="flex flex-col items-end gap-2.5">
+                                <div className="text-right">
+                                  <span className={`text-[10px] font-mono font-bold block ${!isLocked ? 'text-amber-500' : 'text-zinc-550'}`}>
+                                    +{track.baseReward} CR
+                                  </span>
+                                  <span className="text-[9px] font-mono text-zinc-550">{formatDistance(length)}</span>
+                                </div>
+                                <button
+                                  disabled={isLocked}
+                                  onClick={() => startRace(track.id)}
+                                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${!isLocked
+                                    ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
+                                    : 'bg-zinc-900 border border-zinc-800 text-zinc-500 cursor-not-allowed'
+                                    }`}
+                                >
+                                  {!isLocked ? 'Enter' : 'Locked'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}      {tuningState !== 'closed' && (
