@@ -20,6 +20,10 @@
   --animate-slideInRight: slideInRight 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-slideOutRight: slideOutRight 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-fadeOut: fadeOut 0.7s ease-out forwards;
+  --animate-dealerFadeIn: fadeIn 0.7s ease-out forwards;
+  --animate-dealerContentIn: dealerContentIn 0.7s ease-out forwards;
+  --animate-dealerBlackIn: dealerBlackIn 0.7s ease-out forwards;
+  --animate-dealerBlackOut: dealerBlackOut 0.7s ease-out forwards;
   --animate-glowPulseCyan: glowPulseCyan 2s infinite alternate;
   --animate-glowPulseRose: glowPulseRose 2s infinite alternate;
 
@@ -30,6 +34,45 @@
 
     to {
       opacity: 1;
+    }
+  }
+
+  @keyframes dealerContentIn {
+    0%,
+    38% {
+      opacity: 0;
+    }
+
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes dealerBlackIn {
+    0% {
+      opacity: 0;
+    }
+
+    38% {
+      opacity: 1;
+    }
+
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes dealerBlackOut {
+    0% {
+      opacity: 0;
+    }
+
+    55% {
+      opacity: 1;
+    }
+
+    100% {
+      opacity: 0;
     }
   }
 
@@ -233,6 +276,46 @@ body {
   inset: 20% 14%;
   border-color: rgba(244, 63, 94, 0.16);
   clip-path: polygon(14% 44%, 34% 16%, 72% 25%, 86% 58%, 55% 84%, 22% 70%);
+}
+
+.dealer-movie-bar {
+  backdrop-filter: blur(8px);
+}
+
+.dealer-marquee-window {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.dealer-marquee-track {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.dealer-marquee-track.is-centered {
+  text-align: center;
+}
+
+.dealer-marquee-track.is-overflowing {
+  width: max-content;
+  max-width: none;
+  padding-right: 40%;
+  animation: dealerMarqueeShift 13s linear infinite;
+  will-change: transform;
+}
+
+@keyframes dealerMarqueeShift {
+  0%,
+  18% {
+    transform: translateX(0);
+  }
+
+  82%,
+  100% {
+    transform: translateX(calc(-100% + min(100%, 64vw)));
+  }
 }
 
 /* Exit button walker */

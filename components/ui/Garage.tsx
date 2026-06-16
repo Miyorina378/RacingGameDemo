@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map, Trophy } from 'lucide-react';
+import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map as MapIcon, Trophy } from 'lucide-react';
 import * as THREE from 'three';
 import { CARS_DATABASE, CarConfig } from '../config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig } from '../config/TrackDatabase';
@@ -258,12 +258,15 @@ const PAINT_SWATCHES = [
 ];
 
 type DealerCityId = 'east' | 'west' | 'north' | 'south';
+type DealerMarketMode = 'new' | 'used';
+type DealerPage = 'map' | 'city';
 
 const DEALER_CITIES: Array<{
   id: DealerCityId;
   name: string;
   region: string;
   description: string;
+  hoverDescription: string;
   brands: string[];
   accent: string;
 }> = [
@@ -271,7 +274,8 @@ const DEALER_CITIES: Array<{
       id: 'east',
       name: 'East City',
       region: 'Far East Imports',
-      description: 'Japanese, Korean, and Chinese performance cars.',
+      description: 'Japanese and street-spec imports line the neon port roads.',
+      hoverDescription: 'East City stocks Toyota, Nissan, and Honda around a lantern street, compact towers, and late-night import shops.',
       brands: ['Toyota', 'Nissan', 'Honda'],
       accent: 'rose',
     },
@@ -279,7 +283,8 @@ const DEALER_CITIES: Array<{
       id: 'west',
       name: 'West City',
       region: 'Far West Brands',
-      description: 'American and European road machines.',
+      description: 'A bridge city for American power and European exotics.',
+      hoverDescription: 'West City wraps Ford, Tesla, Porsche, Ferrari, Audi, and Chevrolet around a red suspension bridge and bay road.',
       brands: ['Ford', 'Tesla', 'Porsche', 'Ferrari', 'Audi', 'Chevrolet'],
       accent: 'cyan',
     },
@@ -287,16 +292,18 @@ const DEALER_CITIES: Array<{
       id: 'north',
       name: 'North City',
       region: 'Cold Line Exchange',
-      description: 'Reserved for future northern specialist dealers.',
-      brands: [],
+      description: 'A crisp city square with a tall steel landmark.',
+      hoverDescription: 'North City is a specialist market under a tall steel tower, cold plazas, and narrow dealer lanes.',
+      brands: ['Porsche', 'Audi'],
       accent: 'blue',
     },
     {
       id: 'south',
       name: 'South City',
       region: 'Coastal Auto Market',
-      description: 'Reserved for future southern specialist dealers.',
-      brands: [],
+      description: 'Coastal garages sit beside palms, marina roads, and tuned muscle.',
+      hoverDescription: 'South City serves Chevrolet, Ford, and Toyota beside palm-lined roads, low garages, and a harbor lighthouse.',
+      brands: ['Chevrolet', 'Ford', 'Toyota'],
       accent: 'amber',
     },
   ];
@@ -306,6 +313,66 @@ const getDealerCityCars = (city: DealerCityId | null) => {
   const cityConfig = DEALER_CITIES.find((item) => item.id === city);
   if (!cityConfig || cityConfig.brands.length === 0) return [];
   return CARS_DATABASE.filter((car) => cityConfig.brands.includes(car.brand));
+};
+
+const DEALER_CITY_LABEL_POSITIONS: Record<DealerCityId, { left: string; top: string }> = {
+  west: { left: '52%', top: '56%' },
+  north: { left: '78%', top: '48%' },
+  east: { left: '86%', top: '61%' },
+  south: { left: '72%', top: '82%' },
+};
+
+const getDealerBrandInitials = (brand: string) => {
+  if (brand === 'Chevrolet') return 'CH';
+  return brand.slice(0, 2).toUpperCase();
+};
+
+const getDealerBrandTone = (brand: string) => {
+  const tones: Record<string, string> = {
+    Toyota: 'from-rose-500/24 to-zinc-950 border-rose-400/45 text-rose-100',
+    Nissan: 'from-red-500/20 to-zinc-950 border-red-300/40 text-red-100',
+    Honda: 'from-sky-400/22 to-zinc-950 border-sky-300/45 text-sky-100',
+    Ford: 'from-cyan-400/22 to-zinc-950 border-cyan-300/45 text-cyan-100',
+    Tesla: 'from-fuchsia-400/20 to-zinc-950 border-fuchsia-300/40 text-fuchsia-100',
+    Porsche: 'from-yellow-400/20 to-zinc-950 border-yellow-300/45 text-yellow-100',
+    Ferrari: 'from-amber-400/24 to-zinc-950 border-amber-300/45 text-amber-100',
+    Audi: 'from-zinc-200/18 to-zinc-950 border-zinc-300/40 text-zinc-100',
+    Chevrolet: 'from-orange-400/22 to-zinc-950 border-orange-300/45 text-orange-100',
+  };
+
+  return tones[brand] || 'from-zinc-300/18 to-zinc-950 border-zinc-300/35 text-zinc-100';
+};
+
+const DealerHoverBar = ({ city }: { city: typeof DEALER_CITIES[number] }) => {
+  const windowRef = useRef<HTMLDivElement | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    const measure = () => {
+      const windowEl = windowRef.current;
+      const trackEl = trackRef.current;
+      if (!windowEl || !trackEl) return;
+      setIsOverflowing(trackEl.scrollWidth > windowEl.clientWidth + 2);
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [city.hoverDescription]);
+
+  return (
+    <div className="dealer-movie-bar pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden border-y border-white/12 bg-black/92 px-5 py-4 text-center shadow-[0_0_35px_rgba(0,0,0,0.55)]">
+      <div className="mb-1 text-[10px] font-black uppercase tracking-[0.28em] text-rose-400">
+        {city.name}
+      </div>
+      <div ref={windowRef} className="dealer-marquee-window text-sm font-bold text-zinc-100">
+        <div ref={trackRef} className={`dealer-marquee-track ${isOverflowing ? 'is-overflowing' : 'is-centered'}`}>
+          {city.hoverDescription}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const getDealerCityClasses = (accent: string) => {
@@ -338,8 +405,23 @@ const getDealerCityClasses = (accent: string) => {
   };
 };
 
-const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | null }) => {
+const DealerCityMapScene = ({
+  selectedCity,
+  hoveredCity,
+  onHoverCity,
+  onClickCity,
+}: {
+  selectedCity: DealerCityId | null;
+  hoveredCity: DealerCityId | null;
+  onHoverCity: (cityId: DealerCityId | null) => void;
+  onClickCity: (cityId: DealerCityId) => void;
+}) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const hoveredCityRef = useRef<DealerCityId | null>(hoveredCity);
+
+  useEffect(() => {
+    hoveredCityRef.current = hoveredCity;
+  }, [hoveredCity]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -368,15 +450,15 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
       south: 0xf59e0b,
     };
     const cityPositions: Record<DealerCityId, THREE.Vector3> = {
-      east: new THREE.Vector3(-3.8, 0, -2.2),
-      west: new THREE.Vector3(3.7, 0, -1.7),
-      north: new THREE.Vector3(-1.1, 0, 2.7),
-      south: new THREE.Vector3(2.0, 0, 2.3),
+      west: new THREE.Vector3(-3.8, 0, -1.6),
+      north: new THREE.Vector3(-0.6, 0, -2.55),
+      east: new THREE.Vector3(3.75, 0, -0.9),
+      south: new THREE.Vector3(1.35, 0, 2.55),
     };
 
     const base = new THREE.Mesh(
       new THREE.BoxGeometry(10.8, 0.12, 7.2),
-      new THREE.MeshBasicMaterial({ color: 0x09090b, transparent: true, opacity: 0.84 })
+      new THREE.MeshBasicMaterial({ color: 0x0b0f0d, transparent: true, opacity: 0.92 })
     );
     base.position.y = -0.08;
     mapRoot.add(base);
@@ -385,7 +467,12 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
     grid.position.y = 0.01;
     mapRoot.add(grid);
 
-    const roadMat = new THREE.MeshBasicMaterial({ color: 0x18181b, transparent: true, opacity: 0.9 });
+    const roadMat = new THREE.MeshBasicMaterial({ color: 0x171719, transparent: true, opacity: 0.96 });
+    const laneMat = new THREE.MeshBasicMaterial({ color: 0xb7b7a6, transparent: true, opacity: 0.42 });
+    const grassMat = new THREE.MeshBasicMaterial({ color: 0x12311f, transparent: true, opacity: 0.76 });
+    const trunkMat = new THREE.MeshBasicMaterial({ color: 0x6b3f20, transparent: true, opacity: 0.9 });
+    const leafMat = new THREE.MeshBasicMaterial({ color: 0x2f8f46, transparent: true, opacity: 0.9 });
+    const roofMat = new THREE.MeshBasicMaterial({ color: 0x0b0b0d, transparent: true, opacity: 0.9 });
     const glowMats = Object.fromEntries(
       DEALER_CITIES.map((city) => [
         city.id,
@@ -397,21 +484,133 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
       ])
     ) as Record<DealerCityId, THREE.MeshBasicMaterial>;
 
-    const makeRoad = (x: number, z: number, width: number, depth: number, rotation = 0) => {
+    const makeRoad = (x: number, z: number, width: number, depth: number, rotation = 0, lane = true) => {
       const road = new THREE.Mesh(new THREE.BoxGeometry(width, 0.04, depth), roadMat);
       road.position.set(x, 0.04, z);
       road.rotation.y = rotation;
       mapRoot.add(road);
+      if (lane) {
+        const laneStrip = new THREE.Mesh(new THREE.BoxGeometry(width * 0.84, 0.012, Math.max(depth * 0.08, 0.018)), laneMat);
+        laneStrip.position.set(x, 0.068, z);
+        laneStrip.rotation.y = rotation;
+        mapRoot.add(laneStrip);
+      }
       return road;
     };
 
-    makeRoad(0, 0.15, 8.7, 0.22, -0.12);
-    makeRoad(-1.4, 0.2, 0.22, 5.4, 0.32);
-    makeRoad(2.2, 0.08, 0.22, 5.7, -0.52);
-    makeRoad(-0.2, 2.4, 6.8, 0.2, 0.17);
-    makeRoad(0.7, -2.0, 7.0, 0.2, -0.24);
+    makeRoad(0, -0.05, 9.6, 0.28, -0.1);
+    makeRoad(-1.65, -0.05, 0.26, 5.7, 0.34);
+    makeRoad(2.35, 0.55, 0.26, 5.4, -0.48);
+    makeRoad(-0.2, -2.35, 6.3, 0.22, 0.12);
+    makeRoad(0.6, 2.35, 7.2, 0.22, -0.18);
+    makeRoad(-4.1, 0.75, 0.22, 3.7, -0.72);
+    makeRoad(3.78, 0.92, 0.22, 3.3, 0.64);
+
+    const parkPatches = [
+      [-3.05, 1.8, 1.3, 0.75, 0.16],
+      [3.18, 1.72, 1.05, 0.62, -0.22],
+      [0.1, -1.05, 0.95, 0.54, 0.4],
+    ];
+    parkPatches.forEach(([x, z, width, depth, rotation]) => {
+      const park = new THREE.Mesh(new THREE.BoxGeometry(width, 0.025, depth), grassMat);
+      park.position.set(x, 0.055, z);
+      park.rotation.y = rotation;
+      mapRoot.add(park);
+    });
+
+    const makeTree = (x: number, z: number, scale = 1) => {
+      const tree = new THREE.Group();
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.035 * scale, 0.045 * scale, 0.28 * scale, 6), trunkMat);
+      trunk.position.y = 0.22 * scale;
+      tree.add(trunk);
+      const leaves = new THREE.Mesh(new THREE.ConeGeometry(0.18 * scale, 0.42 * scale, 8), leafMat);
+      leaves.position.y = 0.56 * scale;
+      tree.add(leaves);
+      tree.position.set(x, 0.04, z);
+      mapRoot.add(tree);
+      return tree;
+    };
+
+    [
+      [-4.7, 1.55, 0.9], [-4.25, 2.05, 1], [-3.5, 1.55, 0.8], [-2.7, 2.16, 0.9],
+      [2.55, 1.65, 0.85], [3.05, 2.08, 0.9], [3.7, 1.58, 0.75],
+      [-0.7, -0.98, 0.72], [0.34, -1.15, 0.72],
+    ].forEach(([x, z, scale]) => makeTree(x, z, scale));
+
+    // Raycasting setup
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let raycastHoveredCity: DealerCityId | null = null;
+
+    // Map each city's meshes to its cityId for raycasting
+    const meshToCityId = new Map<THREE.Object3D, DealerCityId>();
 
     const cityGroups: Partial<Record<DealerCityId, THREE.Group>> = {};
+    // Store per-city materials for hover effects
+    const cityMaterials: Partial<Record<DealerCityId, {
+      pad: THREE.MeshBasicMaterial;
+      ring: THREE.MeshBasicMaterial;
+      buildingMats: THREE.MeshBasicMaterial[];
+    }>> = {};
+
+    const makeLandmark = (cityId: DealerCityId, color: number) => {
+      const landmark = new THREE.Group();
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.92 });
+      const darkDetailMat = new THREE.MeshBasicMaterial({ color: 0x050507, transparent: true, opacity: 0.88 });
+
+      if (cityId === 'west') {
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.08, 0.12), mat);
+        deck.position.set(0, 0.72, -0.78);
+        landmark.add(deck);
+        [-0.62, 0.62].forEach((x) => {
+          const tower = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.95, 0.12), mat);
+          tower.position.set(x, 0.92, -0.78);
+          landmark.add(tower);
+          const cable = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.035, 0.035), mat);
+          cable.position.set(x / 2, 1.28, -0.78);
+          cable.rotation.z = x < 0 ? 0.34 : -0.34;
+          landmark.add(cable);
+        });
+      } else if (cityId === 'north') {
+        const towerBase = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.56, 0.16, 4), mat);
+        towerBase.position.set(0, 0.58, -0.62);
+        towerBase.rotation.y = Math.PI / 4;
+        landmark.add(towerBase);
+        const towerMid = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.18, 4), mat);
+        towerMid.position.set(0, 1.18, -0.62);
+        towerMid.rotation.y = Math.PI / 4;
+        landmark.add(towerMid);
+        const towerCut = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.09, 0.09), darkDetailMat);
+        towerCut.position.set(0, 1.03, -0.62);
+        landmark.add(towerCut);
+      } else if (cityId === 'east') {
+        const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.92, 0.12), mat);
+        leftPost.position.set(-0.42, 0.86, -0.7);
+        landmark.add(leftPost);
+        const rightPost = leftPost.clone();
+        rightPost.position.x = 0.42;
+        landmark.add(rightPost);
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.12, 0.14), mat);
+        beam.position.set(0, 1.3, -0.7);
+        landmark.add(beam);
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.08, 0.18), roofMat);
+        roof.position.set(0, 1.46, -0.7);
+        landmark.add(roof);
+      } else {
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.9, 12), mat);
+        body.position.set(0.36, 0.9, -0.62);
+        landmark.add(body);
+        const light = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, 0.2, 12), new THREE.MeshBasicMaterial({ color: 0xfff3a3, transparent: true, opacity: 0.9 }));
+        light.position.set(0.36, 1.45, -0.62);
+        landmark.add(light);
+        const cap = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.22, 12), roofMat);
+        cap.position.set(0.36, 1.66, -0.62);
+        landmark.add(cap);
+      }
+
+      return landmark;
+    };
+
     DEALER_CITIES.forEach((city) => {
       const cityGroup = new THREE.Group();
       const position = cityPositions[city.id];
@@ -421,22 +620,27 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
       const isActive = selectedCity === city.id || selectedCity === null;
       const color = cityColors[city.id];
 
+      const padMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.42 : 0.16 });
       const pad = new THREE.Mesh(
         new THREE.CylinderGeometry(0.92, 1.08, 0.16, 6),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.42 : 0.16 })
+        padMat
       );
       pad.position.y = 0.12;
       pad.rotation.y = Math.PI / 6;
       cityGroup.add(pad);
+      meshToCityId.set(pad, city.id);
 
+      const ringMat = glowMats[city.id];
       const ring = new THREE.Mesh(
         new THREE.TorusGeometry(1.08, 0.035, 8, 36),
-        glowMats[city.id]
+        ringMat
       );
       ring.position.y = 0.24;
       ring.rotation.x = Math.PI / 2;
       cityGroup.add(ring);
+      meshToCityId.set(ring, city.id);
 
+      const buildingMats: THREE.MeshBasicMaterial[] = [];
       const buildingMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.72 : 0.25 });
       const darkMat = new THREE.MeshBasicMaterial({ color: 0x111113, transparent: true, opacity: 0.88 });
       const blockOffsets = [
@@ -447,12 +651,39 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
       ];
       blockOffsets.forEach(([x, z, height], index) => {
         const mat = index % 2 === 0 ? buildingMat : darkMat;
+        if (index % 2 === 0) buildingMats.push(buildingMat);
         const block = new THREE.Mesh(new THREE.BoxGeometry(0.32, height, 0.32), mat);
         block.position.set(x, 0.24 + height / 2, z);
         cityGroup.add(block);
+        meshToCityId.set(block, city.id);
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.035, 0.38), roofMat);
+        roof.position.set(x, 0.27 + height, z);
+        cityGroup.add(roof);
+        meshToCityId.set(roof, city.id);
       });
 
+      const landmark = makeLandmark(city.id, color);
+      cityGroup.add(landmark);
+      landmark.traverse((child) => {
+        if (child instanceof THREE.Mesh) meshToCityId.set(child, city.id);
+      });
+
+      cityMaterials[city.id] = { pad: padMat, ring: ringMat, buildingMats };
       mapRoot.add(cityGroup);
+    });
+
+    // Add invisible hit-test spheres for easier raycasting
+    const hitSpheres: THREE.Mesh[] = [];
+    DEALER_CITIES.forEach((city) => {
+      const hitSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(1.3, 8, 8),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hitSphere.position.copy(cityPositions[city.id]);
+      hitSphere.position.y = 0.5;
+      mapRoot.add(hitSphere);
+      hitSpheres.push(hitSphere);
+      meshToCityId.set(hitSphere, city.id);
     });
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.75);
@@ -472,19 +703,95 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
     resize();
     window.addEventListener('resize', resize);
 
+    // Mouse event handlers for raycasting
+    const onMouseMove = (event: MouseEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    };
+
+    const onClick = () => {
+      if (raycastHoveredCity) {
+        onClickCity(raycastHoveredCity);
+      }
+    };
+
+    const onMouseLeave = () => {
+      mouse.x = -999;
+      mouse.y = -999;
+      if (raycastHoveredCity !== null) {
+        raycastHoveredCity = null;
+        onHoverCity(null);
+      }
+    };
+
+    renderer.domElement.addEventListener('mousemove', onMouseMove);
+    renderer.domElement.addEventListener('click', onClick);
+    renderer.domElement.addEventListener('mouseleave', onMouseLeave);
+    renderer.domElement.style.cursor = 'default';
+
     let frameId = 0;
     const startTime = performance.now();
     const animate = (time: number) => {
       const t = (time - startTime) / 1000;
       mapRoot.rotation.y = Math.sin(t * 0.18) * 0.05;
 
+      // Raycast to detect hovered city
+      raycaster.setFromCamera(mouse, camera);
+      const allHitTargets = [...hitSpheres];
+      // Also test city group meshes
+      DEALER_CITIES.forEach((city) => {
+        const group = cityGroups[city.id];
+        if (group) {
+          group.traverse((child) => {
+            if (child instanceof THREE.Mesh) allHitTargets.push(child);
+          });
+        }
+      });
+      const intersects = raycaster.intersectObjects(allHitTargets, false);
+      let newRaycastHover: DealerCityId | null = null;
+      for (const hit of intersects) {
+        const cid = meshToCityId.get(hit.object);
+        if (cid) {
+          newRaycastHover = cid;
+          break;
+        }
+      }
+      if (newRaycastHover !== raycastHoveredCity) {
+        raycastHoveredCity = newRaycastHover;
+        onHoverCity(newRaycastHover);
+      }
+
+      // Determine effective hover: either from 3D raycast or from 2D card hover
+      const effectiveHover = hoveredCityRef.current;
+
+      // Update cursor
+      renderer.domElement.style.cursor = raycastHoveredCity ? 'pointer' : 'default';
+
       DEALER_CITIES.forEach((city, index) => {
         const group = cityGroups[city.id];
         if (!group) return;
-        const target = selectedCity === city.id || selectedCity === null ? 1 : 0.86;
+        const isHovered = effectiveHover === city.id;
+        const isSelected = selectedCity === city.id || selectedCity === null;
+        const target = isSelected ? 1 : 0.86;
+        const hoverBoost = isHovered ? 1.12 : 1;
         const pulse = 1 + Math.sin(t * 1.4 + index) * 0.035;
-        group.scale.setScalar(target * pulse);
-        group.position.y = Math.sin(t * 1.2 + index * 0.7) * 0.04;
+        group.scale.setScalar(target * pulse * hoverBoost);
+        const baseY = Math.sin(t * 1.2 + index * 0.7) * 0.04;
+        group.position.y = isHovered ? baseY + 0.15 : baseY;
+
+        // Update material opacities for hover glow
+        const mats = cityMaterials[city.id];
+        if (mats) {
+          const padTarget = isHovered ? 0.72 : (isSelected ? 0.42 : 0.16);
+          const ringTarget = isHovered ? 0.65 : (isSelected ? 0.34 : 0.12);
+          const buildingTarget = isHovered ? 1.0 : (isSelected ? 0.72 : 0.25);
+          mats.pad.opacity += (padTarget - mats.pad.opacity) * 0.12;
+          mats.ring.opacity += (ringTarget - mats.ring.opacity) * 0.12;
+          mats.buildingMats.forEach((bm) => {
+            bm.opacity += (buildingTarget - bm.opacity) * 0.12;
+          });
+        }
       });
 
       renderer.render(scene, camera);
@@ -495,6 +802,9 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener('resize', resize);
+      renderer.domElement.removeEventListener('mousemove', onMouseMove);
+      renderer.domElement.removeEventListener('click', onClick);
+      renderer.domElement.removeEventListener('mouseleave', onMouseLeave);
       renderer.dispose();
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh) {
@@ -505,9 +815,9 @@ const DealerCityMapScene = ({ selectedCity }: { selectedCity: DealerCityId | nul
       });
       renderer.domElement.remove();
     };
-  }, [selectedCity]);
+  }, [selectedCity, onHoverCity, onClickCity]);
 
-  return <div ref={mountRef} className="absolute inset-0" aria-hidden="true" />;
+  return <div ref={mountRef} className="absolute inset-0 z-[1]" aria-hidden="true" />;
 };
 
 const DEFAULT_UPGRADES = {
@@ -876,7 +1186,14 @@ export default function Garage({
   const [quickPlayStep, setQuickPlayStep] = useState<'car' | 'map'>('car');
   const [quickPlayCarId, setQuickPlayCarId] = useState<string | null>(null);
   const [quickPlaySelectedBrand, setQuickPlaySelectedBrand] = useState<string>('All');
+  const [dealerPage, setDealerPage] = useState<DealerPage>('map');
   const [dealerCity, setDealerCity] = useState<DealerCityId | null>(null);
+  const [hoveredCity, setHoveredCity] = useState<DealerCityId | null>(null);
+  const [dealerMarketMode, setDealerMarketMode] = useState<DealerMarketMode | null>(null);
+  const [dealerMapTransitioning, setDealerMapTransitioning] = useState(false);
+  const [dealerExiting, setDealerExiting] = useState(false);
+  const dealerCityTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dealerExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset drive submode states when tab changes from drive
   React.useEffect(() => {
@@ -890,10 +1207,22 @@ export default function Garage({
 
   React.useEffect(() => {
     if (activeGarageTab !== 'dealer') {
+      setDealerPage('map');
       setDealerCity(null);
+      setHoveredCity(null);
+      setDealerMarketMode(null);
+      setDealerMapTransitioning(false);
+      setDealerExiting(false);
       if (selectedBrand !== 'All') setSelectedBrand('All');
     }
   }, [activeGarageTab, selectedBrand, setSelectedBrand]);
+
+  React.useEffect(() => {
+    return () => {
+      if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
+      if (dealerExitTimeoutRef.current) clearTimeout(dealerExitTimeoutRef.current);
+    };
+  }, []);
 
   const handleBackToGarage = () => {
     setDriveSubMode(null);
@@ -906,6 +1235,59 @@ export default function Garage({
   const getCarUpgradesSafe = (carId: string) => {
     return carUpgrades[carId] || JSON.parse(JSON.stringify(DEFAULT_UPGRADES));
   };
+
+  const handleDealerCitySelect = React.useCallback((cityId: DealerCityId) => {
+    if (dealerMapTransitioning || dealerExiting) return;
+    if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
+    setDealerCity(cityId);
+    setDealerMarketMode(null);
+    setSelectedBrand('All');
+    setHoveredCity(null);
+    setDealerMapTransitioning(true);
+
+    dealerCityTransitionTimeoutRef.current = setTimeout(() => {
+      setDealerPage('city');
+      setDealerMapTransitioning(false);
+    }, 680);
+  }, [dealerExiting, dealerMapTransitioning, setSelectedBrand]);
+
+  const handleDealerBackClick = React.useCallback(() => {
+    if (dealerExitTimeoutRef.current) clearTimeout(dealerExitTimeoutRef.current);
+    if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
+
+    setDealerExiting(true);
+    setDealerMapTransitioning(false);
+
+    dealerExitTimeoutRef.current = setTimeout(() => {
+      setDealerPage('map');
+      setDealerCity(null);
+      setHoveredCity(null);
+      setDealerMarketMode(null);
+      setSelectedBrand('All');
+      setDealerExiting(false);
+      setActiveGarageTab(null);
+    }, 700);
+  }, [setActiveGarageTab, setSelectedBrand]);
+
+  const handleDealerReturnToMap = React.useCallback(() => {
+    setDealerPage('map');
+    setDealerCity(null);
+    setHoveredCity(null);
+    setDealerMarketMode(null);
+    setSelectedBrand('All');
+  }, [setSelectedBrand]);
+
+  const handleDealerMarketChoice = React.useCallback((mode: DealerMarketMode) => {
+    setDealerMarketMode(mode);
+    const cityConfig = DEALER_CITIES.find((city) => city.id === dealerCity);
+    if (selectedBrand === 'All' && cityConfig?.brands[0]) setSelectedBrand(cityConfig.brands[0]);
+  }, [dealerCity, selectedBrand, setSelectedBrand]);
+
+  const handleDealerTuningChoice = React.useCallback(() => {
+    setDealerCity(null);
+    setDealerMarketMode(null);
+    handleTuningClick();
+  }, [handleTuningClick]);
 
   const handleExitClick = () => {
     // If Tauri
@@ -983,6 +1365,12 @@ export default function Garage({
   const activeCarConfig = CARS_DATABASE.find((car) => car.id === activeCarId) || CARS_DATABASE[0];
   const dealerCityConfig = DEALER_CITIES.find((city) => city.id === dealerCity);
   const dealerCars = getDealerCityCars(dealerCity);
+  const dealerHoverConfig = DEALER_CITIES.find((city) => city.id === hoveredCity);
+  const dealerFilteredCars = dealerCars.filter((car) => selectedBrand === 'All' || car.brand === selectedBrand);
+  const dealerMarketCars = dealerMarketMode === 'used'
+    ? dealerFilteredCars.filter((car) => car.tier === 'Entry Tier' || car.price <= 1800)
+    : dealerFilteredCars;
+  const dealerActiveBrands = dealerCityConfig?.brands || [];
 
   return (
     <>
@@ -1174,63 +1562,198 @@ export default function Garage({
       {/* DEDICATED DEALER CITY MAP */}
       {activeGarageTab === 'dealer' && (
         <div
-          className="absolute inset-0 z-10 overflow-hidden bg-zinc-950 pointer-events-auto animate-fadeIn"
+          className={`absolute inset-0 z-10 overflow-hidden bg-zinc-950 pointer-events-auto ${dealerExiting ? 'animate-fadeOut' : 'animate-dealerFadeIn'}`}
         >
-          <DealerCityMapScene selectedCity={dealerCity} />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(244,63,94,0.16),transparent_24%),radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.14),transparent_28%),linear-gradient(90deg,rgba(9,9,11,0.92),rgba(9,9,11,0.72))]" aria-hidden="true" />
-          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-zinc-950 to-transparent" aria-hidden="true" />
-          <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-zinc-950 to-transparent" aria-hidden="true" />
+          <div
+            className={`absolute inset-0 origin-center transition-all duration-700 ease-out ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
+              ? 'scale-125 opacity-0 blur-sm'
+              : dealerPage === 'city'
+                ? 'scale-110 opacity-0 pointer-events-none'
+                : 'scale-100 opacity-100'
+              }`}
+          >
+            <DealerCityMapScene
+              selectedCity={dealerCity}
+              hoveredCity={hoveredCity}
+              onHoverCity={setHoveredCity}
+              onClickCity={handleDealerCitySelect}
+            />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(244,63,94,0.12),transparent_24%),radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.12),transparent_28%),linear-gradient(90deg,rgba(9,9,11,0.58),rgba(9,9,11,0.28),rgba(9,9,11,0.58))]" aria-hidden="true" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-zinc-950 to-transparent" aria-hidden="true" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-zinc-950 to-transparent" aria-hidden="true" />
+          </div>
 
           {/* TAB: DEALER */}
           {activeGarageTab === 'dealer' && (
-            <div className="relative z-10 flex h-full min-h-0 flex-col gap-6 p-8 animate-fadeIn text-left">
-              <div className="flex shrink-0 justify-between items-center pb-4 border-b border-zinc-800/80">
-                <div>
-                  <h2 className="text-2xl font-black text-white tracking-wider uppercase">
-                    {dealerCityConfig ? dealerCityConfig.name : 'DEALER CITY SELECT'}
-                  </h2>
-                  <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-[0.25em]">
-                    {dealerCityConfig ? dealerCityConfig.region : 'CHOOSE WHERE TO BUY CARS'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {dealerCityConfig && (
-                    <button
-                      onClick={() => setDealerCity(null)}
-                      className="px-3 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-[9px] font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
-                    >
-                      CITY MAP
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setDealerCity(null);
-                      setActiveGarageTab(null);
-                    }}
-                    className="px-3 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-[9px] font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
-                  >
-                    BACK
-                  </button>
-                </div>
+            <div className={`pointer-events-none fixed inset-0 z-10 flex min-h-0 flex-col gap-6 p-8 text-left ${!dealerExiting ? 'animate-dealerContentIn' : 'animate-fadeOut'}`}>
+              <div className="pointer-events-auto absolute right-8 top-8 z-30">
+                <button
+                  onClick={handleDealerBackClick}
+                  className="group flex h-14 w-14 items-center justify-center cursor-pointer"
+                  aria-label="Back"
+                  title="Back"
+                >
+                  <img
+                    src="/icon/back_button.svg"
+                    alt=""
+                    className="h-full w-full object-contain drop-shadow-[0_0_18px_rgba(0,0,0,0.65)] transition-[filter] duration-300 ease-in-out scale-200 brightness-100 group-hover:brightness-125"
+                    draggable={false}
+                  />
+                </button>
               </div>
 
-              {!dealerCityConfig && (
+              {dealerPage === 'map' && !dealerMapTransitioning && !dealerExiting && !dealerCityConfig && dealerHoverConfig && (
+                <>
+                  <div
+                    className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full border border-white/15 bg-black/88 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-[0_0_20px_rgba(0,0,0,0.55)]"
+                    style={DEALER_CITY_LABEL_POSITIONS[dealerHoverConfig.id]}
+                  >
+                    {dealerHoverConfig.name}
+                  </div>
+                  <DealerHoverBar city={dealerHoverConfig} />
+                </>
+              )}
+
+              {dealerPage === 'city' && dealerCityConfig && (
+                <div className="pointer-events-none absolute left-8 top-8 z-30 rounded-2xl border border-white/12 bg-black/82 px-5 py-3 shadow-[0_0_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
+                  <div className="text-[9px] font-black uppercase tracking-[0.24em] text-zinc-500">You are in</div>
+                  <div className="mt-0.5 text-sm font-black uppercase tracking-wide text-white">{dealerCityConfig.name}</div>
+                </div>
+              )}
+
+              {dealerPage === 'city' && dealerCityConfig && selectedBrand === 'All' && !dealerMarketMode && (
+                <div className="pointer-events-auto absolute left-1/2 top-1/2 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 -translate-y-1/2 animate-fadeIn">
+                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                    {dealerActiveBrands.map((brand) => (
+                      <button
+                        key={brand}
+                        onClick={() => {
+                          setSelectedBrand(brand);
+                          setDealerMarketMode(null);
+                        }}
+                        className={`group flex min-h-[132px] flex-col items-center justify-center gap-3 rounded-2xl border bg-gradient-to-br ${getDealerBrandTone(brand)} px-5 py-6 shadow-[0_18px_45px_rgba(0,0,0,0.32)] transition-[border-color,background-color,filter] duration-200 hover:brightness-125 cursor-pointer`}
+                      >
+                        <span className="flex h-16 w-16 items-center justify-center rounded-full border border-white/16 bg-black/42 text-lg font-black tracking-wide text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
+                          {getDealerBrandInitials(brand)}
+                        </span>
+                        <span className="text-xs font-black uppercase tracking-[0.18em] text-current">{brand}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {dealerPage === 'city' && dealerCityConfig && selectedBrand !== 'All' && !dealerMarketMode && (
+                <div className="pointer-events-auto absolute left-1/2 bottom-8 z-20 w-[min(920px,calc(100%-64px))] -translate-x-1/2 border-y border-white/12 bg-black/92 px-6 py-5 shadow-[0_0_35px_rgba(0,0,0,0.55)]">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">Brands</span>
+                      {dealerActiveBrands.map((brand) => (
+                        <button
+                          key={brand}
+                          onClick={() => setSelectedBrand(brand)}
+                          className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border ${selectedBrand === brand
+                            ? 'border-rose-500 bg-rose-600 text-white'
+                            : 'border-zinc-800 bg-zinc-950/70 text-zinc-300 hover:border-zinc-650'
+                            }`}
+                        >
+                          {brand}
+                        </button>
+                      ))}
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black uppercase tracking-wide text-white">
+                        {selectedBrand !== 'All' ? selectedBrand : dealerCityConfig.brands.join(' / ')}
+                      </h3>
+                      <p className="mt-1 text-xs font-bold leading-relaxed text-zinc-400">
+                        {dealerCityConfig.description}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                      <button
+                        onClick={() => handleDealerMarketChoice('new')}
+                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-rose-500 hover:bg-rose-600 hover:text-white cursor-pointer"
+                      >
+                        New Car
+                      </button>
+                      <button
+                        onClick={() => handleDealerMarketChoice('used')}
+                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-amber-500 hover:bg-amber-600 hover:text-zinc-950 cursor-pointer"
+                      >
+                        Used Car
+                      </button>
+                      <button
+                        onClick={handleDealerTuningChoice}
+                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-cyan-500 hover:bg-cyan-500 hover:text-zinc-950 cursor-pointer"
+                      >
+                        Tuning
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && (
+                <div className="pointer-events-auto mt-20 flex shrink-0 items-center justify-between gap-4 border-y border-white/12 bg-black/82 px-5 py-3">
+                  <div>
+                    <h3 className="text-base font-black uppercase tracking-wide text-white">
+                      {dealerMarketMode === 'new' ? 'New Car Stock' : 'Used Car Lot'}
+                    </h3>
+                    <span className="text-[9px] font-black uppercase tracking-[0.24em] text-zinc-500">
+                      {dealerCityConfig.name} / {selectedBrand}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {dealerActiveBrands.map((brand) => (
+                      <button
+                        key={brand}
+                        onClick={() => setSelectedBrand(brand)}
+                        className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-wider border transition-all cursor-pointer ${selectedBrand === brand
+                          ? 'border-rose-500 bg-rose-600 text-white'
+                          : 'border-zinc-800 bg-zinc-950/70 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                      >
+                        {brand}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setDealerMarketMode(null)}
+                      className="border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-zinc-400 transition-all hover:text-zinc-200 cursor-pointer"
+                    >
+                      Choices
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedBrand === '__legacy__' && !dealerCityConfig && (
                 <div className="relative mx-auto grid w-full max-w-5xl flex-1 min-h-0 content-center grid-cols-2 gap-5 py-4">
                   {DEALER_CITIES.map((city) => {
                     const cityCars = getDealerCityCars(city.id);
                     const cityClasses = getDealerCityClasses(city.accent);
+                    const isHovered = hoveredCity === city.id;
+                    const accentGlowColor =
+                      city.accent === 'cyan' ? 'border-cyan-500/55 shadow-[0_0_28px_rgba(6,182,212,0.16)]' :
+                        city.accent === 'blue' ? 'border-blue-500/55 shadow-[0_0_28px_rgba(59,130,246,0.16)]' :
+                          city.accent === 'amber' ? 'border-amber-500/55 shadow-[0_0_28px_rgba(245,158,11,0.16)]' :
+                            'border-rose-500/55 shadow-[0_0_28px_rgba(244,63,94,0.16)]';
 
                     return (
                       <button
                         key={city.id}
                         onClick={() => setDealerCity(city.id)}
-                        className={`group relative min-h-[240px] overflow-hidden rounded-2xl border border-zinc-850 bg-zinc-950/65 p-5 text-left backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:bg-zinc-900/75 ${cityClasses.glow}`}
+                        onMouseEnter={() => setHoveredCity(city.id)}
+                        onMouseLeave={() => setHoveredCity(null)}
+                        className={`group relative min-h-[240px] overflow-hidden rounded-2xl border bg-zinc-950/65 p-5 text-left backdrop-blur-md transition-all duration-300 ${isHovered
+                          ? `-translate-y-1 bg-zinc-900/75 ${accentGlowColor}`
+                          : `border-zinc-855 hover:-translate-y-1 hover:bg-zinc-900/75 ${cityClasses.glow}`
+                          }`}
                       >
                         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
                         <div className="relative z-10 flex h-full flex-col justify-between gap-5">
                           <div className="flex items-start justify-between gap-4">
                             <div className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${cityClasses.icon}`}>
-                              <Map className="h-5 w-5" />
+                              <MapIcon className="h-5 w-5" />
                             </div>
                             <div className="text-right">
                               <div className={`text-2xl font-black font-mono ${cityClasses.text}`}>{cityCars.length}</div>
@@ -1262,156 +1785,160 @@ export default function Garage({
                 </div>
               )}
 
-              {dealerCityConfig && dealerCars.length === 0 && (
-                <div className="mx-auto mt-10 w-full max-w-xl rounded-2xl border border-zinc-850 bg-zinc-950/70 p-8 text-center backdrop-blur-md">
+              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketCars.length === 0 && (
+                <div className="pointer-events-auto mx-auto mt-10 w-full max-w-xl rounded-2xl border border-zinc-850 bg-zinc-950/70 p-8 text-center backdrop-blur-md">
                   <h3 className="text-lg font-black uppercase tracking-wide text-white">No Cars Stocked Yet</h3>
                   <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                    This city is open, but its dealer inventory has not arrived yet.
+                    No stock for this brand in this lot.
                   </p>
                 </div>
               )}
 
-              {dealerCityConfig && dealerCars.length > 0 && (
-                <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-6 pr-2 xl:grid-cols-2">
-                {dealerCars.map((car) => {
-                  const isUnlocked = purchasedCars.includes(car.id);
-                  const isActive = activeCarId === car.id;
-                  const canAfford = playerCredits >= car.price;
-                  const isSuperLocked = car.requiresLicense && !hasLicense;
+              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketCars.length > 0 && (
+                <div className="pointer-events-auto grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-6 pr-2 xl:grid-cols-2">
+                  {dealerMarketCars.map((car) => {
+                    const isUnlocked = purchasedCars.includes(car.id);
+                    const isActive = activeCarId === car.id;
+                    const canAfford = playerCredits >= car.price;
+                    const isSuperLocked = car.requiresLicense && !hasLicense;
 
-                  return (
-                    <div
-                      key={car.id}
-                      className={`border p-4 rounded-2xl transition-all flex flex-col gap-3 ${isActive
-                        ? 'bg-zinc-900/60 border-rose-500/80 shadow-[0_0_15px_rgba(244,63,94,0.1)]'
-                        : 'bg-zinc-900/20 border-zinc-855'
-                        }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h3 className="font-bold text-zinc-100 text-sm">
-                            {car.brand} {car.name}
-                          </h3>
-                          <div className="flex gap-2 items-center mt-0.5">
-                            <span className="text-[9px] font-bold tracking-wider uppercase text-rose-500">
-                              {car.tier}
-                            </span>
-                            <span className="text-zinc-700 text-[9px] font-bold">•</span>
-                            <span className="text-[9px] font-bold tracking-wider uppercase text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
-                              {car.driveType}
-                            </span>
+                    return (
+                      <div
+                        key={car.id}
+                        className={`border p-4 rounded-2xl transition-all flex flex-col gap-3 ${isActive
+                          ? 'bg-zinc-900/60 border-rose-500/80 shadow-[0_0_15px_rgba(244,63,94,0.1)]'
+                          : 'bg-zinc-900/20 border-zinc-855'
+                          }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h3 className="font-bold text-zinc-100 text-sm">
+                              {car.brand} {car.name}
+                            </h3>
+                            <div className="flex gap-2 items-center mt-0.5">
+                              <span className="text-[9px] font-bold tracking-wider uppercase text-rose-500">
+                                {car.tier}
+                              </span>
+                              <span className="text-zinc-700 text-[9px] font-bold">•</span>
+                              <span className="text-[9px] font-bold tracking-wider uppercase text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                                {car.driveType}
+                              </span>
+                            </div>
                           </div>
+                          {isUnlocked ? (
+                            <span className="text-[9px] font-bold text-rose-500 bg-rose-950/20 border border-rose-900/30 px-2.5 py-0.5 rounded-lg">
+                              Owned
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <Coins className="w-3.5 h-3.5 text-amber-500" />
+                              <span className="text-xs font-mono font-bold text-amber-500">{car.price} Cr</span>
+                            </div>
+                          )}
                         </div>
+
+                        {/* Spec bars */}
+                        {(() => {
+                          const upgradesForCar = getCarUpgradesSafe(car.id);
+                          const upgradedStats = getUpgradedStats(car, upgradesForCar);
+                          return (
+                            <div className="flex flex-col gap-2 mt-0.5 bg-zinc-950/50 p-3 rounded-xl border border-zinc-900">
+                              {/* Speed */}
+                              <div>
+                                <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
+                                  <span>TOP SPEED</span>
+                                  <span>{Math.round(upgradedStats.speed * 10)}%</span>
+                                </div>
+                                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                  <div
+                                    className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
+                                    style={{ width: `${Math.min(100, upgradedStats.speed * 10)}%` }}
+                                  />
+                                  <div
+                                    className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
+                                    style={{ width: `${Math.min(100, car.speed * 10)}%` }}
+                                  />
+                                </div>
+                              </div>
+                              {/* Acceleration */}
+                              <div>
+                                <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
+                                  <span>ACCELERATION</span>
+                                  <span>{Math.round(upgradedStats.acceleration * 10)}%</span>
+                                </div>
+                                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                  <div
+                                    className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
+                                    style={{ width: `${Math.min(100, upgradedStats.acceleration * 10)}%` }}
+                                  />
+                                  <div
+                                    className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
+                                    style={{ width: `${Math.min(100, car.acceleration * 10)}%` }}
+                                  />
+                                </div>
+                              </div>
+                              {/* Handling */}
+                              <div>
+                                <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
+                                  <span>HANDLING</span>
+                                  <span>{Math.round(upgradedStats.handling * 10)}%</span>
+                                </div>
+                                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                  <div
+                                    className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
+                                    style={{ width: `${Math.min(100, upgradedStats.handling * 10)}%` }}
+                                  />
+                                  <div
+                                    className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
+                                    style={{ width: `${Math.min(100, car.handling * 10)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Dealership Action Buttons */}
                         {isUnlocked ? (
-                          <span className="text-[9px] font-bold text-rose-500 bg-rose-950/20 border border-rose-900/30 px-2.5 py-0.5 rounded-lg">
-                            Owned
-                          </span>
+                          <button
+                            disabled={isActive}
+                            onClick={() => selectCar(car.id)}
+                            className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${isActive
+                              ? 'bg-zinc-950 border border-zinc-900 text-zinc-650 cursor-default'
+                              : 'bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-200'
+                              }`}
+                          >
+                            {isActive ? 'Active Vehicle' : 'Select Vehicle'}
+                          </button>
                         ) : (
-                          <div className="flex items-center gap-1">
-                            <Coins className="w-3.5 h-3.5 text-amber-500" />
-                            <span className="text-xs font-mono font-bold text-amber-500">{car.price} Cr</span>
-                          </div>
+                          <button
+                            disabled={!canAfford || isSuperLocked}
+                            onClick={() => buyCar(car)}
+                            className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${isSuperLocked
+                              ? 'bg-zinc-800 border border-zinc-750 text-zinc-550 cursor-not-allowed'
+                              : canAfford
+                                ? 'bg-rose-600 hover:bg-rose-500 border border-rose-500 text-white'
+                                : 'bg-zinc-800 border border-zinc-750 text-zinc-550 cursor-not-allowed'
+                              }`}
+                          >
+                            {isSuperLocked
+                              ? 'Requires Bronze License'
+                              : canAfford
+                                ? `Purchase Vehicle (-${car.price} CR)`
+                                : 'Insufficient Credits'}
+                          </button>
                         )}
                       </div>
-
-                      {/* Spec bars */}
-                      {(() => {
-                        const upgradesForCar = getCarUpgradesSafe(car.id);
-                        const upgradedStats = getUpgradedStats(car, upgradesForCar);
-                        return (
-                          <div className="flex flex-col gap-2 mt-0.5 bg-zinc-950/50 p-3 rounded-xl border border-zinc-900">
-                            {/* Speed */}
-                            <div>
-                              <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
-                                <span>TOP SPEED</span>
-                                <span>{Math.round(upgradedStats.speed * 10)}%</span>
-                              </div>
-                              <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
-                                <div
-                                  className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
-                                  style={{ width: `${Math.min(100, upgradedStats.speed * 10)}%` }}
-                                />
-                                <div
-                                  className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
-                                  style={{ width: `${Math.min(100, car.speed * 10)}%` }}
-                                />
-                              </div>
-                            </div>
-                            {/* Acceleration */}
-                            <div>
-                              <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
-                                <span>ACCELERATION</span>
-                                <span>{Math.round(upgradedStats.acceleration * 10)}%</span>
-                              </div>
-                              <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
-                                <div
-                                  className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
-                                  style={{ width: `${Math.min(100, upgradedStats.acceleration * 10)}%` }}
-                                />
-                                <div
-                                  className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
-                                  style={{ width: `${Math.min(100, car.acceleration * 10)}%` }}
-                                />
-                              </div>
-                            </div>
-                            {/* Handling */}
-                            <div>
-                              <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
-                                <span>HANDLING</span>
-                                <span>{Math.round(upgradedStats.handling * 10)}%</span>
-                              </div>
-                              <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
-                                <div
-                                  className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
-                                  style={{ width: `${Math.min(100, upgradedStats.handling * 10)}%` }}
-                                />
-                                <div
-                                  className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
-                                  style={{ width: `${Math.min(100, car.handling * 10)}%` }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Dealership Action Buttons */}
-                      {isUnlocked ? (
-                        <button
-                          disabled={isActive}
-                          onClick={() => selectCar(car.id)}
-                          className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${isActive
-                            ? 'bg-zinc-950 border border-zinc-900 text-zinc-650 cursor-default'
-                            : 'bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-200'
-                            }`}
-                        >
-                          {isActive ? 'Active Vehicle' : 'Select Vehicle'}
-                        </button>
-                      ) : (
-                        <button
-                          disabled={!canAfford || isSuperLocked}
-                          onClick={() => buyCar(car)}
-                          className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${isSuperLocked
-                            ? 'bg-zinc-800 border border-zinc-750 text-zinc-550 cursor-not-allowed'
-                            : canAfford
-                              ? 'bg-rose-600 hover:bg-rose-500 border border-rose-500 text-white'
-                              : 'bg-zinc-800 border border-zinc-750 text-zinc-550 cursor-not-allowed'
-                            }`}
-                        >
-                          {isSuperLocked
-                            ? 'Requires Bronze License'
-                            : canAfford
-                              ? `Purchase Vehicle (-${car.price} CR)`
-                              : 'Insufficient Credits'}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
                 </div>
               )}
             </div>
           )}
+          <div
+            className={`pointer-events-none absolute inset-0 z-50 bg-black ${dealerExiting ? 'animate-dealerBlackOut' : 'animate-dealerBlackIn'}`}
+            aria-hidden="true"
+          />
         </div>
       )}
       {/* DEDICATED DRIVE MODES INTERFACE */}
@@ -1849,7 +2376,7 @@ export default function Garage({
                       <div>
                         <div className="flex items-center gap-3 mb-2.5">
                           <div className="w-10 h-10 rounded-xl bg-rose-950/40 border border-rose-900/40 flex items-center justify-center">
-                            <Map className="w-5 h-5 text-rose-500" />
+                            <MapIcon className="w-5 h-5 text-rose-500" />
                           </div>
                           <div>
                             <h3 className="font-extrabold text-white text-base">Custom Map Editor</h3>
@@ -1966,9 +2493,16 @@ export default function Garage({
                 </div>
                 <button
                   onClick={handleExitTuningClick}
-                  className="px-4 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
+                  className="group flex h-12 w-12 items-center justify-center cursor-pointer"
+                  aria-label="Back"
+                  title="Back"
                 >
-                  EXIT BAY
+                  <img
+                    src="/icon/back_button.svg"
+                    alt=""
+                    className="h-full w-full object-contain drop-shadow-[0_0_18px_rgba(0,0,0,0.65)] transition-[filter] duration-300 ease-in-out scale-200 brightness-100 group-hover:brightness-125"
+                    draggable={false}
+                  />
                 </button>
               </div>
             </div>

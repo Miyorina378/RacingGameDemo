@@ -1250,32 +1250,71 @@ export default function Game() {
 
   // Launch different modes in engine
   const startFreeRoam = () => {
-    if (engineRef.current) {
-      engineRef.current.isPaused = false;
-      setIsPaused(false);
-      engineRef.current.buildOpenWorld();
-      setActiveMode('free_roam');
-    }
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      if (engineRef.current) {
+        engineRef.current.isPaused = false;
+        setIsPaused(false);
+        engineRef.current.buildOpenWorld();
+        setActiveMode('free_roam');
+      }
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
   };
 
   const startTutorial = () => {
-    if (engineRef.current) {
-      engineRef.current.isPaused = false;
-      setIsPaused(false);
-      engineRef.current.buildTutorial();
-      setActiveMode('tutorial');
-      setTutorialStep(0);
-    }
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      if (engineRef.current) {
+        engineRef.current.isPaused = false;
+        setIsPaused(false);
+        engineRef.current.buildTutorial();
+        setActiveMode('tutorial');
+        setTutorialStep(0);
+      }
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
   };
 
   const startLicenseTest = (testId: string = activeLicenseTestId) => {
-    if (engineRef.current) {
-      engineRef.current.isPaused = false;
-      setIsPaused(false);
-      engineRef.current.buildLicenseTest(testId);
-      setActiveLicenseTestId(engineRef.current.activeLicenseTestId);
-      setActiveMode('license');
-    }
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      if (engineRef.current) {
+        engineRef.current.isPaused = false;
+        setIsPaused(false);
+        engineRef.current.buildLicenseTest(testId);
+        setActiveLicenseTestId(engineRef.current.activeLicenseTestId);
+        setActiveMode('license');
+      }
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
   };
 
   const startRace = (trackId: string = 'sprint_circuit') => {
@@ -1283,65 +1322,104 @@ export default function Game() {
     if (!track) return;
     if (track.requiresLicense && !hasLicense) return; // Prevent unauthorized entry
 
-    setActiveTrackId(trackId);
-    setPlacement(1);
-    setPrevPlacement(1);
-    setPlacementShift(null);
-    setRaceResults(null);
-    if (engineRef.current) {
-      engineRef.current.isPaused = false;
-      setIsPaused(false);
-      engineRef.current.buildRaceTrack(trackId);
-      setActiveMode('race');
-    }
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      setActiveTrackId(trackId);
+      setPlacement(1);
+      setPrevPlacement(1);
+      setPlacementShift(null);
+      setRaceResults(null);
+      if (engineRef.current) {
+        engineRef.current.isPaused = false;
+        setIsPaused(false);
+        engineRef.current.buildRaceTrack(trackId);
+        setActiveMode('race');
+      }
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
   };
 
   const startQuickPlayRace = (carId: string, trackId: string) => {
     const track = TRACKS_DATABASE.find(t => t.id === trackId);
     if (!track) return;
 
-    quickPlayOriginalCarRef.current = activeCarId;
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
 
-    setActiveTrackId(trackId);
-    setPlacement(1);
-    setPrevPlacement(1);
-    setPlacementShift(null);
-    setRaceResults(null);
-    if (engineRef.current) {
-      engineRef.current.isPaused = false;
-      setIsPaused(false);
-      
-      const carDb = CARS_DATABASE.find(c => c.id === carId);
-      const colorToUse = carDb ? carDb.color : selectedColor;
+    setTimeout(() => {
+      quickPlayOriginalCarRef.current = activeCarId;
 
-      engineRef.current.setActiveCar(carId, colorToUse, DEFAULT_UPGRADES);
-      engineRef.current.buildRaceTrack(trackId);
-      setActiveMode('race');
-    }
+      setActiveTrackId(trackId);
+      setPlacement(1);
+      setPrevPlacement(1);
+      setPlacementShift(null);
+      setRaceResults(null);
+      if (engineRef.current) {
+        engineRef.current.isPaused = false;
+        setIsPaused(false);
+        
+        const carDb = CARS_DATABASE.find(c => c.id === carId);
+        const colorToUse = carDb ? carDb.color : selectedColor;
+
+        engineRef.current.setActiveCar(carId, colorToUse, DEFAULT_UPGRADES);
+        engineRef.current.buildRaceTrack(trackId);
+        setActiveMode('race');
+      }
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
   };
 
   const exitToGarage = () => {
-    if (engineRef.current) {
-      engineRef.current.isPaused = false;
-      setIsPaused(false);
-      engineRef.current.buildGarage();
-      setActiveMode('garage');
-      setGameStatus('idle');
-      setStatusMessage('');
-      setSpeed(0);
-      setDriftScore(0);
-      setPlacement(1);
-      setPrevPlacement(placement);
-      setPlacementShift(null);
-      setRaceResults(null);
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
 
-      if (quickPlayOriginalCarRef.current) {
-        const originalCarId = quickPlayOriginalCarRef.current;
-        quickPlayOriginalCarRef.current = null;
-        const activeUpgrades = getCarUpgrades(originalCarId);
-        engineRef.current.setActiveCar(originalCarId, selectedColor, activeUpgrades);
+    setTimeout(() => {
+      if (engineRef.current) {
+        engineRef.current.isPaused = false;
+        setIsPaused(false);
+        engineRef.current.buildGarage();
+        setActiveMode('garage');
+        setGameStatus('idle');
+        setStatusMessage('');
+        setSpeed(0);
+        setDriftScore(0);
+        setPlacement(1);
+        setPrevPlacement(placement);
+        setPlacementShift(null);
+        setRaceResults(null);
+
+        if (quickPlayOriginalCarRef.current) {
+          const originalCarId = quickPlayOriginalCarRef.current;
+          quickPlayOriginalCarRef.current = null;
+          const activeUpgrades = getCarUpgrades(originalCarId);
+          engineRef.current.setActiveCar(originalCarId, selectedColor, activeUpgrades);
+        }
       }
-    }
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
   };
 
   const handleDriveClick = () => {
@@ -1400,6 +1478,7 @@ export default function Game() {
   const handleExitTuningClick = () => {
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
+    setTuningState('exiting');
 
     setTimeout(() => {
       setActiveGarageTab(null);
