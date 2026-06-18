@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CyberDrive: Neon Syndicate | Retro 3D Arcade Racer",
+  title: "Autodrive Motorsport",
   description: "Experience kilometer-scale cyberpunk racing. Tune 13 custom performance parts, build your own tracks with our interactive editor, and compete with high-octane AI opponents.",
 };
 

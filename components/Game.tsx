@@ -1494,6 +1494,40 @@ export default function Game() {
     }, 1050);
   };
 
+  const handleDealerClick = () => {
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      setActiveGarageTab('dealer');
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
+  };
+
+  const handleExitDealerClick = () => {
+    setIsTransitioningDrive(true);
+    setIsBlackOverlay(true);
+
+    setTimeout(() => {
+      setActiveGarageTab(null);
+    }, 700);
+
+    setTimeout(() => {
+      setIsBlackOverlay(false);
+    }, 850);
+
+    setTimeout(() => {
+      setIsTransitioningDrive(false);
+    }, 1050);
+  };
+
   const handleSettingClick = () => {
     setActiveGarageTab('setting');
     setSettingsSubTab('graphics');
@@ -2430,6 +2464,8 @@ export default function Game() {
             handleSettingClick={handleSettingClick}
             handleTuningClick={handleTuningClick}
             handleExitTuningClick={handleExitTuningClick}
+            handleDealerClick={handleDealerClick}
+            handleExitDealerClick={handleExitDealerClick}
             placeholderRef={placeholderRef}
             setActiveMode={setActiveMode}
           />
@@ -2513,7 +2549,7 @@ export default function Game() {
       />
       {/* Cinematic Blackout Overlay for Drive transition */}
       <div
-        className={`fixed inset-0 bg-black z-[65] pointer-events-none transition-opacity duration-500 ease-in-out ${isBlackOverlay ? 'opacity-100' : 'opacity-0'
+        className={`fixed inset-0 bg-black z-[80] pointer-events-none transition-opacity duration-500 ease-in-out ${isBlackOverlay ? 'opacity-100' : 'opacity-0'
           }`}
       />
     </div>

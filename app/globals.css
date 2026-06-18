@@ -430,3 +430,18 @@ body {
 .group:hover .tuning-wrench {
   transform: translate(calc(-50% + 12px), -50%) rotate(45deg) scale(1.1);
 }
+
+.animate-brandPop {
+  animation: brandPop 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes brandPop {
+  from {
+    transform: translateY(32px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

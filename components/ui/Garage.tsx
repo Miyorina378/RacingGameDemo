@@ -343,12 +343,20 @@ const getDealerBrandTone = (brand: string) => {
   return tones[brand] || 'from-zinc-300/18 to-zinc-950 border-zinc-300/35 text-zinc-100';
 };
 
-const DealerHoverBar = ({ city }: { city: typeof DEALER_CITIES[number] }) => {
+const DealerHoverBar = ({ city }: { city: typeof DEALER_CITIES[number] | null }) => {
   const windowRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
+  const [activeCity, setActiveCity] = useState<typeof DEALER_CITIES[number] | null>(null);
 
   useEffect(() => {
+    if (city) {
+      setActiveCity(city);
+    }
+  }, [city]);
+
+  useEffect(() => {
+    if (!activeCity) return;
     const measure = () => {
       const windowEl = windowRef.current;
       const trackEl = trackRef.current;
@@ -359,16 +367,15 @@ const DealerHoverBar = ({ city }: { city: typeof DEALER_CITIES[number] }) => {
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [city.hoverDescription]);
+  }, [activeCity?.hoverDescription]);
+
+  const isVisible = !!city;
 
   return (
-    <div className="dealer-movie-bar pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden border-y border-white/12 bg-black/92 px-5 py-4 text-center shadow-[0_0_35px_rgba(0,0,0,0.55)]">
-      <div className="mb-1 text-[10px] font-black uppercase tracking-[0.28em] text-rose-400">
-        {city.name}
-      </div>
+    <div className={`dealer-movie-bar pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden border-y border-white/12 bg-black/92 px-5 py-4 text-center shadow-[0_0_35px_rgba(0,0,0,0.55)] transition-all duration-400 ease-in-out ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}`}>
       <div ref={windowRef} className="dealer-marquee-window text-sm font-bold text-zinc-100">
         <div ref={trackRef} className={`dealer-marquee-track ${isOverflowing ? 'is-overflowing' : 'is-centered'}`}>
-          {city.hoverDescription}
+          {activeCity?.hoverDescription || ''}
         </div>
       </div>
     </div>
@@ -418,10 +425,15 @@ const DealerCityMapScene = ({
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const hoveredCityRef = useRef<DealerCityId | null>(hoveredCity);
+  const selectedCityRef = useRef<DealerCityId | null>(selectedCity);
 
   useEffect(() => {
     hoveredCityRef.current = hoveredCity;
   }, [hoveredCity]);
+
+  useEffect(() => {
+    selectedCityRef.current = selectedCity;
+  }, [selectedCity]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -479,7 +491,7 @@ const DealerCityMapScene = ({
         new THREE.MeshBasicMaterial({
           color: cityColors[city.id],
           transparent: true,
-          opacity: selectedCity === city.id || selectedCity === null ? 0.34 : 0.12,
+          opacity: selectedCityRef.current === city.id || selectedCityRef.current === null ? 0.34 : 0.12,
         }),
       ])
     ) as Record<DealerCityId, THREE.MeshBasicMaterial>;
@@ -617,7 +629,7 @@ const DealerCityMapScene = ({
       cityGroup.position.copy(position);
       cityGroups[city.id] = cityGroup;
 
-      const isActive = selectedCity === city.id || selectedCity === null;
+      const isActive = selectedCityRef.current === city.id || selectedCityRef.current === null;
       const color = cityColors[city.id];
 
       const padMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.42 : 0.16 });
@@ -732,9 +744,49 @@ const DealerCityMapScene = ({
 
     let frameId = 0;
     const startTime = performance.now();
+    let lastTime = performance.now();
+    let zoomProgress = 0;
+    let lastActiveCityId: DealerCityId | null = selectedCityRef.current;
+
     const animate = (time: number) => {
       const t = (time - startTime) / 1000;
       mapRoot.rotation.y = Math.sin(t * 0.18) * 0.05;
+
+      const now = performance.now();
+      const deltaTime = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+
+      // Update zoom progress
+      const isZoomed = selectedCityRef.current !== null;
+      if (isZoomed) {
+        zoomProgress = Math.min(1, zoomProgress + deltaTime / 0.68);
+      } else {
+        zoomProgress = Math.max(0, zoomProgress - deltaTime / 0.68);
+      }
+
+      if (selectedCityRef.current) {
+        lastActiveCityId = selectedCityRef.current;
+      }
+
+      // Cosine ease-in-out
+      const easeT = 0.5 - Math.cos(zoomProgress * Math.PI) / 2;
+
+      const defaultCamPos = new THREE.Vector3(0, 8.5, 11);
+      const defaultLookAt = new THREE.Vector3(0, 0, 0);
+
+      const targetCamPos = new THREE.Vector3().copy(defaultCamPos);
+      const targetLookAt = new THREE.Vector3().copy(defaultLookAt);
+
+      const activeCityId = selectedCityRef.current || lastActiveCityId;
+      if (activeCityId) {
+        const cityPos = cityPositions[activeCityId];
+        const zoomedCamPos = cityPos.clone().addScaledVector(defaultCamPos, 0.28);
+        targetCamPos.lerpVectors(defaultCamPos, zoomedCamPos, easeT);
+        targetLookAt.lerpVectors(defaultLookAt, cityPos, easeT);
+      }
+
+      camera.position.copy(targetCamPos);
+      camera.lookAt(targetLookAt);
 
       // Raycast to detect hovered city
       raycaster.setFromCamera(mouse, camera);
@@ -772,7 +824,7 @@ const DealerCityMapScene = ({
         const group = cityGroups[city.id];
         if (!group) return;
         const isHovered = effectiveHover === city.id;
-        const isSelected = selectedCity === city.id || selectedCity === null;
+        const isSelected = selectedCityRef.current === city.id || selectedCityRef.current === null;
         const target = isSelected ? 1 : 0.86;
         const hoverBoost = isHovered ? 1.12 : 1;
         const pulse = 1 + Math.sin(t * 1.4 + index) * 0.035;
@@ -815,7 +867,7 @@ const DealerCityMapScene = ({
       });
       renderer.domElement.remove();
     };
-  }, [selectedCity, onHoverCity, onClickCity]);
+  }, [onHoverCity, onClickCity]);
 
   return <div ref={mountRef} className="absolute inset-0 z-[1]" aria-hidden="true" />;
 };
@@ -1141,6 +1193,8 @@ interface GarageProps {
   handleSettingClick: () => void;
   handleTuningClick: () => void;
   handleExitTuningClick: () => void;
+  handleDealerClick: () => void;
+  handleExitDealerClick: () => void;
   placeholderRef: React.RefObject<HTMLDivElement | null>;
   setActiveMode: (mode: any) => void;
 }
@@ -1177,6 +1231,8 @@ export default function Garage({
   handleSettingClick,
   handleTuningClick,
   handleExitTuningClick,
+  handleDealerClick,
+  handleExitDealerClick,
   placeholderRef,
   setActiveMode,
 }: GarageProps) {
@@ -1189,11 +1245,20 @@ export default function Garage({
   const [dealerPage, setDealerPage] = useState<DealerPage>('map');
   const [dealerCity, setDealerCity] = useState<DealerCityId | null>(null);
   const [hoveredCity, setHoveredCity] = useState<DealerCityId | null>(null);
+  const [lastSelectedCity, setLastSelectedCity] = useState<DealerCityId | null>(null);
   const [dealerMarketMode, setDealerMarketMode] = useState<DealerMarketMode | null>(null);
   const [dealerMapTransitioning, setDealerMapTransitioning] = useState(false);
   const [dealerExiting, setDealerExiting] = useState(false);
+  const [dealerBrandTransitioning, setDealerBrandTransitioning] = useState(false);
   const dealerCityTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dealerExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dealerBrandTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    if (dealerCity) {
+      setLastSelectedCity(dealerCity);
+    }
+  }, [dealerCity]);
 
   // Reset drive submode states when tab changes from drive
   React.useEffect(() => {
@@ -1213,6 +1278,8 @@ export default function Garage({
       setDealerMarketMode(null);
       setDealerMapTransitioning(false);
       setDealerExiting(false);
+      setDealerBrandTransitioning(false);
+      setLastSelectedCity(null);
       if (selectedBrand !== 'All') setSelectedBrand('All');
     }
   }, [activeGarageTab, selectedBrand, setSelectedBrand]);
@@ -1221,6 +1288,7 @@ export default function Garage({
     return () => {
       if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
       if (dealerExitTimeoutRef.current) clearTimeout(dealerExitTimeoutRef.current);
+      if (dealerBrandTransitionTimeoutRef.current) clearTimeout(dealerBrandTransitionTimeoutRef.current);
     };
   }, []);
 
@@ -1251,23 +1319,18 @@ export default function Garage({
     }, 680);
   }, [dealerExiting, dealerMapTransitioning, setSelectedBrand]);
 
-  const handleDealerBackClick = React.useCallback(() => {
-    if (dealerExitTimeoutRef.current) clearTimeout(dealerExitTimeoutRef.current);
-    if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
+  const handleBrandSelect = React.useCallback((brand: string) => {
+    if (dealerBrandTransitioning) return;
+    setDealerBrandTransitioning(true);
 
-    setDealerExiting(true);
-    setDealerMapTransitioning(false);
+    if (dealerBrandTransitionTimeoutRef.current) clearTimeout(dealerBrandTransitionTimeoutRef.current);
 
-    dealerExitTimeoutRef.current = setTimeout(() => {
-      setDealerPage('map');
-      setDealerCity(null);
-      setHoveredCity(null);
+    dealerBrandTransitionTimeoutRef.current = setTimeout(() => {
+      setSelectedBrand(brand);
       setDealerMarketMode(null);
-      setSelectedBrand('All');
-      setDealerExiting(false);
-      setActiveGarageTab(null);
-    }, 700);
-  }, [setActiveGarageTab, setSelectedBrand]);
+      setDealerBrandTransitioning(false);
+    }, 450);
+  }, [dealerBrandTransitioning, setSelectedBrand]);
 
   const handleDealerReturnToMap = React.useCallback(() => {
     setDealerPage('map');
@@ -1276,6 +1339,22 @@ export default function Garage({
     setDealerMarketMode(null);
     setSelectedBrand('All');
   }, [setSelectedBrand]);
+
+  const handleDealerBackClick = React.useCallback(() => {
+    if (selectedBrand !== 'All' || dealerMarketMode !== null) {
+      setSelectedBrand('All');
+      setDealerMarketMode(null);
+    } else if (dealerPage === 'city') {
+      handleDealerReturnToMap();
+    } else {
+      if (dealerExitTimeoutRef.current) clearTimeout(dealerExitTimeoutRef.current);
+      if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
+
+      setDealerExiting(true);
+      setDealerMapTransitioning(false);
+      handleExitDealerClick();
+    }
+  }, [selectedBrand, dealerMarketMode, dealerPage, handleDealerReturnToMap, handleExitDealerClick]);
 
   const handleDealerMarketChoice = React.useCallback((mode: DealerMarketMode) => {
     setDealerMarketMode(mode);
@@ -1398,7 +1477,7 @@ export default function Garage({
               id: 'dealer',
               label: 'DEALER',
               icon: S2000Icon,
-              onClick: () => setActiveGarageTab('dealer'),
+              onClick: handleDealerClick,
             },
             {
               id: 'tuning',
@@ -1562,11 +1641,14 @@ export default function Garage({
       {/* DEDICATED DEALER CITY MAP */}
       {activeGarageTab === 'dealer' && (
         <div
-          className={`absolute inset-0 z-10 overflow-hidden bg-zinc-950 pointer-events-auto ${dealerExiting ? 'animate-fadeOut' : 'animate-dealerFadeIn'}`}
+          className="absolute inset-0 z-10 overflow-hidden bg-zinc-950 pointer-events-auto"
         >
           <div
-            className={`absolute inset-0 origin-center transition-all duration-700 ease-out ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
-              ? 'scale-125 opacity-0 blur-sm'
+            style={{
+              transformOrigin: lastSelectedCity ? `${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].left} ${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].top}` : 'center'
+            }}
+            className={`absolute inset-0 transition-all duration-700 ease-out ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
+              ? 'scale-[2.0] opacity-0 blur-md'
               : dealerPage === 'city'
                 ? 'scale-110 opacity-0 pointer-events-none'
                 : 'scale-100 opacity-100'
@@ -1602,36 +1684,68 @@ export default function Garage({
                 </button>
               </div>
 
-              {dealerPage === 'map' && !dealerMapTransitioning && !dealerExiting && !dealerCityConfig && dealerHoverConfig && (
+              {dealerPage === 'map' && !dealerMapTransitioning && !dealerExiting && !dealerCityConfig && (
                 <>
-                  <div
-                    className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full border border-white/15 bg-black/88 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-[0_0_20px_rgba(0,0,0,0.55)]"
-                    style={DEALER_CITY_LABEL_POSITIONS[dealerHoverConfig.id]}
-                  >
-                    {dealerHoverConfig.name}
-                  </div>
-                  <DealerHoverBar city={dealerHoverConfig} />
+                  {dealerHoverConfig && (
+                    <div
+                      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full border border-white/15 bg-black/88 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-[0_0_20px_rgba(0,0,0,0.55)]"
+                      style={DEALER_CITY_LABEL_POSITIONS[dealerHoverConfig.id]}
+                    >
+                      {dealerHoverConfig.name}
+                    </div>
+                  )}
+                  <DealerHoverBar city={dealerHoverConfig || null} />
                 </>
               )}
 
               {dealerPage === 'city' && dealerCityConfig && (
-                <div className="pointer-events-none absolute left-8 top-8 z-30 rounded-2xl border border-white/12 bg-black/82 px-5 py-3 shadow-[0_0_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
-                  <div className="text-[9px] font-black uppercase tracking-[0.24em] text-zinc-500">You are in</div>
-                  <div className="mt-0.5 text-sm font-black uppercase tracking-wide text-white">{dealerCityConfig.name}</div>
+                <div className="pointer-events-none absolute left-0 top-8 z-30 flex items-stretch select-none">
+                  {/* City Indicator */}
+                  <div
+                    className={`transition-all duration-500 ease-out pl-8 pr-4 py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s ${selectedBrand !== 'All'
+                        ? 'bg-zinc-900 border-r border-white/10 rounded-r-none'
+                        : 'bg-rose-600 rounded-r-full pr-6 shadow-[0_0_24px_rgba(244,63,94,0.4)]'
+                      }`}
+                  >
+                    {dealerCityConfig.name}
+                  </div>
+                  {/* Extended Brand Indicator */}
+                  <div
+                    className={`transition-all duration-500 ease-out py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s overflow-hidden ${selectedBrand !== 'All'
+                        ? dealerMarketMode !== null
+                          ? 'bg-zinc-900 border-r border-white/10 rounded-r-none pl-4 pr-4'
+                          : 'bg-rose-600 rounded-r-full pl-4 pr-6 shadow-[0_0_24px_rgba(244,63,94,0.4)]'
+                        : 'max-w-0 opacity-0 pl-0 pr-0'
+                      }`}
+                    style={{
+                      maxWidth: selectedBrand !== 'All' ? '200px' : '0px'
+                    }}
+                  >
+                    <span className="whitespace-nowrap">{selectedBrand}</span>
+                  </div>
+                  {/* Extended Market Indicator */}
+                  <div
+                    className={`bg-rose-600 rounded-r-full py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s shadow-[0_0_24px_rgba(244,63,94,0.4)] transition-all duration-500 ease-out overflow-hidden ${dealerMarketMode !== null
+                        ? 'max-w-[200px] opacity-100 pl-4 pr-6'
+                        : 'max-w-0 opacity-0 pl-0 pr-0'
+                      }`}
+                  >
+                    <span className="whitespace-nowrap">
+                      {dealerMarketMode === 'new' ? 'NEW CAR' : 'USED CAR'}
+                    </span>
+                  </div>
                 </div>
               )}
 
               {dealerPage === 'city' && dealerCityConfig && selectedBrand === 'All' && !dealerMarketMode && (
                 <div className="pointer-events-auto absolute left-1/2 top-1/2 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 -translate-y-1/2 animate-fadeIn">
                   <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                    {dealerActiveBrands.map((brand) => (
+                    {dealerActiveBrands.map((brand, index) => (
                       <button
                         key={brand}
-                        onClick={() => {
-                          setSelectedBrand(brand);
-                          setDealerMarketMode(null);
-                        }}
-                        className={`group flex min-h-[132px] flex-col items-center justify-center gap-3 rounded-2xl border bg-gradient-to-br ${getDealerBrandTone(brand)} px-5 py-6 shadow-[0_18px_45px_rgba(0,0,0,0.32)] transition-[border-color,background-color,filter] duration-200 hover:brightness-125 cursor-pointer`}
+                        onClick={() => handleBrandSelect(brand)}
+                        className={`group flex min-h-[132px] flex-col items-center justify-center gap-3 rounded-2xl border bg-gradient-to-br ${getDealerBrandTone(brand)} px-5 py-6 shadow-[0_18px_45px_rgba(0,0,0,0.32)] transition-[border-color,background-color,filter] duration-200 hover:brightness-125 cursor-pointer animate-brandPop`}
+                        style={{ animationDelay: `${index * 80}ms` }}
                       >
                         <span className="flex h-16 w-16 items-center justify-center rounded-full border border-white/16 bg-black/42 text-lg font-black tracking-wide text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
                           {getDealerBrandInitials(brand)}
@@ -1651,7 +1765,7 @@ export default function Garage({
                       {dealerActiveBrands.map((brand) => (
                         <button
                           key={brand}
-                          onClick={() => setSelectedBrand(brand)}
+                          onClick={() => handleBrandSelect(brand)}
                           className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border ${selectedBrand === brand
                             ? 'border-rose-500 bg-rose-600 text-white'
                             : 'border-zinc-800 bg-zinc-950/70 text-zinc-300 hover:border-zinc-650'
@@ -1935,12 +2049,59 @@ export default function Garage({
               )}
             </div>
           )}
-          <div
-            className={`pointer-events-none absolute inset-0 z-50 bg-black ${dealerExiting ? 'animate-dealerBlackOut' : 'animate-dealerBlackIn'}`}
-            aria-hidden="true"
-          />
+
+          {/* BRAND SHOWCASE BACKGROUND */}
+          {dealerPage === 'city' && selectedBrand !== 'All' && (
+            <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-zinc-950 animate-fadeIn">
+              {/* Subtle glowing radial gradient in center */}
+              <div
+                className="absolute w-[600px] h-[600px] rounded-full filter blur-[120px] opacity-15 mix-blend-screen"
+                style={{
+                  background:
+                    selectedBrand.toLowerCase().includes('nissan') || selectedBrand.toLowerCase().includes('skyline') ? 'radial-gradient(circle, #f43f5e 0%, transparent 70%)' :
+                      selectedBrand.toLowerCase().includes('toyota') || selectedBrand.toLowerCase().includes('supra') ? 'radial-gradient(circle, #f59e0b 0%, transparent 70%)' :
+                        selectedBrand.toLowerCase().includes('honda') || selectedBrand.toLowerCase().includes('s2000') ? 'radial-gradient(circle, #3b82f6 0%, transparent 70%)' :
+                          selectedBrand.toLowerCase().includes('mazda') || selectedBrand.toLowerCase().includes('rx7') ? 'radial-gradient(circle, #10b981 0%, transparent 70%)' :
+                            'radial-gradient(circle, #71717a 0%, transparent 70%)'
+                }}
+              />
+
+              {/* Cyberpunk Grid Overlay */}
+              <div
+                className="absolute inset-0 opacity-5"
+                style={{
+                  backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+                  backgroundSize: '40px 40px'
+                }}
+              />
+
+              {/* Giant outlined brand name in center */}
+              <div
+                className="select-none text-center font-black tracking-[0.15em] uppercase select-none pointer-events-none animate-scaleIn"
+                style={{
+                  fontSize: '15vw',
+                  lineHeight: 1,
+                  fontFamily: 'system-ui, sans-serif',
+                  WebkitTextStroke: '2px rgba(255, 255, 255, 0.05)',
+                  color: 'transparent',
+                }}
+              >
+                {selectedBrand}
+              </div>
+            </div>
+          )}
+
+          {/* LOCAL TRANSITION OVERLAY FOR INTERNAL DEALER TRANSITIONS */}
+          {dealerMapTransitioning && (
+            <div
+              className="pointer-events-none absolute inset-0 z-40 bg-black animate-fadeIn"
+              style={{ animationDuration: '450ms' }}
+            />
+          )}
         </div>
       )}
+
+
       {/* DEDICATED DRIVE MODES INTERFACE */}
       {activeGarageTab === 'drive' && (
         <div
