@@ -572,7 +572,9 @@ export class GameEngine {
     }
 
     // 2. Render Loop HUD speed calculations (convert m/s → km/h for display)
-    const displaySpeed = Math.round(Math.abs(this.vehicle.speed) * 3.6);
+    const displaySpeed = Math.round(
+      Math.hypot(this.vehicle.velocityX, this.vehicle.velocityZ) * 3.6
+    );
     this.callbacks.onSpeedChange(displaySpeed);
     if (this.callbacks.onVehicleStatsChange) {
       this.callbacks.onVehicleStatsChange(

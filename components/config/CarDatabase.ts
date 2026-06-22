@@ -29,11 +29,15 @@ export interface CarConfig {
   handlingRate: number;
   dragCoeff: number;
   driveType: 'FWD' | 'RWD' | 'AWD';
+  powertrainType?: 'combustion' | 'electric';
+  speedLimiterMultiplier?: number;
   brakingRate?: number;
   wheelbase?: number;
   trackWidth?: number;
   cgHeight?: number;
   yawInertia?: number;
+  engineLayout?: 'front' | 'front_mid' | 'mid' | 'rear';
+  massConcentration?: number;
   frontWeightDistribution?: number;
   dragCoefficient?: number;
   liftCoefficient?: number;
@@ -45,6 +49,9 @@ export interface CarConfig {
   torqueCurve?: TorquePoint[];
   brakeForce?: number;
   maxSteeringAngle?: number;
+  rearSteeringRatio?: number;
+  rearSteeringMaxAngle?: number;
+  steeringResponse?: number;
   rollingResistanceCoefficient?: number;
   differential?: DifferentialConfig;
   shiftUpMph?: number[];   // index 0 = gear 1 -> 2, index 1 = 2 -> 3, etc.
@@ -314,23 +321,70 @@ export const CARS_DATABASE: CarConfig[] = [
   },
   {
     id: 'cybertruck',
-    name: 'Cyber Truck',
-    brand: 'Ford',
-    speed: 6.4,
-    acceleration: 8.0,
-    handling: 6.6,
+    name: 'Cybertruck AWD',
+    brand: 'Tesla',
+    speed: 6.0,
+    acceleration: 8.2,
+    handling: 5.4,
     price: 3000,
-    color: '#8b5cf6',
+    color: '#a9adb0',
     tier: 'Sport Tier',
     requiresLicense: false,
-    maxSpeed: 160,
-    accelerationRate: 0.28,
-    handlingRate: 0.042,
+    maxSpeed: 180.25,
+    accelerationRate: 0.25,
+    handlingRate: 0.041,
     dragCoeff: 0.00001,
     driveType: 'AWD',
+    powertrainType: 'electric',
+    speedLimiterMultiplier: 1.01,
+    maxRpm: 10500,
+    baseMass: 3009,
+    wheelbase: 3.635,
+    trackWidth: 1.772,
+    cgHeight: 0.72,
+    frontWeightDistribution: 1491 / 3009,
+    dragCoefficient: 0.34,
+    frontalArea: 3.10,
+    liftCoefficient: 0.08,
+    tireGripFront: 0.98,
+    tireGripRear: 1.00,
+    corneringStiffnessFront: 5.7,
+    corneringStiffnessRear: 5.9,
+    brakeForce: 33000,
+    maxSteeringAngle: 0.50,
+    rearSteeringRatio: 0.35,
+    rearSteeringMaxAngle: 0.12,
+    steeringResponse: 0.72,
+    rollingResistanceCoefficient: 0.0155,
+    differential: {
+      accelLock: 0.36,
+      decelLock: 0.12,
+      preload: 0.02,
+      awdFrontBias: 0.50
+    },
+    gearRatios: [0, 9.0],
+    finalDrive: 1.0,
+    wheelRadius: 0.43925,
+    torqueCurve: [
+      { rpm: 0, torque: 1180 },
+      { rpm: 3000, torque: 1180 },
+      { rpm: 5000, torque: 950 },
+      { rpm: 7000, torque: 600 },
+      { rpm: 9000, torque: 280 },
+      { rpm: 10500, torque: 110 }
+    ],
+    visualScale: 5.6829 / 4.8,
+    driverCameraOffset: { x: 0, y: 1.42, z: 0.55 },
+    engineLayout: 'mid',
+    massConcentration: 1.08,
     hasSpoiler: false,
-    boosterColor: 0xff3300,
-    character: { weightDistribution: 0.56, rearGripMultiplier: 1.02, yawInertia: 1.30, oversteerResistance: 0.70 }
+    boosterColor: 0x66ccff,
+    character: {
+      weightDistribution: 1491 / 3009,
+      rearGripMultiplier: 1.00,
+      yawInertia: 1.08,
+      oversteerResistance: 0.82
+    }
   },
   {
     id: 'tempest',
@@ -552,6 +606,8 @@ export const CARS_DATABASE: CarConfig[] = [
     boosterColor: 0xffaa00,
     maxRpm: 9000,
     baseMass: 1250,
+    engineLayout: 'front_mid',
+    massConcentration: 0.91,
     visualScale: 3,
     driverCameraOffset: { x: 0, y: 0.5, z: 0.3 },
     character: { weightDistribution: 0.50, rearGripMultiplier: 0.92, yawInertia: 0.85, oversteerResistance: 0.48 }
@@ -580,6 +636,8 @@ export const CARS_DATABASE: CarConfig[] = [
     trackWidth: 1.62,
     cgHeight: 0.44,
     yawInertia: 3200,
+    engineLayout: 'mid',
+    massConcentration: 0.86,
     frontWeightDistribution: 0.43,
     dragCoefficient: 0.39,
     frontalArea: 1.88,

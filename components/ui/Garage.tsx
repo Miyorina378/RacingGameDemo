@@ -258,8 +258,148 @@ const PAINT_SWATCHES = [
 ];
 
 type DealerCityId = 'east' | 'west' | 'north' | 'south';
-type DealerMarketMode = 'new' | 'used';
+type DealerMarketMode = 'new' | 'used' | 'race' | 'museum';
 type DealerPage = 'map' | 'city';
+
+interface BrandLore {
+  name: string;
+  origin: string;
+  established: string;
+  specialty: string;
+  description: string;
+  achievements: string[];
+  signatureCarId: string;
+  signatureCarName: string;
+}
+
+const BRAND_LORE: Record<string, BrandLore> = {
+  Toyota: {
+    name: 'Toyota',
+    origin: 'Japan',
+    established: '1937',
+    specialty: 'Reliability & Drift Heritage',
+    description: 'From pioneering hybrid street technology to dominating the gravel of the World Rally Championship and the asphalt of Le Mans, Toyota has built a legacy of speed, engineering precision, and indestructible performance.',
+    achievements: [
+      'Four consecutive Le Mans 24 Hours victories (2018-2021)',
+      'Multiple WRC Manufacturer titles with the GR Yaris',
+      'The legendary AE86 and Supra defined modern drifting culture'
+    ],
+    signatureCarId: 'driftmaster',
+    signatureCarName: 'Tokyo Driftmaster'
+  },
+  Nissan: {
+    name: 'Nissan',
+    origin: 'Japan',
+    established: '1933',
+    specialty: 'Turbocharged Precision & GT-R Legend',
+    description: 'Known worldwide for the legendary "Godzilla" Skyline and Z-car bloodlines, Nissan is synonymous with high-performance sports cars, twin-turbocharged street machines, and absolute racing control.',
+    achievements: [
+      'Bathurst 12 Hour victories and JTCC domination with Skyline GT-R',
+      'Pioneering Super GT GT500 engineering innovations',
+      'Unmatched street tuner status with RB26 and SR20 engines'
+    ],
+    signatureCarId: 'sport',
+    signatureCarName: 'Volt Interceptor'
+  },
+  Honda: {
+    name: 'Honda',
+    origin: 'Japan',
+    established: '1948',
+    specialty: 'VTEC Revs & Front-Wheel-Drive Dominance',
+    description: 'Driven by the philosophy of "The Power of Dreams," Honda created some of the most rev-happy naturally-aspirated engines in history. Their racing bloodline runs deep, from Formula 1 engines to FWD track records.',
+    achievements: [
+      'Engineered the legendary NSX supercar with Ayrton Senna\'s input',
+      'FWD records at Nürburgring Nordschleife with Civic Type R',
+      'Dominant Formula 1 engine supplier across multiple championship eras'
+    ],
+    signatureCarId: 'honda_s2000',
+    signatureCarName: 'S2000 Roadster'
+  },
+  Ford: {
+    name: 'Ford',
+    origin: 'USA',
+    established: '1903',
+    specialty: 'V8 Muscle & Le Mans Pedigree',
+    description: 'Ford forged its legacy in raw steel, V8 rumble, and international racing dominance. They famously challenged and beat the world\'s best at Le Mans with the GT40, and continue to dominate Rally stages worldwide.',
+    achievements: [
+      'Historic 1-2-3 finish at Le Mans 24 Hours in 1966 with GT40',
+      'Decades of rally supremacy with Escort, Focus, and Puma WRC models',
+      'The Mustang remains the world\'s best-selling sports coupe'
+    ],
+    signatureCarId: 'ford_gt_2006',
+    signatureCarName: 'Ford GT 2006'
+  },
+  Tesla: {
+    name: 'Tesla',
+    origin: 'USA',
+    established: '2003',
+    specialty: 'Instant Electric Torque & Tech Integration',
+    description: 'Tesla revolutionized the automotive landscape by proving that electric cars can be faster, sleeker, and more technologically advanced than traditional combustion vehicles. Instant torque redefined acceleration standards.',
+    achievements: [
+      'Pioneered Plaid tri-motor powertrain pushing 0-60 in under 2 seconds',
+      'Instantaneous torque delivery outpaces traditional combustion supercars',
+      'Setting EV track records at Laguna Seca and Nürburgring'
+    ],
+    signatureCarId: 'solaris',
+    signatureCarName: 'Solaris eV'
+  },
+  Porsche: {
+    name: 'Porsche',
+    origin: 'Germany',
+    established: '1931',
+    specialty: 'Rear-Engine Perfection & Surgical Handling',
+    description: 'For Porsche, there is no substitute. By perfecting the rear-engine layout of the iconic 911, they created the benchmark for modern sports cars, blending track-focused capability with everyday usability.',
+    achievements: [
+      'Most overall victories at Le Mans 24 Hours (19 wins)',
+      'The 911 Carrera and GT3 series represent the pinnacle of track precision',
+      '919 Hybrid Evo holds legendary outright lap records'
+    ],
+    signatureCarId: 'phantom',
+    signatureCarName: 'Ghost Phantom'
+  },
+  Ferrari: {
+    name: 'Ferrari',
+    origin: 'Italy',
+    established: '1939',
+    specialty: 'Formula 1 Pedigree & Screaming V12s',
+    description: 'Enzo Ferrari\'s passion was simple: build road cars only to fund the racing team. Ferrari represents the ultimate dream of speed, prestige, and screaming V12 engines, colored in signature Rosso Corsa.',
+    achievements: [
+      'The most successful team in Formula 1 history with over 240 wins',
+      'Iconic supercars like the F40, Enzo, and LaFerrari set the standards',
+      'Le Mans Centenary victory in 2023 returning to top tier'
+    ],
+    signatureCarId: 'vortex',
+    signatureCarName: 'Vortex R'
+  },
+  Audi: {
+    name: 'Audi',
+    origin: 'Germany',
+    established: '1909',
+    specialty: 'Quattro AWD & High-Tech Performance',
+    description: 'Guided by "Vorsprung durch Technik" (Progress through Technology), Audi revolutionized motorsport with the Quattro all-wheel-drive system. They went on to dominate rally, touring cars, and Le Mans prototypes.',
+    achievements: [
+      'Quattro system permanently changed the face of WRC Group B rallying',
+      'Unprecedented Le Mans dominance with TDI diesel and Hybrid prototypes',
+      'R8 supercar established Audi as a premier supercar builder'
+    ],
+    signatureCarId: 'quantum',
+    signatureCarName: 'Quantum Flux'
+  },
+  Chevrolet: {
+    name: 'Chevrolet',
+    origin: 'USA',
+    established: '1911',
+    specialty: 'V8 Small-Block Muscle & Corvette Legacy',
+    description: 'Chevrolet is the heart of American performance. Powered by the legendary Small-Block V8, cars like the Corvette and Camaro have brought track-slaying performance to the masses for over a century.',
+    achievements: [
+      'Corvette Racing dominates international GT endurance classes',
+      'Small-block V8 is one of the most successful engine architectures in history',
+      'Corvette C8 Z06 redefined American mid-engine capability'
+    ],
+    signatureCarId: 'blade',
+    signatureCarName: 'Blade Runner'
+  }
+};
 
 const DEALER_CITIES: Array<{
   id: DealerCityId;
@@ -343,6 +483,22 @@ const getDealerBrandTone = (brand: string) => {
   return tones[brand] || 'from-zinc-300/18 to-zinc-950 border-zinc-300/35 text-zinc-100';
 };
 
+const getBrandColor = (brand: string): string => {
+  const colors: Record<string, string> = {
+    Toyota: '#f59e0b',
+    Nissan: '#f43f5e',
+    Honda: '#3b82f6',
+    Ford: '#06b6d4',
+    Tesla: '#d946ef',
+    Porsche: '#eab308',
+    Ferrari: '#ef4444',
+    Audi: '#a1a1aa',
+    Chevrolet: '#f97316',
+  };
+  return colors[brand] || '#71717a';
+};
+
+
 const DealerHoverBar = ({ city }: { city: typeof DEALER_CITIES[number] | null }) => {
   const windowRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -414,11 +570,13 @@ const getDealerCityClasses = (accent: string) => {
 
 const DealerCityMapScene = ({
   selectedCity,
+  lastSelectedCity,
   hoveredCity,
   onHoverCity,
   onClickCity,
 }: {
   selectedCity: DealerCityId | null;
+  lastSelectedCity: DealerCityId | null;
   hoveredCity: DealerCityId | null;
   onHoverCity: (cityId: DealerCityId | null) => void;
   onClickCity: (cityId: DealerCityId) => void;
@@ -426,6 +584,7 @@ const DealerCityMapScene = ({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const hoveredCityRef = useRef<DealerCityId | null>(hoveredCity);
   const selectedCityRef = useRef<DealerCityId | null>(selectedCity);
+  const lastSelectedCityRef = useRef<DealerCityId | null>(lastSelectedCity);
 
   useEffect(() => {
     hoveredCityRef.current = hoveredCity;
@@ -434,6 +593,10 @@ const DealerCityMapScene = ({
   useEffect(() => {
     selectedCityRef.current = selectedCity;
   }, [selectedCity]);
+
+  useEffect(() => {
+    lastSelectedCityRef.current = lastSelectedCity;
+  }, [lastSelectedCity]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -715,6 +878,10 @@ const DealerCityMapScene = ({
     resize();
     window.addEventListener('resize', resize);
 
+    const t1 = setTimeout(resize, 100);
+    const t2 = setTimeout(resize, 350);
+    const t3 = setTimeout(resize, 750);
+
     // Mouse event handlers for raycasting
     const onMouseMove = (event: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -747,6 +914,11 @@ const DealerCityMapScene = ({
     let lastTime = performance.now();
     let zoomProgress = 0;
     let lastActiveCityId: DealerCityId | null = selectedCityRef.current;
+
+    if (selectedCityRef.current === null && lastSelectedCityRef.current !== null) {
+      zoomProgress = 1;
+      lastActiveCityId = lastSelectedCityRef.current;
+    }
 
     const animate = (time: number) => {
       const t = (time - startTime) / 1000;
@@ -852,6 +1024,9 @@ const DealerCityMapScene = ({
     frameId = requestAnimationFrame(animate);
 
     return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
       cancelAnimationFrame(frameId);
       window.removeEventListener('resize', resize);
       renderer.domElement.removeEventListener('mousemove', onMouseMove);
@@ -1245,6 +1420,7 @@ export default function Garage({
   const [dealerPage, setDealerPage] = useState<DealerPage>('map');
   const [dealerCity, setDealerCity] = useState<DealerCityId | null>(null);
   const [hoveredCity, setHoveredCity] = useState<DealerCityId | null>(null);
+  const [hoveredBrand, setHoveredBrand] = useState<string | null>(null);
   const [lastSelectedCity, setLastSelectedCity] = useState<DealerCityId | null>(null);
   const [dealerMarketMode, setDealerMarketMode] = useState<DealerMarketMode | null>(null);
   const [dealerMapTransitioning, setDealerMapTransitioning] = useState(false);
@@ -1352,21 +1528,16 @@ export default function Garage({
 
       setDealerExiting(true);
       setDealerMapTransitioning(false);
+      setLastSelectedCity(null);
       handleExitDealerClick();
     }
-  }, [selectedBrand, dealerMarketMode, dealerPage, handleDealerReturnToMap, handleExitDealerClick]);
+  }, [selectedBrand, dealerMarketMode, dealerPage, handleDealerReturnToMap, handleExitDealerClick, setLastSelectedCity]);
 
   const handleDealerMarketChoice = React.useCallback((mode: DealerMarketMode) => {
     setDealerMarketMode(mode);
     const cityConfig = DEALER_CITIES.find((city) => city.id === dealerCity);
     if (selectedBrand === 'All' && cityConfig?.brands[0]) setSelectedBrand(cityConfig.brands[0]);
   }, [dealerCity, selectedBrand, setSelectedBrand]);
-
-  const handleDealerTuningChoice = React.useCallback(() => {
-    setDealerCity(null);
-    setDealerMarketMode(null);
-    handleTuningClick();
-  }, [handleTuningClick]);
 
   const handleExitClick = () => {
     // If Tauri
@@ -1448,7 +1619,11 @@ export default function Garage({
   const dealerFilteredCars = dealerCars.filter((car) => selectedBrand === 'All' || car.brand === selectedBrand);
   const dealerMarketCars = dealerMarketMode === 'used'
     ? dealerFilteredCars.filter((car) => car.tier === 'Entry Tier' || car.price <= 1800)
-    : dealerFilteredCars;
+    : dealerMarketMode === 'race'
+      ? dealerFilteredCars.filter((car) => car.tier === 'Hyper Tier' || car.tier === 'Legendary Tier' || car.requiresLicense)
+      : dealerMarketMode === 'new'
+        ? dealerFilteredCars.filter((car) => car.tier !== 'Hyper Tier' && car.tier !== 'Legendary Tier' && !car.requiresLicense)
+        : dealerFilteredCars;
   const dealerActiveBrands = dealerCityConfig?.brands || [];
 
   return (
@@ -1654,12 +1829,15 @@ export default function Garage({
                 : 'scale-100 opacity-100'
               }`}
           >
-            <DealerCityMapScene
-              selectedCity={dealerCity}
-              hoveredCity={hoveredCity}
-              onHoverCity={setHoveredCity}
-              onClickCity={handleDealerCitySelect}
-            />
+            {dealerPage !== 'city' && (
+              <DealerCityMapScene
+                selectedCity={dealerCity}
+                lastSelectedCity={lastSelectedCity}
+                hoveredCity={hoveredCity}
+                onHoverCity={setHoveredCity}
+                onClickCity={handleDealerCitySelect}
+              />
+            )}
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(244,63,94,0.12),transparent_24%),radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.12),transparent_28%),linear-gradient(90deg,rgba(9,9,11,0.58),rgba(9,9,11,0.28),rgba(9,9,11,0.58))]" aria-hidden="true" />
             <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-zinc-950 to-transparent" aria-hidden="true" />
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-zinc-950 to-transparent" aria-hidden="true" />
@@ -1740,19 +1918,57 @@ export default function Garage({
               {dealerPage === 'city' && dealerCityConfig && selectedBrand === 'All' && !dealerMarketMode && (
                 <div className="pointer-events-auto absolute left-1/2 top-1/2 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 -translate-y-1/2 animate-fadeIn">
                   <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                    {dealerActiveBrands.map((brand, index) => (
-                      <button
-                        key={brand}
-                        onClick={() => handleBrandSelect(brand)}
-                        className={`group flex min-h-[132px] flex-col items-center justify-center gap-3 rounded-2xl border bg-gradient-to-br ${getDealerBrandTone(brand)} px-5 py-6 shadow-[0_18px_45px_rgba(0,0,0,0.32)] transition-[border-color,background-color,filter] duration-200 hover:brightness-125 cursor-pointer animate-brandPop`}
-                        style={{ animationDelay: `${index * 80}ms` }}
-                      >
-                        <span className="flex h-16 w-16 items-center justify-center rounded-full border border-white/16 bg-black/42 text-lg font-black tracking-wide text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
-                          {getDealerBrandInitials(brand)}
-                        </span>
-                        <span className="text-xs font-black uppercase tracking-[0.18em] text-current">{brand}</span>
-                      </button>
-                    ))}
+                    {dealerActiveBrands.map((brand, index) => {
+                      const brandColor = getBrandColor(brand);
+                      return (
+                        <button
+                          key={brand}
+                          onClick={() => handleBrandSelect(brand)}
+                          onMouseEnter={() => setHoveredBrand(brand)}
+                          onMouseLeave={() => setHoveredBrand(null)}
+                          className="group flex flex-col items-center justify-center gap-4 py-8 px-6 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 hover:brightness-125 animate-brandPop"
+                          style={{ animationDelay: `${index * 80}ms` }}
+                        >
+                          {/* Circular double-ring emblem */}
+                          <div className="relative flex h-24 w-24 items-center justify-center">
+                            {/* Outer glowing ring */}
+                            <div
+                              className="absolute inset-0 border border-white/10 rounded-full transition-all duration-500 group-hover:scale-110 group-hover:rotate-[180deg]"
+                              style={{
+                                borderColor: `${brandColor}33`,
+                                boxShadow: `0 0 15px ${brandColor}00`,
+                              }}
+                            />
+                            {/* Inner dashed ring */}
+                            <div
+                              className="absolute inset-2 border border-dashed border-white/5 rounded-full transition-all duration-300 group-hover:scale-105"
+                              style={{
+                                borderColor: `${brandColor}55`,
+                              }}
+                            />
+                            {/* Monogram initials */}
+                            <span 
+                              className="relative text-2xl font-black font-mono tracking-widest text-zinc-300 transition-all duration-300 group-hover:text-white"
+                              style={{
+                                textShadow: `0 0 10px ${brandColor}66`
+                              }}
+                            >
+                              {getDealerBrandInitials(brand)}
+                            </span>
+                          </div>
+
+                          {/* Brand name */}
+                          <span
+                            className="text-xs font-black uppercase tracking-[0.25em] text-zinc-400 transition-all duration-300 group-hover:text-white"
+                            style={{
+                              textShadow: `0 0 10px ${brandColor}33`
+                            }}
+                          >
+                            {brand}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1783,7 +1999,7 @@ export default function Garage({
                         {dealerCityConfig.description}
                       </p>
                     </div>
-                    <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                       <button
                         onClick={() => handleDealerMarketChoice('new')}
                         className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-rose-500 hover:bg-rose-600 hover:text-white cursor-pointer"
@@ -1797,10 +2013,16 @@ export default function Garage({
                         Used Car
                       </button>
                       <button
-                        onClick={handleDealerTuningChoice}
-                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-cyan-500 hover:bg-cyan-500 hover:text-zinc-950 cursor-pointer"
+                        onClick={() => handleDealerMarketChoice('race')}
+                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-red-500 hover:bg-red-650 hover:text-white cursor-pointer"
                       >
-                        Tuning
+                        Race Car
+                      </button>
+                      <button
+                        onClick={() => handleDealerMarketChoice('museum')}
+                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-purple-500 hover:bg-purple-650 hover:text-white cursor-pointer"
+                      >
+                        Museum
                       </button>
                     </div>
                   </div>
@@ -1811,10 +2033,16 @@ export default function Garage({
                 <div className="pointer-events-auto mt-20 flex shrink-0 items-center justify-between gap-4 border-y border-white/12 bg-black/82 px-5 py-3">
                   <div>
                     <h3 className="text-base font-black uppercase tracking-wide text-white">
-                      {dealerMarketMode === 'new' ? 'New Car Stock' : 'Used Car Lot'}
+                      {dealerMarketMode === 'museum'
+                        ? 'Brand Heritage Museum'
+                        : dealerMarketMode === 'race'
+                          ? 'Race Car Stock'
+                          : dealerMarketMode === 'new'
+                            ? 'New Car Stock'
+                            : 'Used Car Lot'}
                     </h3>
                     <span className="text-[9px] font-black uppercase tracking-[0.24em] text-zinc-500">
-                      {dealerCityConfig.name} / {selectedBrand}
+                      {dealerCityConfig.name} / {selectedBrand} {dealerMarketMode === 'museum' ? '/ History' : ''}
                     </span>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -1899,7 +2127,7 @@ export default function Garage({
                 </div>
               )}
 
-              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketCars.length === 0 && (
+              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketMode !== 'museum' && dealerMarketCars.length === 0 && (
                 <div className="pointer-events-auto mx-auto mt-10 w-full max-w-xl rounded-2xl border border-zinc-850 bg-zinc-950/70 p-8 text-center backdrop-blur-md">
                   <h3 className="text-lg font-black uppercase tracking-wide text-white">No Cars Stocked Yet</h3>
                   <p className="mt-2 text-xs leading-relaxed text-zinc-400">
@@ -1908,7 +2136,155 @@ export default function Garage({
                 </div>
               )}
 
-              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketCars.length > 0 && (
+              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode === 'museum' && (() => {
+                const lore = BRAND_LORE[selectedBrand];
+                if (!lore) return null;
+                const brandColor = getBrandColor(selectedBrand);
+                const signatureCar = CARS_DATABASE.find((c) => c.id === lore.signatureCarId);
+
+                return (
+                  <div className="pointer-events-auto flex flex-col gap-6 overflow-y-auto pb-6 pr-2 min-h-0 flex-1 animate-fadeIn">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      
+                      {/* Left Block: Brand Overview & Info */}
+                      <div className="lg:col-span-2 border border-zinc-850 bg-zinc-950/75 p-6 rounded-2xl flex flex-col gap-4 backdrop-blur-md">
+                        <div className="flex justify-between items-start border-b border-white/10 pb-4">
+                          <div>
+                            <h2 className="text-3xl font-black uppercase tracking-wider text-white" style={{ textShadow: `0 0 15px ${brandColor}44` }}>
+                              {lore.name}
+                            </h2>
+                            <p className="text-xs font-bold text-zinc-400 mt-1 uppercase tracking-widest">
+                              {lore.specialty}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Origin</span>
+                            <div className="text-sm font-black text-white">{lore.origin}</div>
+                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-1 block">Established</span>
+                            <div className="text-sm font-bold text-zinc-300">{lore.established}</div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-2">Heritage & Philosophy</span>
+                          <p className="text-sm font-bold leading-relaxed text-zinc-300">
+                            {lore.description}
+                          </p>
+                        </div>
+
+                        <div className="mt-2 flex flex-col gap-3">
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block">Historic Milestones</span>
+                          {lore.achievements.map((ach, idx) => (
+                            <div key={idx} className="flex gap-3 items-start border border-zinc-900 bg-zinc-900/30 p-3.5 rounded-xl">
+                              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-black text-white" style={{ backgroundColor: `${brandColor}33`, color: brandColor }}>
+                                {idx + 1}
+                              </div>
+                              <p className="text-xs font-bold leading-relaxed text-zinc-300">
+                                {ach}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Right Block: Signature Vehicle Show */}
+                      <div className="border border-zinc-850 bg-zinc-950/75 p-6 rounded-2xl flex flex-col gap-4 backdrop-blur-md justify-between">
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-3">Signature Vehicle</span>
+                          {signatureCar && (
+                            <div className="flex flex-col gap-4">
+                              <div className="border border-zinc-900 bg-zinc-900/40 p-4 rounded-xl flex flex-col gap-1">
+                                <span className="text-[9px] font-black uppercase tracking-wider text-rose-500">
+                                  {signatureCar.tier}
+                                </span>
+                                <h4 className="text-lg font-black text-zinc-100 uppercase tracking-wide">
+                                  {signatureCar.brand} {signatureCar.name}
+                                </h4>
+                                <div className="flex items-center gap-1.5 font-mono text-amber-500 text-xs font-bold mt-1">
+                                  <Coins className="w-3.5 h-3.5" />
+                                  <span>{signatureCar.price === 0 ? 'Reward Car' : `${signatureCar.price.toLocaleString()} CR`}</span>
+                                </div>
+                              </div>
+
+                              {/* Spec chart */}
+                              <div className="flex flex-col gap-3 bg-zinc-900/20 p-4 rounded-xl border border-zinc-900/50">
+                                {/* Speed */}
+                                <div>
+                                  <div className="flex justify-between text-[9px] font-black text-zinc-500 mb-1">
+                                    <span>TOP SPEED</span>
+                                    <span className="font-mono text-zinc-300">{Math.round(signatureCar.speed * 10)}%</span>
+                                  </div>
+                                  <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                    <div
+                                      className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
+                                      style={{ width: `${signatureCar.speed * 10}%`, backgroundColor: brandColor }}
+                                    />
+                                  </div>
+                                </div>
+                                {/* Acceleration */}
+                                <div>
+                                  <div className="flex justify-between text-[9px] font-black text-zinc-500 mb-1">
+                                    <span>ACCELERATION</span>
+                                    <span className="font-mono text-zinc-300">{Math.round(signatureCar.acceleration * 10)}%</span>
+                                  </div>
+                                  <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                    <div
+                                      className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
+                                      style={{ width: `${signatureCar.acceleration * 10}%`, backgroundColor: brandColor }}
+                                    />
+                                  </div>
+                                </div>
+                                {/* Handling */}
+                                <div>
+                                  <div className="flex justify-between text-[9px] font-black text-zinc-500 mb-1">
+                                    <span>HANDLING</span>
+                                    <span className="font-mono text-zinc-300">{Math.round(signatureCar.handling * 10)}%</span>
+                                  </div>
+                                  <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
+                                    <div
+                                      className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
+                                      style={{ width: `${signatureCar.handling * 10}%`, backgroundColor: brandColor }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-4">
+                          <button
+                            onClick={() => {
+                              if (signatureCar) selectCar(signatureCar.id);
+                            }}
+                            disabled={!signatureCar || !purchasedCars.includes(signatureCar.id) || activeCarId === signatureCar.id}
+                            className={`w-full py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer ${
+                              !signatureCar
+                                ? 'bg-zinc-800 border border-zinc-750 text-zinc-550 cursor-not-allowed'
+                                : activeCarId === signatureCar.id
+                                  ? 'bg-zinc-950 border border-zinc-900 text-zinc-650 cursor-default'
+                                  : purchasedCars.includes(signatureCar.id)
+                                    ? 'bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-200 hover:border-zinc-500'
+                                    : 'bg-zinc-950 border border-zinc-900/60 text-zinc-600 cursor-not-allowed'
+                            }`}
+                          >
+                            {!signatureCar 
+                              ? 'Preview Unavailable' 
+                              : activeCarId === signatureCar.id 
+                                ? 'Active Vehicle' 
+                                : purchasedCars.includes(signatureCar.id) 
+                                  ? 'Select Vehicle' 
+                                  : 'Not Owned'}
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketMode !== 'museum' && dealerMarketCars.length > 0 && (
                 <div className="pointer-events-auto grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-6 pr-2 xl:grid-cols-2">
                   {dealerMarketCars.map((car) => {
                     const isUnlocked = purchasedCars.includes(car.id);
@@ -2051,45 +2427,196 @@ export default function Garage({
           )}
 
           {/* BRAND SHOWCASE BACKGROUND */}
-          {dealerPage === 'city' && selectedBrand !== 'All' && (
-            <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-zinc-950 animate-fadeIn">
-              {/* Subtle glowing radial gradient in center */}
-              <div
-                className="absolute w-[600px] h-[600px] rounded-full filter blur-[120px] opacity-15 mix-blend-screen"
-                style={{
-                  background:
-                    selectedBrand.toLowerCase().includes('nissan') || selectedBrand.toLowerCase().includes('skyline') ? 'radial-gradient(circle, #f43f5e 0%, transparent 70%)' :
-                      selectedBrand.toLowerCase().includes('toyota') || selectedBrand.toLowerCase().includes('supra') ? 'radial-gradient(circle, #f59e0b 0%, transparent 70%)' :
-                        selectedBrand.toLowerCase().includes('honda') || selectedBrand.toLowerCase().includes('s2000') ? 'radial-gradient(circle, #3b82f6 0%, transparent 70%)' :
-                          selectedBrand.toLowerCase().includes('mazda') || selectedBrand.toLowerCase().includes('rx7') ? 'radial-gradient(circle, #10b981 0%, transparent 70%)' :
-                            'radial-gradient(circle, #71717a 0%, transparent 70%)'
-                }}
-              />
+          {dealerPage === 'city' && selectedBrand === 'All' && !dealerMarketMode && dealerCityConfig && (() => {
+            const brandColor = hoveredBrand ? getBrandColor(hoveredBrand) : (
+              dealerCityConfig.accent === 'rose' ? '#f43f5e' :
+              dealerCityConfig.accent === 'cyan' ? '#06b6d4' :
+              dealerCityConfig.accent === 'blue' ? '#3b82f6' : '#f59e0b'
+            );
+            const displayName = hoveredBrand || dealerCityConfig.name;
+            return (
+              <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-zinc-950 animate-fadeIn">
+                {/* Subtle glowing radial gradient in center */}
+                <div
+                  className="absolute w-[600px] h-[600px] rounded-full filter blur-[120px] opacity-15 mix-blend-screen transition-all duration-700"
+                  style={{
+                    background: `radial-gradient(circle, ${brandColor} 0%, transparent 70%)`
+                  }}
+                />
 
-              {/* Cyberpunk Grid Overlay */}
-              <div
-                className="absolute inset-0 opacity-5"
-                style={{
-                  backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
-                  backgroundSize: '40px 40px'
-                }}
-              />
+                {/* Cyberpunk Grid Overlay */}
+                <div
+                  className="absolute inset-0 opacity-5"
+                  style={{
+                    backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+                    backgroundSize: '40px 40px'
+                  }}
+                />
 
-              {/* Giant outlined brand name in center */}
-              <div
-                className="select-none text-center font-black tracking-[0.15em] uppercase select-none pointer-events-none animate-scaleIn"
-                style={{
-                  fontSize: '15vw',
-                  lineHeight: 1,
-                  fontFamily: 'system-ui, sans-serif',
-                  WebkitTextStroke: '2px rgba(255, 255, 255, 0.05)',
-                  color: 'transparent',
-                }}
-              >
-                {selectedBrand}
+                {/* City-Specific Overlays */}
+                {dealerCityConfig.id === 'east' && (
+                  <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden animate-fadeIn">
+                    {/* Pagoda silhouette */}
+                    <svg className="absolute bottom-0 w-full h-[35%] opacity-20 text-zinc-800" viewBox="0 0 1000 300" preserveAspectRatio="none" fill="currentColor">
+                      <path d="M 0 300 L 0 250 L 50 220 L 70 220 L 90 250 L 150 250 L 180 180 L 195 180 L 210 160 L 230 180 L 245 180 L 275 250 L 380 250 L 410 140 L 450 140 L 460 120 L 470 140 L 510 140 L 540 250 L 650 250 L 670 200 L 730 200 L 750 250 L 850 250 L 890 100 L 920 100 L 930 80 L 940 100 L 970 100 L 1000 250 L 1000 300 Z" />
+                    </svg>
+                    {/* Lanterns */}
+                    <div className="absolute top-0 inset-x-0 h-48 flex justify-around px-12 opacity-35">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <div key={i} className="animate-lantern-swing flex flex-col items-center" style={{ animationDelay: `${i * 0.4}s` }}>
+                          <div className="w-0.5 h-16 bg-zinc-700" />
+                          <div className="w-6 h-1.5 bg-zinc-800 rounded-sm" />
+                          <div
+                            className="w-8 h-10 rounded-xl relative animate-lantern-flicker"
+                            style={{
+                              background: `radial-gradient(circle, ${brandColor}dd 0%, ${brandColor}88 70%)`,
+                              boxShadow: `0 0 20px ${brandColor}88`,
+                              animationDelay: `${i * 0.3}s`
+                            }}
+                          >
+                            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 w-1 h-3 bg-amber-500 rounded-b-sm" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {dealerCityConfig.id === 'west' && (
+                  <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden animate-fadeIn">
+                    {/* Suspension bridge outline */}
+                    <svg className="absolute bottom-0 w-full h-[60%] opacity-20 transition-colors duration-700" style={{ color: brandColor }} viewBox="0 0 1000 400" preserveAspectRatio="none" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="0" y1="350" x2="1000" y2="350" strokeWidth="4" />
+                      <path d="M 250 400 L 280 80 L 320 80 L 350 400" fill="currentColor" opacity="0.3" />
+                      <line x1="280" y1="80" x2="320" y2="80" strokeWidth="3" />
+                      <line x1="285" y1="150" x2="315" y2="150" strokeWidth="2" />
+                      <line x1="290" y1="220" x2="310" y2="220" strokeWidth="2" />
+                      <line x1="295" y1="290" x2="305" y2="290" strokeWidth="2" />
+                      <path d="M 650 400 L 680 80 L 720 80 L 750 400" fill="currentColor" opacity="0.3" />
+                      <line x1="680" y1="80" x2="720" y2="80" strokeWidth="3" />
+                      <line x1="685" y1="150" x2="715" y2="150" strokeWidth="2" />
+                      <line x1="690" y1="220" x2="710" y2="220" strokeWidth="2" />
+                      <line x1="695" y1="290" x2="705" y2="290" strokeWidth="2" />
+                      <path d="M 0 120 Q 300 350 300 80 Q 500 240 700 80 Q 700 350 1000 120" strokeWidth="3" />
+                      {[50, 100, 150, 200, 370, 420, 470, 520, 570, 630, 800, 850, 900, 950].map((x, idx) => {
+                        let yCable = 350;
+                        if (x < 250) {
+                          yCable = 120 + ((x - 0) / 250) * 120;
+                        } else if (x > 350 && x < 650) {
+                          const t = (x - 300) / 400;
+                          yCable = 80 + 4 * (160) * (t - 0.5) * (t - 0.5);
+                        } else if (x > 750) {
+                          yCable = 120 + ((1000 - x) / 250) * 120;
+                        }
+                        return <line key={idx} x1={x} y1={yCable} x2={x} y2={350} strokeWidth="1" opacity="0.6" />;
+                      })}
+                    </svg>
+                    {/* Speed lines */}
+                    <div className="absolute bottom-[48px] inset-x-0 h-10 flex flex-col justify-around opacity-40">
+                      <div className="w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500 to-transparent animate-speed-line" style={{ animationDelay: '0s' }} />
+                      <div className="w-full h-[2px] bg-gradient-to-r from-transparent via-fuchsia-500 to-transparent animate-speed-line" style={{ animationDelay: '0.7s', animationDuration: '3s' }} />
+                      <div className="w-full h-[1px] bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-speed-line" style={{ animationDelay: '1.4s', animationDuration: '2.5s' }} />
+                    </div>
+                  </div>
+                )}
+
+                {dealerCityConfig.id === 'north' && (
+                  <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden animate-fadeIn">
+                    {/* Tall steel tower */}
+                    <svg className="absolute bottom-0 right-[10%] w-[300px] h-[80%] opacity-20 transition-colors duration-700" style={{ color: brandColor }} viewBox="0 0 200 500" fill="currentColor">
+                      <path d="M 30 500 L 70 500 L 90 280 L 110 280 L 130 500 L 170 500 L 125 150 L 135 150 L 135 120 L 115 120 L 105 0 L 95 0 L 85 120 L 65 120 L 65 150 L 75 150 Z" />
+                      {[100, 180, 260, 340, 420].map((y, idx) => (
+                        <line key={idx} x1={40 + idx*5} y1={y} x2={160 - idx*5} y2={y} stroke="#0f172a" strokeWidth="4" />
+                      ))}
+                    </svg>
+                    {/* Vertical laser lines */}
+                    <div className="absolute inset-0 flex justify-around opacity-15">
+                      {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <div key={i} className="w-[1px] h-full bg-gradient-to-t from-transparent via-blue-400 to-transparent" />
+                      ))}
+                    </div>
+                    {/* Digital snow particles */}
+                    <div className="absolute inset-0">
+                      {[1, 2, 3, 4].map((group) => (
+                        <div key={group} className={`absolute inset-0 animate-snow-${group}`}>
+                          {[...Array(12)].map((_, idx) => {
+                            const left = `${(idx * 8 + group * 23) % 100}%`;
+                            const top = `${(idx * 7) % 30 - 30}px`;
+                            const size = `${((idx % 3) + 2) * 2}px`;
+                            return (
+                              <div
+                                key={idx}
+                                className="absolute rounded-full transition-colors duration-750"
+                                style={{
+                                  left,
+                                  top,
+                                  width: size,
+                                  height: size,
+                                  backgroundColor: brandColor,
+                                  boxShadow: `0 0 8px ${brandColor}`,
+                                  opacity: 0.7
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {dealerCityConfig.id === 'south' && (
+                  <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden animate-fadeIn">
+                    <div className="absolute bottom-0 inset-x-0 h-[40%] bg-gradient-to-t from-amber-500/10 via-transparent to-transparent" />
+                    {/* Lighthouse */}
+                    <svg className="absolute bottom-0 left-[8%] w-[120px] h-[55%] opacity-25 text-zinc-400" viewBox="0 0 100 300" fill="currentColor">
+                      <path d="M 20 300 L 30 60 L 70 60 L 80 300 Z" />
+                      <rect x="25" y="45" width="50" height="15" rx="2" fill="currentColor" />
+                      <rect x="35" y="15" width="30" height="30" rx="3" fill="#0f172a" />
+                      <path d="M 32 15 C 32 -5, 68 -5, 68 15 Z" fill="currentColor" />
+                    </svg>
+                    {/* Palm Trees */}
+                    <svg className="absolute bottom-0 right-[5%] w-[280px] h-[65%] opacity-20 text-zinc-900" viewBox="0 0 200 300" fill="currentColor">
+                      <path d="M 60 300 Q 80 180 120 100 Q 123 100 122 103 Q 83 182 63 300 Z" />
+                      <path d="M 120 100 Q 150 120 180 150 Q 150 135 120 100 Z" />
+                      <path d="M 120 100 Q 160 90 190 95 Q 150 95 120 100 Z" />
+                      <path d="M 120 100 Q 140 60 160 30 Q 135 65 120 100 Z" />
+                      <path d="M 120 100 Q 100 50 75 20 Q 105 65 120 100 Z" />
+                      <path d="M 120 100 Q 80 80 50 90 Q 95 95 120 100 Z" />
+                      <path d="M 140 300 Q 150 200 170 140 Q 172 140 171 142 Q 152 201 142 300 Z" />
+                      <path d="M 170 140 Q 190 155 210 175 Q 190 165 170 140 Z" />
+                      <path d="M 170 140 Q 200 135 220 138 Q 190 138 170 140 Z" />
+                      <path d="M 170 140 Q 185 110 200 85 Q 180 110 170 140 Z" />
+                      <path d="M 170 140 Q 155 100 135 80 Q 155 115 170 140 Z" />
+                    </svg>
+                    {/* Light beam */}
+                    <div className="absolute left-[13%] bottom-[82.5%] w-[2000px] h-[2000px] -translate-x-1/2 translate-y-1/2 pointer-events-none">
+                      <div
+                        className="w-full h-full animate-lighthouse-rotate transition-all duration-700"
+                        style={{
+                          background: `conic-gradient(from 0deg at 50% 50%, transparent 42%, ${brandColor}22 45%, ${brandColor}44 48%, ${brandColor}22 51%, transparent 54%)`
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Giant outlined brand/city name in center */}
+                <div
+                  className="select-none text-center font-black tracking-[0.15em] uppercase select-none pointer-events-none animate-scaleIn z-10 transition-all duration-700"
+                  style={{
+                    fontSize: '15vw',
+                    lineHeight: 1,
+                    fontFamily: 'system-ui, sans-serif',
+                    WebkitTextStroke: '2px rgba(255, 255, 255, 0.05)',
+                    color: 'transparent',
+                  }}
+                >
+                  {displayName}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* LOCAL TRANSITION OVERLAY FOR INTERNAL DEALER TRANSITIONS */}
           {dealerMapTransitioning && (

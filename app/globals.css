@@ -445,3 +445,66 @@ body {
     opacity: 1;
   }
 }
+
+/* Custom Showcase Animations */
+@keyframes lanternSwing {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+
+@keyframes lanternFlicker {
+  0%, 100% { opacity: 0.8; }
+  45%, 55% { opacity: 1.0; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes digitalSnow {
+  0% { transform: translateY(-50px) translateX(0); opacity: 0; }
+  10% { opacity: 0.8; }
+  90% { opacity: 0.8; }
+  100% { transform: translateY(650px) translateX(30px); opacity: 0; }
+}
+
+@keyframes lighthouseRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes speedLinePulse {
+  0%, 100% { opacity: 0.15; transform: scaleX(0.98); }
+  50% { opacity: 0.45; transform: scaleX(1.02); }
+}
+
+.animate-lantern-swing {
+  animation: lanternSwing 3.5s ease-in-out infinite;
+  transform-origin: 50% 0%;
+}
+
+.animate-lantern-flicker {
+  animation: lanternFlicker 2s infinite;
+}
+
+.animate-snow-1 {
+  animation: digitalSnow 6s linear infinite;
+}
+.animate-snow-2 {
+  animation: digitalSnow 8s linear infinite;
+  animation-delay: 1.5s;
+}
+.animate-snow-3 {
+  animation: digitalSnow 7s linear infinite;
+  animation-delay: 3s;
+}
+.animate-snow-4 {
+  animation: digitalSnow 9s linear infinite;
+  animation-delay: 4.5s;
+}
+
+.animate-lighthouse-rotate {
+  animation: lighthouseRotate 12s linear infinite;
+}
+
+.animate-speed-line {
+  animation: speedLinePulse 2s ease-in-out infinite;
+}
+

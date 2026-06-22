@@ -1,482 +1,266 @@
-import * as THREE from 'three';
+# Vehicle Physics Realism Audit 🏎️
 
-export class Vehicle {
-  public mesh: THREE.Group;
-  public wheels: THREE.Object3D[] = [];
-  public leftFrontWheel?: THREE.Object3D;
-  public rightFrontWheel?: THREE.Object3D;
-  
-  // Physics parameters
-  public pos = new THREE.Vector3(0, 0, 0);
-  public yaw = 0; // Heading direction in radians
-  public pitch = 0;
-  public roll = 0;
-  public speed = 0;
-  public yVelocity = 0; // For jumps
-  public isGrounded = true;
-  public isDrifting = false;
-  public driftAngle = 0;
+A system-by-system analysis of what is already realistic vs. what is still **not 1:1 with real-world physics**.
 
-  // Car stats
-  public maxSpeed = 45;
-  public accelerationRate = 0.35;
-  public handlingRate = 0.045;
-  public brakingRate = 0.8;
-  public dragCoeff = 0.015;
+---
 
-  // Powertrain Params
-  public currentGear = 1;
-  public rpm = 1000;
-  public gearRatios = [0, 3.60, 2.10, 1.45, 1.10, 0.90, 0.73]; 
-  public finalDrive = 3.42;
-  public wheelRadius = 0.48; 
+## Rating Legend
 
-  // --- NEW SIMULATOR VARIABLES ---
-  public baseMass = 1200;   // Unloaded factory car weight (kg)
-  public mass = 1200;       // Active mass after modifications
-  public maxRpm = 6500;     // Engine redline limits
+| Symbol | Meaning |
+|--------|---------|
+| ✅ | Realistic / close to real |
+| ⚠️ | Partially realistic — has the right idea but simplifies significantly |
+| ❌ | Not realistic — arcade or missing entirely |
 
-  // Comprehensive Upgrade Configuration
-  public upgrades = {
-    mufflers: 0,            // Level 0-3: Decreases backpressure, scaling up base engine torque
-    brake: {
-      level: 0,             // Level 0-3: Increases absolute braking force clamping power
-      hasABS: false,        // Anti-lock Braking System: Prevents wheel lock, allows steering under heavy braking
-      hasESC: false         // Electronic Stability Control: Restores stability if sliding out unintentionally
-    },
-    aspiration: 'natural',  // 'natural' or 'turbo': Adds a force-fed torque spike at mid-high RPM
-    weightReduction: 0,     // Level 0-3: Directly drops vehicle mass (improving acceleration, braking, and cornering)
-    driveTrain: {
-      gearboxLevel: 0,      // Level 0-3: Lowers gear shift times / optimizes top-end gear ratios
-      clutchLevel: 0,       // Level 0-3: Minimizes drivetrain slipping, boosting transmission efficiency
-      flywheelLevel: 0,     // Level 0-3: Lightens engine rotational inertia, making RPM climb/drop faster
-      propellerShaftLevel: 0 // Level 0-2: Carbon/lightweight shaft reduces power loss to the wheels
-    },
-    engine: {
-      ecuLevel: 0,              // Level 0-3: Digitally remapped fuel tables for flat torque gains
-      engineBalancingLevel: 0,  // Level 0-3: Harmonizes internal components, raising safe Max RPM limit
-      portGrindingLevel: 0      // Level 0-3: Smooths cylinder head airflow, major torque gains at high RPM
-    },
-    suspensionLevel: 0,     // Level 0-3: Lowers center of gravity, sharpens handling, reduces visual body roll
-    bodyControlModuleLevel: 0 // Level 0-3: Electronic Traction Control (TCS) preventing low-speed wheel spin
-  };
+---
 
-  public carId: string;
-  public color: string;
+## 1. Tire Model (Lateral Forces)
 
-  constructor(carId: string = 'starter', color: string = '#f43f5e') {
-    this.carId = carId;
-    this.color = color;
-    this.mesh = new THREE.Group();
-    this.buildMesh();
-    this.updateStats();
-  }
+**Current**: Simplified Pacejka "Magic Formula" → `F = Fpeak × sin(atan(B × α))` with post-peak drop-off.
 
-  // Engine Torque Curve modified by Exhaust (mufflers) and Engine Internals
-  private getTorque(currentRpm: number): number {
-    let baseTorque = 180;
-    if (this.carId === 'sport') baseTorque = 240;
-    if (this.carId === 'super') baseTorque = 320;
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Magic formula shape | ⚠️ | Uses only `sin(atan(B*α))` — real Pacejka has 4 params `(B, C, D, E)` controlling peak shape, asymmetry, and tail behavior |
+| Post-peak grip drop-off | ⚠️ | Hardcoded at 20% over 0.4 rad — real tires lose 10-40% depending on compound/load/temperature |
+| Cornering stiffness per car | ✅ | Each car has `corneringStiffnessFront/Rear` in database |
+| **Tire temperature model** | ❌ | **Completely absent.** Real tires have an operating window (cold = low grip, optimal = peak, overheated = degraded). This is a major realism gap |
+| **Tire pressure model** | ❌ | **Missing.** Pressure affects contact patch size, stiffness, heat generation, and wear rate |
+| **Load sensitivity (tire)** | ⚠️ | `computeAxleGripLimit()` has basic load sensitivity (`1.08 - 0.16*(loadRatio-1)`), but real tires have complex non-linear degression |
+| **Camber effects** | ❌ | **Missing.** Camber angle affects lateral grip significantly (1-3° negative camber = more cornering grip) |
+| **Combined slip (longitudinal)** | ⚠️ | `combinedGripCircle()` uses circular friction — real tires have an **elliptical** friction envelope (more grip longitudinally than laterally) |
+| **Relaxation length** | ❌ | **Missing.** Real tires don't generate force instantly — there's a ~0.05-0.1m relaxation length delay as the contact patch deforms |
 
-    // [UPGRADE IMPACT]: Engine tuning alters base rotational force
-    baseTorque += this.upgrades.mufflers * 12;
-    baseTorque += this.upgrades.engine.ecuLevel * 20;
-    baseTorque += this.upgrades.engine.portGrindingLevel * 25;
+---
 
-    let torque = baseTorque;
-    if (currentRpm < 1000) {
-      torque = baseTorque * 0.9;
-    } else if (currentRpm >= 1000 && currentRpm < 4500) {
-      // RPM climbing stage
-      torque = baseTorque + (currentRpm - 1000) * 0.04; 
-    } else if (currentRpm >= 4500 && currentRpm <= this.maxRpm) {
-      // Falling stage near redline (port grinding flattens this drop out)
-      let highRpmDrop = 0.06 - (this.upgrades.engine.portGrindingLevel * 0.01);
-      torque = (baseTorque + 140) - (currentRpm - 4500) * Math.max(0.02, highRpmDrop);
-    } else {
-      torque = 10; // Rev limiter cut-off
-    }
+## 2. Tire Model (Longitudinal Forces)
 
-    // [UPGRADE IMPACT]: Turbo Aspiration adds progressive forced boost between 3,200 and 5,800 RPM
-    if (this.upgrades.aspiration === 'turbo' && currentRpm > 3200 && currentRpm < 5800) {
-      let boostSwell = Math.sin((currentRpm - 3200) / 2600 * Math.PI) * 65;
-      torque += boostSwell;
-    }
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Slip ratio computation | ✅ | Correct |
+| Wheelspin detection | ✅ | Excess drive force → wheel speed diverges from ground speed |
+| **Longitudinal force NOT used in main loop** | ❌ | `computeLongitudinalForce()` is defined but **never called** in [Vehicle.ts](file:///d:/trifilpla/components/objects/Vehicle.ts). Drive/brake forces are applied directly without going through the tire longitudinal model. Real cars produce traction force *through the tire contact patch* with slip-dependent grip |
+| Wheel inertia model | ⚠️ | Uses a flat `100 kg` effective wheel mass for wheelspin — real wheel assemblies have rotational inertia based on moment of inertia (typically 1-2 kg·m²) |
 
-    return Math.max(10, torque);
-  }
+---
 
-  private handleAutoTransmission() {
-    // [UPGRADE IMPACT]: Flywheel level makes the transmission react faster to RPM shifts
-    let shiftRPM = 5800 + (this.upgrades.driveTrain.flywheelLevel * 150);
-    if (shiftRPM > this.maxRpm - 200) shiftRPM = this.maxRpm - 200;
+## 3. Drivetrain & Transmission
 
-    if (this.speed > 0) {
-      if (this.rpm > shiftRPM && this.currentGear < 6) {
-        this.currentGear++;
-      } else if (this.rpm < 2400 && this.currentGear > 1) {
-        this.currentGear--;
-      }
-    } else {
-      this.currentGear = 1;
-    }
-  }
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Gear ratios per car | ✅ | Database supports custom `gearRatios[]` and `finalDrive` |
+| Auto-shift by RPM or speed schedule | ✅ | `shiftUpMph[]` schedule + RPM-based fallback |
+| Shift time with upgrade modifiers | ✅ | Base 0.35s up / 0.20s down, reduced by gearbox+flywheel upgrades |
+| **Rev-matching / heel-toe on downshift** | ❌ | **Missing.** Downshifts should blip throttle to match RPM — currently RPM just jumps |
+| **Manual transmission option** | ❌ | Only automatic. No clutch simulation, paddle-shift, or H-pattern |
+| Clutch slip at launch | ⚠️ | Basic clutch capacity model exists but is very simplified (no clutch engagement curve, no stall) |
+| **Torque converter / dual-clutch** | ❌ | No torque converter for automatics, no dual-clutch pre-engagement |
+| Engine inertia | ⚠️ | Flywheel inertia is a flat `0.05-0.18` value — real engines have measured MOI curves |
 
-  public rebuild(carId: string, color: string) {
-    this.carId = carId;
-    this.color = color;
-    
-    while (this.mesh.children.length > 0) {
-      this.mesh.remove(this.mesh.children[0]);
-    }
-    this.wheels = [];
-    this.leftFrontWheel = undefined;
-    this.rightFrontWheel = undefined;
-    
-    this.buildMesh();
-    this.updateStats();
-  }
+---
 
-  private buildMesh() {
-    // Chassis Base
-    const chassisGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
-    const chassisMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(this.color),
-      roughness: 0.2,
-      metalness: 0.8,
-    });
-    const chassis = new THREE.Mesh(chassisGeom, chassisMat);
-    chassis.position.y = 0.45;
-    this.mesh.add(chassis);
+## 4. Engine Model
 
-    // Cabin/Windshield
-    const cabinGeom = new THREE.BoxGeometry(1.8, 0.6, 2.2);
-    const cabinMat = new THREE.MeshStandardMaterial({
-      color: 0x050510,
-      roughness: 0.1,
-      metalness: 0.9,
-      transparent: true,
-      opacity: 0.75,
-    });
-    const cabin = new THREE.Mesh(cabinGeom, cabinMat);
-    cabin.position.set(0, 0.9, -0.2); 
-    this.mesh.add(cabin);
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Torque curve per car | ✅ | Custom `torqueCurve: TorquePoint[]` with linear interpolation |
+| Rev limiter | ✅ | Oscillating cut at redline |
+| Turbo spool lag | ⚠️ | Simple 0→1 spool variable — real turbos have inertia-based spool, wastegate, blow-off valve, and boost curves |
+| **Engine friction model** | ⚠️ | `frictionTorque = 15 + 0.012 * rpm` — overly linear. Real engines have viscous + mechanical + pumping losses |
+| **Fuel system** | ❌ | No fuel consumption, no fuel weight affecting handling over time |
+| **Engine temperature** | ❌ | No overheating, coolant, or performance degradation from sustained high RPM |
+| **Natural aspiration induction** | ❌ | No intake manifold resonance tuning, no VTEC-like variable valve timing (despite having an S2000!) |
 
-    // Windshield frame
-    const windshieldGeom = new THREE.BoxGeometry(1.7, 0.5, 1.2);
-    const windshieldMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      roughness: 0.05,
-      metalness: 0.95,
-      emissive: 0x003333,
-    });
-    const windshield = new THREE.Mesh(windshieldGeom, windshieldMat);
-    windshield.position.set(0, 0.85, 0.8);
-    windshield.rotation.x = -0.5; 
-    this.mesh.add(windshield);
+---
 
-    // Headlights
-    const headlightGeom = new THREE.BoxGeometry(0.6, 0.12, 0.2);
-    const headlightMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 2.0
-    });
-    const leftHeadlight = new THREE.Mesh(headlightGeom, headlightMat);
-    leftHeadlight.position.set(-0.8, 0.45, 2.4);
-    this.mesh.add(leftHeadlight);
-    const rightHeadlight = leftHeadlight.clone();
-    rightHeadlight.position.x = 0.8;
-    this.mesh.add(rightHeadlight);
+## 5. Aerodynamics
 
-    const frontSpot = new THREE.SpotLight(0x00ffff, 4, 30, Math.PI / 4, 0.5, 1);
-    frontSpot.position.set(0, 0.5, 2.5);
-    frontSpot.target.position.set(0, 0, 10);
-    this.mesh.add(frontSpot);
-    this.mesh.add(frontSpot.target);
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Drag force (Cd × A × ½ρv²) | ✅ | Proper aerodynamic drag formula with per-car Cd and frontal area |
+| Downforce (lift coefficient) | ✅ | `liftCoefficient` creates speed-dependent downforce |
+| Rolling resistance | ✅ | `rollingResistanceCoefficient` per car |
+| **Yaw-dependent aero** | ❌ | **Missing.** At high yaw angles (sideslip), drag increases dramatically and downforce distribution shifts. Real cars at 10°+ sideslip have 2-3× the drag |
+| **Pitch-dependent aero** | ❌ | Under braking (nose-down pitch), front downforce increases. Not modeled |
+| **Ground effect** | ❌ | No ride-height-dependent underbody venturi effect |
+| **Dirty air / slipstream** | ❌ | No drafting effect behind AI cars, no turbulent wake |
 
-    // Tail lights
-    const taillightGeom = new THREE.BoxGeometry(0.8, 0.1, 0.1);
-    const taillightMat = new THREE.MeshStandardMaterial({
-      color: 0xff0055,
-      emissive: 0xff0055,
-      emissiveIntensity: 1.5
-    });
-    const tailLight = new THREE.Mesh(taillightGeom, taillightMat);
-    tailLight.position.set(0, 0.5, -2.4);
-    this.mesh.add(tailLight);
+---
 
-    // Exhaust
-    const exhaustGeom = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
-    exhaustGeom.rotateX(Math.PI / 2);
-    const exhaustMat = new THREE.MeshStandardMaterial({
-      color: 0x222233,
-      metalness: 0.9,
-    });
-    const exhaust = new THREE.Mesh(exhaustGeom, exhaustMat);
-    exhaust.position.set(0, 0.35, -2.4);
-    this.mesh.add(exhaust);
+## 6. Weight Transfer
 
-    // Underglow
-    const underglow = new THREE.PointLight(new THREE.Color(this.color), 3, 6);
-    underglow.position.set(0, -0.2, 0);
-    this.mesh.add(underglow);
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Longitudinal weight transfer | ✅ | `(mass × accel × cgHeight) / wheelbase` — textbook formula |
+| Lateral weight transfer | ✅ | `(mass × lateralAccel × cgHeight) / trackWidth` |
+| Per-axle weight distribution | ✅ | `frontWeightDistribution` in database |
+| Transfer clamping (no negative load) | ✅ | Capped at 80% of static load |
+| **Per-wheel weight (4 corners)** | ❌ | Uses a **2-axle (bicycle) model**, not 4-wheel. Combined lateral + longitudinal diagonal load transfer is not computed. This means inside-front/outside-rear load differences during corner entry are missed |
+| **Sprung vs unsprung mass** | ❌ | No distinction between body mass and wheel/suspension mass |
 
-    if (this.carId === 'sport' || this.carId === 'super') {
-      const spoilerPillarsGeom = new THREE.BoxGeometry(0.1, 0.6, 0.2);
-      const spoilerPillarsMat = new THREE.MeshStandardMaterial({ color: 0x111122 });
-      const leftPillar = new THREE.Mesh(spoilerPillarsGeom, spoilerPillarsMat);
-      leftPillar.position.set(-0.8, 0.9, -2.1);
-      this.mesh.add(leftPillar);
-      const rightPillar = leftPillar.clone();
-      rightPillar.position.x = 0.8;
-      this.mesh.add(rightPillar);
+---
 
-      const wingGeom = new THREE.BoxGeometry(2.6, 0.08, 0.6);
-      const wingMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(this.color), roughness: 0.3 });
-      const wing = new THREE.Mesh(wingGeom, wingMat);
-      wing.position.set(0, 1.2, -2.1);
-      wing.rotation.x = 0.05;
-      this.mesh.add(wing);
-    }
+## 7. Suspension
 
-    // Wheels
-    const wheelGeom = new THREE.CylinderGeometry(0.48, 0.48, 0.44, 16);
-    wheelGeom.rotateZ(Math.PI / 2); 
-    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111115, roughness: 0.8 });
-    const rimGeom = new THREE.CylinderGeometry(0.28, 0.28, 0.46, 8);
-    rimGeom.rotateZ(Math.PI / 2);
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x003333, metalness: 0.9 });
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Visual body roll | ✅ | Roll based on steering × speed ratio |
+| Visual pitch (accel/brake) | ✅ | Longitudinal acceleration affects pitch |
+| Suspension compression visual | ✅ | `suspensionOffset` for vertical chassis movement |
+| **Spring/damper physics** | ❌ | **No actual spring rates, damper coefficients, or compression/rebound simulation.** All body motion is cosmetic lerp-based, not force-based |
+| **Anti-roll bars** | ❌ | No anti-roll bar stiffness affecting weight transfer distribution |
+| **Ride height changes** | ❌ | Suspension level upgrade "lowers CG" by a fixed offset, not through actual spring/damper geometry |
+| **Bump stops / travel limits** | ❌ | No suspension travel limits or progressive bump stops |
+| **Independent wheel height** | ❌ | All 4 wheels share the same ground height — no per-wheel terrain sampling |
 
-    const createWheelAssembly = (x: number, y: number, z: number, isFront: boolean) => {
-      const wGroup = new THREE.Group();
-      wGroup.position.set(x, y, z);
-      const tire = new THREE.Mesh(wheelGeom, wheelMat);
-      const rim = new THREE.Mesh(rimGeom, rimMat);
-      wGroup.add(tire);
-      wGroup.add(rim);
-      this.mesh.add(wGroup);
-      this.wheels.push(wGroup);
-      if (isFront) {
-        if (x < 0) this.leftFrontWheel = wGroup;
-        else this.rightFrontWheel = wGroup;
-      }
-    };
+---
 
-    createWheelAssembly(-1.25, 0.48, 1.6, true);  
-    createWheelAssembly(1.25, 0.48, 1.6, true);   
-    createWheelAssembly(-1.25, 0.48, -1.6, false); 
-    createWheelAssembly(1.25, 0.48, -1.6, false);  
-  }
+## 8. Braking System
 
-  public updateStats() {
-    // Establish base profiles
-    if (this.carId === 'starter') {
-      this.baseMass = 1200;
-      this.maxSpeed = 45;
-      this.accelerationRate = 0.35;
-      this.handlingRate = 0.045;
-      this.dragCoeff = 0.012;
-    } else if (this.carId === 'sport') {
-      this.baseMass = 1100;
-      this.maxSpeed = 65;
-      this.accelerationRate = 0.5;
-      this.handlingRate = 0.05;
-      this.dragCoeff = 0.010;
-    } else if (this.carId === 'super') {
-      this.baseMass = 1000;
-      this.maxSpeed = 85;
-      this.accelerationRate = 0.7;
-      this.handlingRate = 0.055;
-      this.dragCoeff = 0.008;
-    }
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Brake force with pressure curve | ✅ | `(1 - (1-input)^1.65)` progressive pedal feel |
+| Front/rear brake bias (60/40) | ✅ | Hardcoded 60% front / 40% rear |
+| ABS preventing lock-up | ✅ | Limits longitudinal force to 90% of grip when ABS on |
+| **ABS pulse cycling** | ❌ | Real ABS rapidly pulses brakes (10-15 Hz cycle) causing a characteristic pedal feedback and noise. Current ABS is just a force clamp |
+| **Brake fade / heat** | ❌ | **No brake temperature.** Sustained heavy braking should reduce brake effectiveness (brake fade). Critical for endurance racing |
+| **Adjustable brake bias** | ❌ | Fixed at 60/40 — real racing allows driver adjustment |
+| **Brake cooling** | ❌ | No brake duct effects or speed-dependent cooling |
 
-    // --- APPLY DYNAMIC PERFORMANCE CALCULATIONS FROM UPGRADES ---
+---
 
-    // [UPGRADE IMPACT]: Weight Reduction stage directly drops target mass (lighter = quicker)
-    this.mass = this.baseMass - (this.upgrades.weightReduction * 85); 
+## 9. Steering Model
 
-    // [UPGRADE IMPACT]: Suspension improves cornering responsive thresholds
-    this.handlingRate = (this.carId === 'starter' ? 0.045 : this.carId === 'sport' ? 0.05 : 0.055) + (this.upgrades.suspensionLevel * 0.006);
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Ackermann steering geometry | ✅ | Inner wheel steers more than outer — correct |
+| Speed-sensitive steering reduction | ✅ | Max steer angle reduces at high speed |
+| Counter-steer assist | ✅ | Dynamic assist that helps catch slides |
+| **Self-aligning torque (SAT)** | ❌ | **Missing.** Real tires generate a restoring torque through the pneumatic trail — this is what gives steering "feel" and auto-centering force |
+| **Steering rack ratio** | ❌ | No distinction between steering wheel angle and road wheel angle |
+| **Power steering model** | ❌ | No speed-dependent power assist simulation |
+| **Steering column compliance** | ❌ | No flex or play in the steering system |
 
-    // [UPGRADE IMPACT]: Brake Level upgrades absolute stopping capability
-    this.brakingRate = 0.8 + (this.upgrades.brake.level * 0.3);
+---
 
-    // [UPGRADE IMPACT]: Engine blueprinting/balancing & ECU expansion raises structural safety limits for RPM
-    this.maxRpm = 6500 + (this.upgrades.engine.ecuLevel * 250) + (this.upgrades.engine.engineBalancingLevel * 350);
+## 10. Differential
 
-    // [UPGRADE IMPACT]: Custom Gearbox ratio setups increase potential Top Speed bound caps
-    if (this.upgrades.driveTrain.gearboxLevel > 0) {
-      this.maxSpeed += this.upgrades.driveTrain.gearboxLevel * 6;
-    }
-  }
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Accel/decel/preload lock percentages | ✅ | `accelLock`, `decelLock`, `preload` per car |
+| AWD front/rear torque split | ✅ | `awdFrontBias` adjustable |
+| LSD effect on lateral grip | ✅ | Locked diff affects wheelspin grip penalty |
+| **Torque vectoring** | ❌ | No active torque vectoring (brake-based or clutch-based) |
+| **Viscous vs plate LSD** | ❌ | No distinction between mechanical LSD types (viscous has speed-dependent lock, plate has torque-dependent) |
+| **One-way / 1.5-way / 2-way** | ❌ | Current model is effectively a 2-way LSD for all cars |
 
-  public update(deltaTime: number, keys: { [key: string]: boolean }, isCountdown: boolean = false) {
-    if (isCountdown) {
-      this.mesh.position.copy(this.pos);
-      this.mesh.rotation.set(0, this.yaw, 0);
-      return;
-    }
+---
 
-    // Keyboard inputs
-    const throttle = keys['w'] || keys['arrowup'];
-    const reverse = keys['s'] || keys['arrowdown'];
-    const turnLeft = keys['a'] || keys['arrowleft'];
-    const turnRight = keys['d'] || keys['arrowright'];
-    const handbrake = keys[' ']; 
+## 11. Collision Physics
 
-    const speedRatio = Math.abs(this.speed) / this.maxSpeed;
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Wall reflection with restitution | ✅ | Velocity reflected off wall normal with 0.3 restitution |
+| Energy loss on impact | ✅ | 8% speed penalty on wall contact |
+| **Car-to-car collision** | ❌ | **No car-to-car collision at all.** Player and AI cars phase through each other |
+| **Damage model** | ❌ | No mechanical or visual damage (engine damage, broken suspension, bent steering, cosmetic dents) |
+| **Crumple zones / impact deformation** | ❌ | No deformation physics |
 
-    // 1. Drivetrain Calculation
-    if (this.speed >= 0) {
-      let wheelRPM = (this.speed / (2 * Math.PI * this.wheelRadius)) * 60;
-      let targetRPM = wheelRPM * this.gearRatios[this.currentGear] * this.finalDrive;
-      this.rpm = Math.max(1000, Math.min(targetRPM, this.maxRpm));
-      this.handleAutoTransmission();
-    } else {
-      this.rpm = 1000 + Math.abs(this.speed) * 110;
-      this.currentGear = 1;
-    }
+---
 
-    // 2. Acceleration Logic
-    if (throttle) {
-      let currentTorque = this.getTorque(this.rpm);
-      
-      // [UPGRADE IMPACT]: Clutch and Propeller shaft level upgrades optimize efficiency (less mechanical friction loss)
-      let gearEfficiency = 0.83 + (this.upgrades.driveTrain.clutchLevel * 0.04) + (this.upgrades.driveTrain.propellerShaftLevel * 0.02);
-      if (gearEfficiency > 0.98) gearEfficiency = 0.98;
+## 12. Tire Compounds & Wear
 
-      let forceFactor = (currentTorque * this.gearRatios[this.currentGear] * this.finalDrive * gearEfficiency) / this.wheelRadius;
-      
-      // Acceleration (Force / Mass) equation scaled with base rates
-      let massScalingAcceleration = (forceFactor / this.mass) * (this.accelerationRate * 2.5);
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| 6 compound types with grip/wear trade-offs | ✅ | Economy through Super Soft |
+| Wear cliff (performance drops after ~30%) | ✅ | Smooth-stepped penalty curve |
+| Speed/slip/brake-dependent wear | ✅ | Multi-factor wear accumulation |
+| **Flat spots from lock-ups** | ❌ | No localized tire damage from brake lockup |
+| **Graining / blistering** | ❌ | No compound-specific degradation modes |
+| **Grip multiplier values unrealistic** | ⚠️ | Economy tires have 1.5× base grip, Super Soft at 2.44×. Real tire compounds differ by only ~15-25% grip, not 60%+ |
 
-      // [UPGRADE IMPACT]: Body Control Module (TCS) checks low speed slip. Caps chaotic tire spin out at low speeds
-      if (this.upgrades.bodyControlModuleLevel > 0 && this.speed < 12) {
-        let tcsFactor = 1.0 - (0.15 * this.upgrades.bodyControlModuleLevel);
-        massScalingAcceleration *= tcsFactor; 
-      }
+---
 
-      this.speed += massScalingAcceleration;
-      if (this.speed > this.maxSpeed) this.speed = this.maxSpeed;
-    } else if (reverse) {
-      this.speed -= this.accelerationRate * 0.8;
-      if (this.speed < -this.maxSpeed * 0.3) this.speed = -this.maxSpeed * 0.3;
-    } else {
-      // Aerodynamic Drag + Friction
-      let airDrag = this.dragCoeff * this.speed * Math.abs(this.speed);
-      let rollingResistance = 0.1 * Math.sign(this.speed);
+## 13. Surface & Environment Physics
 
-      if (this.speed > 0) {
-        this.speed -= (airDrag + rollingResistance);
-        if (this.speed < 0) this.speed = 0;
-      } else if (this.speed < 0) {
-        this.speed += (Math.abs(airDrag) + Math.abs(rollingResistance));
-        if (this.speed > 0) this.speed = 0;
-      }
-    }
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Grass grip reduction | ✅ | Progressive instability factor |
+| Grass speed limit (~60 km/h) | ✅ | Heavy drag on grass |
+| Grass lateral slide | ✅ | Oscillating lateral impulse |
+| **Wet/rain physics** | ❌ | No rain, no aquaplaning, no puddles, no spray |
+| **Track rubbering in** | ❌ | No racing line grip evolution over laps |
+| **Marbles / dirty surface off-line** | ❌ | No tire debris accumulation reducing grip |
+| **Kerb / rumble strip physics** | ❌ | No special kerb behavior (bouncing, destabilizing) |
+| **Elevation change physics** | ⚠️ | Ground height is sampled but no true 3D track — gradient doesn't affect acceleration/braking force calculation |
 
-    // 3. Braking Logic
-    if (reverse && this.speed > 0) {
-      this.speed -= this.brakingRate;
-      if (this.speed < 0) this.speed = 0;
-    }
-    if (throttle && this.speed < 0) {
-      this.speed += this.brakingRate;
-      if (this.speed > 0) this.speed = 0;
-    }
+---
 
-    // 4. Drifting & Stability Systems
-    const turnInput = (turnLeft ? 1 : 0) - (turnRight ? 1 : 0);
-    
-    if (this.isGrounded && Math.abs(this.speed) > 10 && (handbrake || (Math.abs(turnInput) > 0 && speedRatio > 0.4))) {
-      this.isDrifting = true;
-      this.driftAngle = THREE.MathUtils.lerp(this.driftAngle, -turnInput * 0.42, 0.1);
-    } else {
-      this.isDrifting = false;
-      this.driftAngle = THREE.MathUtils.lerp(this.driftAngle, 0, 0.15);
-    }
+## 14. Gravity & Airborne Physics
 
-    // [UPGRADE IMPACT]: Electronic Stability Control (ESC) dampens runaway oversteer if drift wasn't triggered by handbrake
-    if (this.upgrades.brake.hasESC && this.isDrifting && !handbrake) {
-      this.driftAngle = THREE.MathUtils.lerp(this.driftAngle, 0, 0.25 * deltaTime);
-    }
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Basic gravity when airborne | ✅ | 18 m/s² downward (slightly stronger than real 9.81 — feels snappier) |
+| Pitch while airborne | ✅ | Forward/backward tilt based on vertical velocity |
+| **Yaw/roll control while airborne** | ❌ | No angular momentum conservation — car just freezes yaw mid-air |
+| **Drag while airborne** | ❌ | No reduced grip or aero effects while wheels are off ground |
 
-    // Handle Steering wheel mesh rotation
-    if (this.leftFrontWheel && this.rightFrontWheel) {
-      const steeringAngle = turnInput * 0.5; 
-      this.leftFrontWheel.rotation.y = steeringAngle;
-      this.rightFrontWheel.rotation.y = steeringAngle;
-    }
+---
 
-    // Wheel rotation speed
-    const wheelRotSpeed = (this.speed / 0.48) * deltaTime;
-    this.wheels.forEach(wheel => {
-      wheel.children[0].rotation.x += wheelRotSpeed;
-    });
+## 15. Banking / Banked Curves
 
-    // Turning vehicle heading yaw
-    if (Math.abs(this.speed) > 1) {
-      // Speed Sensitivity Understeer calculation
-      let speedSensitivityFactor = 1.0 / (1.0 + (Math.abs(this.speed) * 0.035));
-      
-      // [UPGRADE IMPACT]: ABS Check under braking. Locks front wheels if false, ruining steering alignment
-      let brakingSteerModifier = 1.0;
-      if (reverse && this.speed > 0) {
-        brakingSteerModifier = this.upgrades.brake.hasABS ? 0.85 : 0.25; 
-      }
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Banking angle affects gravity vector | ✅ | `effectiveGravity` modified by `cos(bankAngle)` |
+| Lateral gravity force on banked surfaces | ✅ | `sin(bankAngle)` adds lateral force component |
+| **Banking affects visual roll** | ❌ | Car visual doesn't tilt to match banked surface |
 
-      const steeringFactor = turnInput * this.handlingRate * (this.speed > 0 ? 1 : -0.7) * speedSensitivityFactor * brakingSteerModifier;
-      this.yaw += steeringFactor;
-    }
+---
 
-    // Compute velocity vectors incorporating drift sliding
-    const headingVector = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw + this.driftAngle);
-    
-    // Update X and Z position
-    this.pos.x += headingVector.x * this.speed * deltaTime;
-    this.pos.z += headingVector.z * this.speed * deltaTime;
+## 16. Car Database / Vehicle Specs
 
-    // Gravity effect if flying
-    if (!this.isGrounded) {
-      this.yVelocity -= 18 * deltaTime; 
-      this.pos.y += this.yVelocity * deltaTime;
-      this.pitch = THREE.MathUtils.lerp(this.pitch, this.yVelocity > 0 ? 0.15 : -0.2, 0.08);
+| Aspect | Status | Detail |
+|--------|--------|--------|
+| Real manufacturer names (Honda, Ford, Ferrari) | ✅ | In database |
+| Per-car character tuning (weight dist, grip, inertia) | ✅ | GT4-style `character` object |
+| **Real-world verified specs** | ⚠️ | Ford GT 2006 has detailed specs (torque curve, gear ratios, mass, wheelbase). Most fictional cars use tier-based defaults with no real-world validation |
+| **Power/weight ratio accuracy** | ⚠️ | Some cars have unrealistic torque-to-mass ratios. Entry tier cars with 170 Nm and 1200 kg = very slow (real 100hp hatchback has ~180 Nm and does 0-100 in ~10s) |
+| **Drag coefficient values** | ⚠️ | `dragCoeff` field (e.g. `0.000012`) in database is NOT the same as `dragCoefficient` (e.g. `0.32`). The old `dragCoeff` field appears to be a legacy arcade drag value, unused by the new physics. Confusing |
 
-      if (this.pos.y <= 0) {
-        this.pos.y = 0;
-        this.yVelocity = 0;
-        this.isGrounded = true;
-        this.pitch = 0;
-      }
-    } else {
-      this.pitch = THREE.MathUtils.lerp(this.pitch, 0, 0.2);
-    }
+---
 
-    // [UPGRADE IMPACT]: High level stiffer suspensions reduce aesthetic body lean roll angles
-    let rollDampening = 0.12 - (this.upgrades.suspensionLevel * 0.02);
-    const targetRoll = -turnInput * Math.max(0.04, rollDampening) * speedRatio;
-    this.roll = THREE.MathUtils.lerp(this.roll, targetRoll, 0.15);
+## Summary: Priority Gaps for Realism
 
-    // Apply rotation transforms to vehicle container
-    this.mesh.position.copy(this.pos);
-    this.mesh.rotation.set(this.pitch, this.yaw, this.roll);
-  }
+### 🔴 High Impact (would most noticeably improve realism)
 
-  public reset(pos: THREE.Vector3, yaw: number) {
-    this.pos.copy(pos);
-    this.yaw = yaw;
-    this.pitch = 0;
-    this.roll = 0;
-    this.speed = 0;
-    this.yVelocity = 0;
-    this.isGrounded = true;
-    this.isDrifting = false;
-    this.driftAngle = 0;
-    this.currentGear = 1;
-    this.rpm = 1000;
-    
-    this.mesh.position.copy(this.pos);
-    this.mesh.rotation.set(0, this.yaw, 0);
-  }
-}
+1. **Tire temperature model** — Biggest single omission. Cold tires out of pit, tire warm-up laps, overheating during sustained cornering
+2. **Car-to-car collision** — Essential for racing, currently phantom cars
+3. **Proper suspension physics** — Spring/damper/anti-roll bars determine weight transfer timing and feel
+4. **Full 4-wheel model** (instead of bicycle) — Diagonal weight transfer matters for cornering realism
+5. **Longitudinal tire force through slip ratio** — Currently bypassed; drive force should go through tire model
+6. **Rain/weather physics** — Transforms driving dynamics entirely
+
+### 🟡 Medium Impact
+
+7. **Friction ellipse** instead of circle — Tires grip more longitudinally than laterally
+8. **Brake fade/temperature** — Long races need this
+9. **Self-aligning torque** — Critical for steering feel
+10. **Manual transmission** — Core driving experience for enthusiasts
+11. **Rev-matching on downshifts**
+12. **Tire relaxation length** — Smoother, more progressive force build-up
+13. **Damage model** — Consequences for bad driving
+
+### 🟢 Lower Priority (nice-to-have for full sim)
+
+14. Tire pressure model
+15. Camber effects
+16. Fuel consumption & weight
+17. Yaw-dependent aero
+18. Slipstream/drafting
+19. Ground effect
+20. ABS pulse cycling
+21. Track rubbering in
+
+---
+
+> [!NOTE]
+> The current physics is already a strong **simcade** implementation — the bicycle model, Pacejka-lite tire forces, weight transfer, and torque-based drivetrain put it well ahead of pure arcade racers. The gaps listed above represent what separates it from a true **simulation** (Gran Turismo / Assetto Corsa level).
