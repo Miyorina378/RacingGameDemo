@@ -43,7 +43,22 @@ export interface EngineCallbacks {
   onDriftCompleted: (earnedCredits: number) => void;
   onLicenseProgressChange?: (progress: LicenseProgress, hasLicense: boolean) => void;
   onPlacementChange?: (placement: number, totalParticipants: number) => void;
-  onVehicleStatsChange?: (speed: number, rpm: number, gear: number, isShifting: boolean, throttle: number, brake: number) => void;
+  onVehicleStatsChange?: (
+    speed: number,
+    rpm: number,
+    gear: number,
+    isShifting: boolean,
+    throttle: number,
+    brake: number,
+    fuelLiters: number,
+    fuelCapacityLiters: number,
+    fuelConsumptionLitersPerHour: number,
+    isEngineStalled: boolean,
+    tireWear?: number,
+    tireTemperature?: number,
+    tireCompound?: string,
+    tireWearEnabled?: boolean
+  ) => void;
   onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
 }
 
@@ -213,6 +228,8 @@ export class GameEngine {
     this.resetGameplayTimer();
     this.activeMode = modeName;
     this.currentModeInstance = modeInstance;
+    this.vehicle.refuel(1);
+    this.vehicle.tireWearEnabled = modeName === 'race';
     this.currentModeInstance.init();
 
     // Snap camera instantly to chase position for driving modes
@@ -537,6 +554,10 @@ export class GameEngine {
       // 1. Delegate tick to active mode instance
       if (this.currentModeInstance) {
         this.currentModeInstance.update(deltaTime);
+        if (this.vehicle.fuelTowRequired) {
+          this.currentModeInstance.handleFuelTow();
+          this.vehicle.fuelTowRequired = false;
+        }
       }
 
       // Update dirLight coordinates to follow the vehicle
@@ -583,7 +604,15 @@ export class GameEngine {
         this.vehicle.currentGear,
         this.vehicle.isShifting,
         this.vehicle.throttleInput,
-        this.vehicle.brakeInput
+        this.vehicle.brakeInput,
+        this.vehicle.fuelLiters,
+        this.vehicle.fuelCapacityLiters,
+        this.vehicle.fuelConsumptionLitersPerHour,
+        this.vehicle.isEngineStalled,
+        this.vehicle.tireState.wear,
+        this.vehicle.tireState.temperature,
+        this.vehicle.tireState.compound,
+        this.vehicle.tireWearEnabled
       );
     }
 

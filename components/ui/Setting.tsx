@@ -696,7 +696,7 @@ export default function Setting({
                       <span className={`font-mono text-[9px] mb-0.5 ${hudConfig.showSpeedometer ? 'text-white' : 'text-rose-500'}`} style={{ display: hudConfig.showSpeedometer ? 'block' : 'none' }}>
                         {hudConfig.speedUnit === 'mph' ? '150 MPH' : '240 KM/H'}
                       </span>
-                      SPEEDOMETER
+                      DASH & TELEMETRY
                     </button>
                   </div>
 
@@ -766,7 +766,7 @@ export default function Setting({
                   { key: 'showLapTimer', label: 'Lap Timer', desc: 'Live time limit or current lap timer' },
                   { key: 'showPosition', label: 'Race Position', desc: 'Placement rankings tracker vs AI' },
                   { key: 'showStats', label: 'Time Stats Panel', desc: 'Top-right best lap and total race timers' },
-                  { key: 'showSpeedometer', label: 'Gear & Speed Box', desc: 'Speed, RPM, throttle and brake inputs' },
+                  { key: 'showSpeedometer', label: 'Gear, Speed & Telemetry', desc: 'Speed, RPM, inputs, tire wear, and fuel levels' },
                 ].map((item) => {
                   const k = item.key as keyof HUDConfig;
                   return (

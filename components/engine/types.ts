@@ -11,7 +11,22 @@ export interface EngineCallbacks {
   onGameStatus: (status: GameStatus, message?: string, results?: unknown[]) => void;
   onDriftCompleted: (earnedCredits: number) => void;
   onPlacementChange?: (placement: number, totalParticipants: number) => void;
-  onVehicleStatsChange?: (speed: number, rpm: number, gear: number, isShifting: boolean, throttle: number, brake: number) => void;
+  onVehicleStatsChange?: (
+    speed: number,
+    rpm: number,
+    gear: number,
+    isShifting: boolean,
+    throttle: number,
+    brake: number,
+    fuelLiters: number,
+    fuelCapacityLiters: number,
+    fuelConsumptionLitersPerHour: number,
+    isEngineStalled: boolean,
+    tireWear?: number,
+    tireTemperature?: number,
+    tireCompound?: string,
+    tireWearEnabled?: boolean
+  ) => void;
   onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
   onCarLoading?: (loading: boolean, progress: number) => void;
 }

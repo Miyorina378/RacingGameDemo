@@ -175,7 +175,7 @@ export default function HUDCustomizer({
                   }`}
                 >
                   <span className="font-mono text-[9px] mb-0.5 text-cyan-400" style={{ display: hudConfig.showSpeedometer ? 'block' : 'none' }}>240 KM/H</span>
-                  SPEEDOMETER
+                  DASH & TELEMETRY
                 </button>
               </div>
 
@@ -216,7 +216,7 @@ export default function HUDCustomizer({
               { key: 'showLapTimer', label: 'Lap Timer', desc: 'Live time limit or current lap timer' },
               { key: 'showPosition', label: 'Race Position', desc: 'Placement rankings tracker vs AI' },
               { key: 'showStats', label: 'Time Stats Panel', desc: 'Top-right best lap and total race timers' },
-              { key: 'showSpeedometer', label: 'Gear & Speed Box', desc: 'Speed, RPM, throttle and brake inputs' },
+              { key: 'showSpeedometer', label: 'Gear, Speed & Telemetry', desc: 'Speed, RPM, inputs, tire wear, and fuel levels' },
             ].map((item) => {
               const k = item.key as keyof HUDConfig;
               return (

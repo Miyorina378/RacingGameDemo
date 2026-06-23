@@ -9,6 +9,7 @@ export interface GameMode {
   update(deltaTime: number): void;
   cleanup(): void;
   reset(): void;
+  handleFuelTow(): void;
 }
 
 export abstract class BaseMode implements GameMode {
@@ -75,6 +76,14 @@ export abstract class BaseMode implements GameMode {
   public abstract cleanup(): void;
   public abstract reset(): void;
 
+  public handleFuelTow(): void {
+    this.vehicle.refuel(1);
+    this.engine.resetCar();
+    this.engine.callbacks.onGameStatus(
+      'playing',
+      'OUT OF FUEL — TOWED AND REFUELED.'
+    );
+  }
 
 
   protected createGridFloor() {

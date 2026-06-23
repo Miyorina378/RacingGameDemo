@@ -1227,11 +1227,11 @@ const UPGRADES_CONFIG = [
       },
       {
         id: 'tireLevel',
-        name: 'Racing Tires',
-        description: 'Upgrades tire compounds from economy to racing super soft for extreme grip.',
+        name: 'Sport & Racing Tires',
+        description: 'Progresses from stable sport tires to high-grip racing and qualifying compounds.',
         type: 'level',
-        maxLevel: 5,
-        costs: [400, 800, 1200, 1800, 2600],
+        maxLevel: 8,
+        costs: [300, 550, 850, 1200, 1650, 2200, 2900, 3800],
         path: ['tireLevel']
       }
     ]
@@ -1305,12 +1305,18 @@ const getUpgradedStats = (car: CarConfig, upgrades: any) => {
     (weightLvl * 0.3);
 
   const tireCompound = upgrades.tireCompound || 'economy';
-  let tireHandlingBoost = 0;
-  if (tireCompound === 'super_hard') tireHandlingBoost = 0.35;
-  else if (tireCompound === 'hard') tireHandlingBoost = 0.7;
-  else if (tireCompound === 'normal') tireHandlingBoost = 1.1;
-  else if (tireCompound === 'soft') tireHandlingBoost = 1.5;
-  else if (tireCompound === 'super_soft') tireHandlingBoost = 2.0;
+  const tireHandlingBoosts: Record<string, number> = {
+    economy: 0,
+    sport_hard: 0.3,
+    sport_medium: 0.55,
+    sport_soft: 0.85,
+    super_hard: 1.25,
+    hard: 1.55,
+    normal: 1.9,
+    soft: 2.2,
+    super_soft: 2.5
+  };
+  const tireHandlingBoost = tireHandlingBoosts[tireCompound] ?? 0;
 
   const upgradedHandling = car.handling +
     (suspensionLvl * 0.5) +
@@ -3286,7 +3292,7 @@ export default function Garage({
                                 if (!isUnlocked) return null;
                                 const isEquipped = equippedLvl === lvl;
                                 const btnLabel = item.id === 'tireLevel'
-                                  ? ['S-Hard', 'Hard', 'Normal', 'Soft', 'S-Soft'][i]
+                                  ? ['Sp-H', 'Sp-M', 'Sp-S', 'R-H', 'R-M', 'R-S', 'R-SS', 'Quali'][i]
                                   : `Stg ${lvl}`;
 
                                 return (

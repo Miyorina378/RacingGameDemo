@@ -3,6 +3,14 @@ export interface TorquePoint {
   torque: number;
 }
 
+export type TransmissionType =
+  | 'manual'
+  | 'automatic'
+  | 'dual_clutch'
+  | 'single_speed';
+
+export type PowerSteeringType = 'none' | 'hydraulic' | 'electric';
+
 export interface DifferentialConfig {
   accelLock: number;      // 0.0 = open diff, 1.0 = fully locked under throttle
   decelLock: number;      // locking under braking / lift
@@ -30,6 +38,17 @@ export interface CarConfig {
   dragCoeff: number;
   driveType: 'FWD' | 'RWD' | 'AWD';
   powertrainType?: 'combustion' | 'electric';
+  engineDisplacementLiters?: number;
+  throttleResponse?: number;
+  variableValveTiming?: boolean;
+  variableValveEngageRpm?: number;
+  variableValveTorqueGain?: number;
+  engineCoolingEfficiency?: number;
+  fuelCapacityLiters?: number;
+  fuelTankLongitudinalPosition?: number;
+  fuelTankHeight?: number;
+  fuelDensityKgPerLiter?: number;
+  brakeSpecificFuelConsumption?: number;
   speedLimiterMultiplier?: number;
   brakingRate?: number;
   wheelbase?: number;
@@ -46,19 +65,29 @@ export interface CarConfig {
   tireGripRear?: number;
   corneringStiffnessFront?: number;
   corneringStiffnessRear?: number;
+  frontCamberDegrees?: number;
+  rearCamberDegrees?: number;
+  tireColdPressurePsi?: number;
   torqueCurve?: TorquePoint[];
   brakeForce?: number;
   maxSteeringAngle?: number;
   rearSteeringRatio?: number;
   rearSteeringMaxAngle?: number;
   steeringResponse?: number;
+  steeringRackRatio?: number;
+  powerSteeringType?: PowerSteeringType;
+  pneumaticTrail?: number;
+  casterTrail?: number;
   rollingResistanceCoefficient?: number;
   differential?: DifferentialConfig;
   shiftUpMph?: number[];   // index 0 = gear 1 -> 2, index 1 = 2 -> 3, etc.
 
   // Optional transmission overrides
+  transmissionType?: TransmissionType;
   gearRatios?: number[];
   finalDrive?: number;
+  torqueConverterStallRpm?: number;
+  torqueConverterStallRatio?: number;
   wheelRadius?: number;
   maxRpm?: number;
   baseMass?: number;
@@ -336,6 +365,10 @@ export const CARS_DATABASE: CarConfig[] = [
     dragCoeff: 0.00001,
     driveType: 'AWD',
     powertrainType: 'electric',
+    fuelCapacityLiters: 0,
+    throttleResponse: 14,
+    engineCoolingEfficiency: 1.15,
+    transmissionType: 'single_speed',
     speedLimiterMultiplier: 1.01,
     maxRpm: 10500,
     baseMass: 3009,
@@ -355,6 +388,10 @@ export const CARS_DATABASE: CarConfig[] = [
     rearSteeringRatio: 0.35,
     rearSteeringMaxAngle: 0.12,
     steeringResponse: 0.72,
+    steeringRackRatio: 14.0,
+    powerSteeringType: 'electric',
+    pneumaticTrail: 0.075,
+    casterTrail: 0.045,
     rollingResistanceCoefficient: 0.0155,
     differential: {
       accelLock: 0.36,
@@ -602,6 +639,21 @@ export const CARS_DATABASE: CarConfig[] = [
     handlingRate: 0.055,
     dragCoeff: 0.000007,
     driveType: 'RWD',
+    transmissionType: 'manual',
+    engineDisplacementLiters: 2.0,
+    throttleResponse: 11.5,
+    variableValveTiming: true,
+    variableValveEngageRpm: 6000,
+    variableValveTorqueGain: 0.12,
+    engineCoolingEfficiency: 1.0,
+    fuelCapacityLiters: 50,
+    fuelTankLongitudinalPosition: -0.22,
+    fuelTankHeight: 0.31,
+    brakeSpecificFuelConsumption: 272,
+    steeringRackRatio: 13.8,
+    powerSteeringType: 'hydraulic',
+    pneumaticTrail: 0.062,
+    casterTrail: 0.038,
     hasSpoiler: false,
     boosterColor: 0xffaa00,
     maxRpm: 9000,
@@ -628,6 +680,14 @@ export const CARS_DATABASE: CarConfig[] = [
     handlingRate: 0.057,
     dragCoeff: 0.0000055,
     driveType: 'RWD',
+    transmissionType: 'manual',
+    engineDisplacementLiters: 5.4,
+    throttleResponse: 7.5,
+    engineCoolingEfficiency: 1.12,
+    fuelCapacityLiters: 66,
+    fuelTankLongitudinalPosition: 0.03,
+    fuelTankHeight: 0.29,
+    brakeSpecificFuelConsumption: 305,
     hasSpoiler: false,
     boosterColor: 0xffaa00,
     maxRpm: 6500,
@@ -648,6 +708,10 @@ export const CARS_DATABASE: CarConfig[] = [
     corneringStiffnessRear: 7.25,
     brakeForce: 18000,
     maxSteeringAngle: 0.52,
+    steeringRackRatio: 15.7,
+    powerSteeringType: 'hydraulic',
+    pneumaticTrail: 0.068,
+    casterTrail: 0.041,
     rollingResistanceCoefficient: 0.013,
     differential: {
       accelLock: 0.42,

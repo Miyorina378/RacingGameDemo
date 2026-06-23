@@ -1,10 +1,20 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { Coins, Timer, Trophy } from 'lucide-react';
+import { Coins, Fuel, Timer, Trophy } from 'lucide-react';
 import * as THREE from 'three';
 import { TRACKS_DATABASE, TrackNode } from '../config/TrackDatabase';
 import { HUDConfig } from '../option';
+import { TIRE_COMPOUNDS, TireCompoundType } from '../objects/TireCompound';
+
+const getTempColorClass = (temp: number, compoundId: string) => {
+  const config = TIRE_COMPOUNDS[compoundId as TireCompoundType] || TIRE_COMPOUNDS.normal;
+  const lower = config.optimalTemperature - config.temperatureWindow;
+  const upper = config.optimalTemperature + config.temperatureWindow;
+  if (temp < lower) return 'text-cyan-400';
+  if (temp > upper) return 'text-rose-500 animate-pulse font-bold';
+  return 'text-emerald-400 font-bold';
+};
 
 interface HUDProps {
   activeMode: string;
@@ -31,9 +41,17 @@ interface HUDProps {
   gear: number | string;
   rpm: number;
   isShifting: boolean;
+  fuelLiters: number;
+  fuelCapacityLiters: number;
+  fuelConsumptionLitersPerHour: number;
+  isEngineStalled: boolean;
   cameraViewMode: string;
   showMirrorInTPS: boolean;
   engineRef: React.RefObject<any>;
+  tireWear: number;
+  tireTemperature: number;
+  tireCompound: string;
+  tireWearEnabled: boolean;
 }
 
 const getTrackLength = (path: THREE.Vector3[]) => {
@@ -100,9 +118,17 @@ export default function HUD({
   gear,
   rpm,
   isShifting,
+  fuelLiters,
+  fuelCapacityLiters,
+  fuelConsumptionLitersPerHour,
+  isEngineStalled,
   cameraViewMode,
   showMirrorInTPS,
   engineRef,
+  tireWear,
+  tireTemperature,
+  tireCompound,
+  tireWearEnabled,
 }: HUDProps) {
 
   // Canvas minimap rendering loop
@@ -322,6 +348,22 @@ export default function HUD({
 
         {/* Right Side: Placement & Time Stats */}
         <div className="flex flex-col items-end gap-2.5 pointer-events-auto">
+          {fuelCapacityLiters > 0 && (
+            <div className={`bg-slate-950/80 backdrop-blur-md border px-3 py-2 rounded-xl flex items-center gap-2.5 shadow-[0_0_15px_rgba(0,0,0,0.5)] ${isEngineStalled || fuelLiters / fuelCapacityLiters < 0.08 ? 'border-rose-600 text-rose-400 animate-pulse' : 'border-slate-800 text-amber-300'}`}>
+              <Fuel className="w-4 h-4 shrink-0" />
+              <div className="flex flex-col min-w-[92px]">
+                <span className="text-[8px] font-extrabold uppercase tracking-widest leading-none">
+                  {isEngineStalled ? 'Fuel Empty' : 'Fuel'}
+                </span>
+                <span className="text-sm font-mono font-black leading-tight">
+                  {fuelLiters.toFixed(1)} / {fuelCapacityLiters.toFixed(0)} L
+                </span>
+                <span className="text-[8px] text-slate-400 font-mono leading-none">
+                  {fuelConsumptionLitersPerHour.toFixed(1)} L/h
+                </span>
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-3">
             {activeMode === 'race' && hudConfig.showPosition && (
               <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-2.5 shadow-[0_0_15px_rgba(0,0,0,0.5)] select-none overflow-hidden relative">
@@ -440,67 +482,161 @@ export default function HUD({
 
         {/* Bottom HUD: Speed, Timer, Checkpoint Progress */}
         <div className="w-full flex items-end justify-between">
-          {/* Speedometer & Transmission HUD */}
-          {hudConfig.showSpeedometer && (
-            <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-5 rounded-2xl shadow-xl flex flex-col items-center min-w-[180px] pointer-events-auto">
-              <div className="flex items-center gap-4 mt-1">
-                {/* GT4 Style Throttle & Brake Input Indicators */}
-                <div className="flex gap-1.5 h-10 items-stretch select-none">
-                  {/* Brake indicator */}
-                  <div className="w-1.5 bg-zinc-900 border border-zinc-850 rounded-sm relative overflow-hidden" title="Brake Input">
-                    <div
-                      className="absolute top-0 inset-x-0 bg-rose-600 transition-all duration-75"
-                      style={{ height: `${brakeInput * 100}%` }}
-                    />
+          <div className="flex items-end gap-4 pointer-events-auto">
+            {/* Speedometer & Transmission HUD */}
+            {hudConfig.showSpeedometer && (
+              <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-5 rounded-2xl shadow-xl flex flex-col items-center min-w-[180px]">
+                <div className="flex items-center gap-4 mt-1">
+                  {/* GT4 Style Throttle & Brake Input Indicators */}
+                  <div className="flex gap-1.5 h-10 items-stretch select-none">
+                    {/* Brake indicator */}
+                    <div className="w-1.5 bg-zinc-900 border border-zinc-850 rounded-sm relative overflow-hidden" title="Brake Input">
+                      <div
+                        className="absolute top-0 inset-x-0 bg-rose-600 transition-all duration-75"
+                        style={{ height: `${brakeInput * 100}%` }}
+                      />
+                    </div>
+                    {/* Throttle indicator */}
+                    <div className="w-1.5 bg-zinc-900 border border-zinc-850 rounded-sm relative overflow-hidden" title="Throttle Input">
+                      <div
+                        className="absolute bottom-0 inset-x-0 bg-emerald-500 transition-all duration-75"
+                        style={{ height: `${throttleInput * 100}%` }}
+                      />
+                    </div>
                   </div>
-                  {/* Throttle indicator */}
-                  <div className="w-1.5 bg-zinc-900 border border-zinc-850 rounded-sm relative overflow-hidden" title="Throttle Input">
-                    <div
-                      className="absolute bottom-0 inset-x-0 bg-emerald-500 transition-all duration-75"
-                      style={{ height: `${throttleInput * 100}%` }}
-                    />
+
+                  {/* Divider */}
+                  <div className="h-10 w-px bg-zinc-800" />
+
+                  <div className="flex flex-col items-center min-w-[36px]">
+                    <span className="text-zinc-500 text-[9px] font-bold uppercase tracking-wider">Gear</span>
+                    <span className={`text-3xl font-black font-mono mt-0.5 transition-all duration-150 ${isShifting ? 'text-zinc-700 scale-95' : 'text-zinc-100'}`}>
+                      {speed === 0 ? 'N' : (speed < 0 ? 'R' : gear)}
+                    </span>
+                  </div>
+                  <div className="h-10 w-px bg-zinc-800" />
+                  <div className="flex flex-col items-center">
+                    <span className="text-zinc-500 text-[9px] font-bold uppercase tracking-wider">Speed</span>
+                    <div className="flex items-baseline gap-0.5 mt-0.5">
+                      <span className="text-4xl font-black font-mono tracking-tight text-white">
+                        {speed}
+                      </span>
+                      <span className="text-zinc-400 font-bold text-[10px]">
+                        {hudConfig.speedUnit === 'mph' ? 'MPH' : 'KM/H'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Divider */}
-                <div className="h-10 w-px bg-zinc-800" />
+                {/* Real RPM indicator bar */}
+                <div className="w-full flex justify-between items-center mt-3 px-1 text-[8px] text-zinc-500 font-mono">
+                  <span>1K RPM</span>
+                  <span className={rpm > 5500 ? 'text-rose-500 font-bold animate-pulse' : ''}>
+                    {rpm > 5500 ? 'LIMITER' : `${Math.round(rpm)}`}
+                  </span>
+                  <span className="text-red-500 font-bold">6.5K REDLINE</span>
+                </div>
+                <div className="w-full h-1.5 bg-zinc-900 rounded-full mt-1.5 overflow-hidden border border-zinc-800">
+                  <div
+                    className={`h-full transition-all duration-75 ${rpm > 5500 ? 'bg-red-600 animate-pulse' : 'bg-zinc-200'}`}
+                    style={{ width: `${Math.min(100, (rpm / 6500) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
-                <div className="flex flex-col items-center min-w-[36px]">
-                  <span className="text-zinc-500 text-[9px] font-bold uppercase tracking-wider">Gear</span>
-                  <span className={`text-3xl font-black font-mono mt-0.5 transition-all duration-150 ${isShifting ? 'text-zinc-700 scale-95' : 'text-zinc-100'}`}>
-                    {speed === 0 ? 'N' : (speed < 0 ? 'R' : gear)}
+            {/* Telemetry (Tires & Fuel) HUD */}
+            {hudConfig.showSpeedometer && (
+              <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-4 rounded-2xl shadow-xl flex flex-col gap-2 min-w-[220px] text-zinc-100 select-none">
+                {/* Title / Header */}
+                <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
+                  <span className="text-zinc-500 text-[8px] font-extrabold uppercase tracking-widest leading-none">
+                    VEHICLE SYSTEMS
+                  </span>
+                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider leading-none ${
+                    tireCompound === 'soft' || tireCompound === 'super_soft'
+                      ? 'bg-red-950/50 border border-red-800/40 text-red-400'
+                      : tireCompound === 'hard' || tireCompound === 'super_hard'
+                        ? 'bg-blue-950/50 border border-blue-800/40 text-blue-400'
+                        : tireCompound.startsWith('sport_')
+                          ? 'bg-emerald-950/50 border border-emerald-800/40 text-emerald-400'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400'
+                  }`}>
+                    {tireCompound ? tireCompound.replaceAll('_', ' ') : 'ECONOMY'}
                   </span>
                 </div>
-                <div className="h-10 w-px bg-zinc-800" />
-                <div className="flex flex-col items-center">
-                  <span className="text-zinc-500 text-[9px] font-bold uppercase tracking-wider">Speed</span>
-                  <div className="flex items-baseline gap-0.5 mt-0.5">
-                    <span className="text-4xl font-black font-mono tracking-tight text-white">
-                      {speed}
-                    </span>
-                    <span className="text-zinc-400 font-bold text-[10px]">
-                      {hudConfig.speedUnit === 'mph' ? 'MPH' : 'KM/H'}
-                    </span>
+
+                <div className="flex items-center gap-4 py-0.5">
+                  {/* Circular Fuel Gauge */}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="text-zinc-500 text-[8px] font-extrabold tracking-wider leading-none">FUEL</span>
+                    <div className="relative flex items-center justify-center w-14 h-14">
+                      {/* SVG Radial progress bar */}
+                      <svg className="w-full h-full transform -rotate-90">
+                        {/* Background track circle (black outline) */}
+                        <circle
+                          cx="28"
+                          cy="28"
+                          r="22"
+                          stroke="#000000"
+                          strokeWidth="3.5"
+                          fill="transparent"
+                        />
+                        {/* Foreground progress circle (yellow outline) */}
+                        <circle
+                          cx="28"
+                          cy="28"
+                          r="22"
+                          stroke="#eab308"
+                          strokeWidth="3.5"
+                          fill="transparent"
+                          strokeDasharray={2 * Math.PI * 22}
+                          strokeDashoffset={2 * Math.PI * 22 * (1 - Math.min(1, fuelCapacityLiters > 0 ? (fuelLiters / fuelCapacityLiters) : 0))}
+                          className="transition-all duration-350"
+                        />
+                      </svg>
+                      {/* Center React Icon & Info */}
+                      <div className="absolute flex flex-col items-center justify-center mt-[-1px]">
+                        <Fuel className={`w-5 h-5 ${fuelLiters / (fuelCapacityLiters || 1) < 0.15 ? 'text-rose-500 animate-pulse' : 'text-zinc-300'}`} />
+                        <span className={`text-[8px] font-mono font-black mt-0.5 leading-none ${fuelLiters / (fuelCapacityLiters || 1) < 0.15 ? 'text-rose-400 animate-pulse' : 'text-zinc-400'}`}>
+                          {fuelCapacityLiters > 0 ? `${Math.round((fuelLiters / fuelCapacityLiters) * 100)}%` : '0%'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="w-px h-12 bg-zinc-800 self-center" />
+
+                  {/* Tire Status */}
+                  <div className="flex-1 flex flex-col gap-1">
+                    <div className="flex justify-between items-center text-[10px] font-mono leading-none">
+                      <span className="text-zinc-400 font-bold">TIRE LIFE</span>
+                      <span className={`font-black ${tireWear > 0.7 ? 'text-rose-400 animate-pulse' : tireWear > 0.4 ? 'text-amber-400' : 'text-white'}`}>
+                        {Math.max(0, Math.round((1 - tireWear) * 100))}%
+                      </span>
+                    </div>
+                    {/* Tire Wear bar */}
+                    <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-850">
+                      <div
+                        className={`h-full transition-all duration-100 ${
+                          tireWear > 0.7 ? 'bg-rose-600 animate-pulse' : tireWear > 0.4 ? 'bg-amber-500' : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.max(0, Math.min(100, (1 - tireWear) * 100))}%` }}
+                      />
+                    </div>
+                    {/* Tire Temperature */}
+                    <div className="flex justify-between items-center text-[9px] font-mono mt-0.5">
+                      <span className="text-zinc-550 text-zinc-500">TEMP</span>
+                      <span className={getTempColorClass(tireTemperature, tireCompound)}>
+                        {Math.round(tireTemperature)}°C
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              {/* Real RPM indicator bar */}
-              <div className="w-full flex justify-between items-center mt-3 px-1 text-[8px] text-zinc-500 font-mono">
-                <span>1K RPM</span>
-                <span className={rpm > 5500 ? 'text-rose-500 font-bold animate-pulse' : ''}>
-                  {rpm > 5500 ? 'LIMITER' : `${Math.round(rpm)}`}
-                </span>
-                <span className="text-red-500 font-bold">6.5K REDLINE</span>
-              </div>
-              <div className="w-full h-1.5 bg-zinc-900 rounded-full mt-1.5 overflow-hidden border border-zinc-800">
-                <div
-                  className={`h-full transition-all duration-75 ${rpm > 5500 ? 'bg-red-600 animate-pulse' : 'bg-zinc-200'}`}
-                  style={{ width: `${Math.min(100, (rpm / 6500) * 100)}%` }}
-                />
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </>

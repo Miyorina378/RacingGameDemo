@@ -307,11 +307,11 @@ const UPGRADES_CONFIG = [
       },
       {
         id: 'tireLevel',
-        name: 'Racing Tires',
-        description: 'Upgrades tire compounds from economy to racing super soft for extreme grip.',
+        name: 'Sport & Racing Tires',
+        description: 'Progresses from stable sport tires to high-grip racing and qualifying compounds.',
         type: 'level',
-        maxLevel: 5,
-        costs: [400, 800, 1200, 1800, 2600],
+        maxLevel: 8,
+        costs: [300, 550, 850, 1200, 1650, 2200, 2900, 3800],
         path: ['tireLevel']
       }
     ]
@@ -376,12 +376,18 @@ const getUpgradedStats = (car: CarConfig, upgrades: any) => {
     (weightLvl * 0.3);
 
   const tireCompound = upgrades.tireCompound || 'economy';
-  let tireHandlingBoost = 0;
-  if (tireCompound === 'super_hard') tireHandlingBoost = 0.35;
-  else if (tireCompound === 'hard') tireHandlingBoost = 0.7;
-  else if (tireCompound === 'normal') tireHandlingBoost = 1.1;
-  else if (tireCompound === 'soft') tireHandlingBoost = 1.5;
-  else if (tireCompound === 'super_soft') tireHandlingBoost = 2.0;
+  const tireHandlingBoosts: Record<string, number> = {
+    economy: 0,
+    sport_hard: 0.3,
+    sport_medium: 0.55,
+    sport_soft: 0.85,
+    super_hard: 1.25,
+    hard: 1.55,
+    normal: 1.9,
+    soft: 2.2,
+    super_soft: 2.5
+  };
+  const tireHandlingBoost = tireHandlingBoosts[tireCompound] ?? 0;
 
   // Handling increases with suspension, weight reduction (lighter is more nimble), and stabilizer levels
   const upgradedHandling = car.handling +
@@ -512,6 +518,14 @@ export default function Game() {
   const [isShifting, setIsShifting] = useState<boolean>(false);
   const [throttleInput, setThrottleInput] = useState<number>(0);
   const [brakeInput, setBrakeInput] = useState<number>(0);
+  const [fuelLiters, setFuelLiters] = useState<number>(0);
+  const [fuelCapacityLiters, setFuelCapacityLiters] = useState<number>(0);
+  const [fuelConsumptionLitersPerHour, setFuelConsumptionLitersPerHour] = useState<number>(0);
+  const [isEngineStalled, setIsEngineStalled] = useState<boolean>(false);
+  const [tireWear, setTireWear] = useState<number>(0);
+  const [tireTemperature, setTireTemperature] = useState<number>(25);
+  const [tireCompound, setTireCompound] = useState<string>('economy');
+  const [tireWearEnabled, setTireWearEnabled] = useState<boolean>(false);
   const [cameraViewMode, setCameraViewMode] = useState<'chase' | 'driver'>('chase');
   const [showMirrorInTPS, setShowMirrorInTPS] = useState<boolean>(false);
   const [hudConfig, setHudConfig] = useState<HUDConfig>(DEFAULT_HUD_CONFIG);
@@ -900,7 +914,22 @@ export default function Game() {
           });
         }
       },
-      onVehicleStatsChange: (s: number, r: number, g: number, shifting: boolean, throttle?: number, brake?: number) => {
+      onVehicleStatsChange: (
+        s: number,
+        r: number,
+        g: number,
+        shifting: boolean,
+        throttle?: number,
+        brake?: number,
+        fuel?: number,
+        fuelCapacity?: number,
+        fuelRate?: number,
+        stalled?: boolean,
+        tireWear?: number,
+        tireTemp?: number,
+        tireComp?: string,
+        wearEnabled?: boolean
+      ) => {
         const displayS = hudConfig.speedUnit === 'mph' ? Math.round(s * 0.621371) : s;
         setSpeed(displayS);
         setRpm(r);
@@ -908,6 +937,14 @@ export default function Game() {
         setIsShifting(shifting);
         if (throttle !== undefined) setThrottleInput(throttle);
         if (brake !== undefined) setBrakeInput(brake);
+        if (fuel !== undefined) setFuelLiters(fuel);
+        if (fuelCapacity !== undefined) setFuelCapacityLiters(fuelCapacity);
+        if (fuelRate !== undefined) setFuelConsumptionLitersPerHour(fuelRate);
+        if (stalled !== undefined) setIsEngineStalled(stalled);
+        if (tireWear !== undefined) setTireWear(tireWear);
+        if (tireTemp !== undefined) setTireTemperature(tireTemp);
+        if (tireComp !== undefined) setTireCompound(tireComp);
+        if (wearEnabled !== undefined) setTireWearEnabled(wearEnabled);
         if (engineRef.current) {
           setCameraViewMode(engineRef.current.cameraViewMode);
         }
@@ -1121,7 +1158,17 @@ export default function Game() {
     target[lastKey] = targetLevel;
 
     if (item.id === 'tireLevel') {
-      const compounds = ['economy', 'super_hard', 'hard', 'normal', 'soft', 'super_soft'];
+      const compounds = [
+        'economy',
+        'sport_hard',
+        'sport_medium',
+        'sport_soft',
+        'super_hard',
+        'hard',
+        'normal',
+        'soft',
+        'super_soft'
+      ];
       currentCarUpgrades.tireCompound = compounds[targetLevel] || 'economy';
     }
 
@@ -1176,7 +1223,17 @@ export default function Game() {
       target[lastKey] = nextLvl;
 
       if (item.id === 'tireLevel') {
-        const compounds = ['economy', 'super_hard', 'hard', 'normal', 'soft', 'super_soft'];
+        const compounds = [
+          'economy',
+          'sport_hard',
+          'sport_medium',
+          'sport_soft',
+          'super_hard',
+          'hard',
+          'normal',
+          'soft',
+          'super_soft'
+        ];
         currentCarUpgrades.tireCompound = compounds[nextLvl] || 'economy';
       }
     } else {
@@ -2232,9 +2289,17 @@ export default function Game() {
         gear={speed === 0 ? 'N' : (speed < 0 ? 'R' : gear)}
         rpm={rpm}
         isShifting={isShifting}
+        fuelLiters={fuelLiters}
+        fuelCapacityLiters={fuelCapacityLiters}
+        fuelConsumptionLitersPerHour={fuelConsumptionLitersPerHour}
+        isEngineStalled={isEngineStalled}
         cameraViewMode={cameraViewMode}
         showMirrorInTPS={showMirrorInTPS}
         engineRef={engineRef}
+        tireWear={tireWear}
+        tireTemperature={tireTemperature}
+        tireCompound={tireCompound}
+        tireWearEnabled={tireWearEnabled}
       />
 
       {/* PAUSE MENU OVERLAY (When Esc is pressed in gameplay) */}

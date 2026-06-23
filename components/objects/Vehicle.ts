@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { CARS_DATABASE, type CarConfig, type DifferentialConfig, type TorquePoint } from '../config/CarDatabase';
+import {
+  CARS_DATABASE,
+  type CarConfig,
+  type DifferentialConfig,
+  type TorquePoint,
+  type TransmissionType
+} from '../config/CarDatabase';
 import { updateGrassInstability, applyGrassLateralSlide, applyGrassSpeedReduction } from './Grass';
 import { enforceFenceBoundary } from './Fence';
 import {
@@ -8,6 +14,7 @@ import {
   computeLongitudinalForce,
   computeSlipAngle,
   computeSlipRatio,
+  computeCamberEffects,
   relaxTireValue,
   combinedGripCircle
 } from './TireModel';
@@ -16,6 +23,8 @@ import {
   TireState,
   createFreshTireState,
   getEffectiveGrip,
+  getTirePressureEffects,
+  TIRE_COMPOUNDS,
   updateTireTemperature,
   accumulateWear
 } from './TireCompound';
@@ -28,6 +37,20 @@ import {
   MassDynamics,
   MassProperties
 } from './MassDynamics';
+import {
+  PowerSteeringType,
+  updateSteeringSystem
+} from './SteeringModel';
+import {
+  computeEngineFrictionTorque,
+  getEngineTemperatureTorqueMultiplier,
+  getVariableValveTimingMultiplier,
+  updateEngineTemperature
+} from './EngineModel';
+import {
+  computeFuelConsumption,
+  computeFuelDeliveryFactor
+} from './FuelModel';
 
 const AIR_DENSITY = 1.225;
 const GRAVITY = 9.81;
@@ -59,6 +82,9 @@ export class Vehicle {
   public isDrifting = false;
   public driftAngle = 0; // Derived: angle between heading and velocity vector
   public steerAngle = 0; // Smoothly interpolated steering angle for physics and visuals
+  public steeringWheelAngle = 0;
+  public steeringTorqueNm = 0;
+  public steeringAssistFraction = 0;
   public getGroundHeight?: (x: number, z: number) => number;
   public getTrackInfo?: (x: number, z: number) => {
     dist: number;
@@ -93,6 +119,14 @@ export class Vehicle {
 
   // --- REALISM ENHANCEMENT VARIABLES ---
   public turboSpoolLevel = 0;       // 0.0–1.0 spool-up fraction for turbo lag
+  public engineTemperature = 25;
+  public engineThrottlePosition = 0;
+  public fuelCapacityLiters = 50;
+  public fuelLiters = 50;
+  public fuelConsumptionLitersPerHour = 0;
+  public fuelDeliveryFactor = 1;
+  public isEngineStalled = false;
+  public fuelTowRequired = false;
   public suspensionOffset = 0;      // Vertical chassis displacement from suspension compression
   public prevSpeed = 0;             // Previous frame speed for computing longitudinal acceleration
   public longitudinalAccel = 0;     // Smoothed acceleration value (m/s²) for pitch effects
@@ -105,8 +139,11 @@ export class Vehicle {
   public isSpinning = false;        // True when car has entered unrecoverable spin
   public spinTimer = 0;             // Time remaining in spin animation
   public prevThrottleValue = 0;     // Previous frame throttle for lift-off oversteer detection
+  private previousTurnInput = 0;
+  private steeringReversalTimer = 0;
   public throttleInput = 0;
   public brakeInput = 0;
+  private serviceBrakePressure = 0;
 
   // --- ADVANCED PHYSICS PROPERTIES ---
   public wheelSpeed = 0;            // Rotation speed of driving wheels (m/s)
@@ -132,6 +169,20 @@ export class Vehicle {
   private relaxedFrontSlipAngle = 0;
   private relaxedRearSlipAngle = 0;
   private revMatchTargetRpm = 1000;
+  private clutchEngagement = 1;
+  private torqueConverterMultiplier = 1;
+  private dryMass = 1200;
+  private dryFrontWeightDistribution = 0.52;
+  private dryCgHeight = 0.52;
+  private fuelTankLongitudinalPosition = -0.2;
+  private fuelTankHeight = 0.30;
+  private fuelDensityKgPerLiter = 0.745;
+  private brakeSpecificFuelConsumption = 285;
+  private massEngineLayout: 'front' | 'front_mid' | 'mid' | 'rear' = 'front_mid';
+  private massConcentration = 1;
+  private yawInertiaOverride?: number;
+  private unsprungMassPerWheel = 38;
+  private lastConfiguredFuelMass = -1;
   private readonly wheelInertiaPerWheel = 1.35; // kg*m^2
 
   // GT4-style per-car physics character (loaded from CarDatabase)
@@ -156,11 +207,17 @@ export class Vehicle {
   public tireGripRear = 1.0;
   public corneringStiffnessFront = 6.5;
   public corneringStiffnessRear = 6.5;
+  public frontCamberDegrees = -1.0;
+  public rearCamberDegrees = -1.0;
   public brakeForce = 12000;
   public maxSteeringAngle = 0.55;
   public rearSteeringRatio = 0;
   public rearSteeringMaxAngle = 0;
   public steeringResponse = 1;
+  public steeringRackRatio = 15;
+  public powerSteeringType: PowerSteeringType = 'electric';
+  public pneumaticTrail = 0.065;
+  public casterTrail = 0.038;
   public rollingResistanceCoefficient = 0.014;
   public shiftUpMph: number[] = [];
   public differential: DifferentialConfig = {
@@ -171,6 +228,15 @@ export class Vehicle {
   };
   public driveType: 'FWD' | 'RWD' | 'AWD' = 'RWD';
   public powertrainType: 'combustion' | 'electric' = 'combustion';
+  public engineDisplacementLiters = 2.0;
+  public throttleResponse = 8;
+  public variableValveTiming = false;
+  public variableValveEngageRpm = 6000;
+  public variableValveTorqueGain = 0.1;
+  public engineCoolingEfficiency = 1;
+  public transmissionType: TransmissionType = 'automatic';
+  public torqueConverterStallRpm = 2400;
+  public torqueConverterStallRatio = 1.85;
   public speedLimiterMultiplier = 1.25;
 
   // New Powertrain Params (เพิ่มระบบเกียร์และแรงบิด)
@@ -251,6 +317,155 @@ export class Vehicle {
       { rpm: Math.max(4500, maxRpm * 0.78), torque: peakTorque * 0.97 },
       { rpm: maxRpm, torque: peakTorque * (config.tier === 'Entry Tier' ? 0.84 : 0.90) }
     ];
+  }
+
+  private getDefaultFuelCapacity(
+    config: CarConfig,
+    emptyMass: number
+  ): number {
+    if (config.powertrainType === 'electric') return 0;
+    const driveTypeReserve =
+      config.driveType === 'AWD' ? 4 : config.driveType === 'RWD' ? 2 : 0;
+    const estimatedCapacity =
+      31 +
+      this.engineDisplacementLiters * 4.2 +
+      emptyMass * 0.008 +
+      config.maxSpeed * 0.028 +
+      driveTypeReserve;
+    return Math.round(THREE.MathUtils.clamp(estimatedCapacity, 38, 88) * 2) / 2;
+  }
+
+  private refreshMassProperties(force: boolean = false): void {
+    const fuelMass =
+      this.fuelLiters * this.fuelDensityKgPerLiter;
+    if (
+      !force &&
+      Math.abs(fuelMass - this.lastConfiguredFuelMass) < 0.05
+    ) {
+      return;
+    }
+
+    this.lastConfiguredFuelMass = fuelMass;
+    this.mass = this.dryMass + fuelMass;
+    const fuelFrontShare = THREE.MathUtils.clamp(
+      this.fuelTankLongitudinalPosition + 0.5,
+      0,
+      1
+    );
+    this.frontWeightDistribution = THREE.MathUtils.clamp(
+      (
+        this.dryMass * this.dryFrontWeightDistribution +
+        fuelMass * fuelFrontShare
+      ) / Math.max(this.mass, 1),
+      0.32,
+      0.68
+    );
+    this.cgHeight = Math.max(
+      0.18,
+      (
+        this.dryMass * this.dryCgHeight +
+        fuelMass * this.fuelTankHeight
+      ) / Math.max(this.mass, 1)
+    );
+
+    this.massProperties = this.massDynamics.configure({
+      totalMass: this.mass,
+      wheelbase: this.wheelBase,
+      trackWidth: this.trackWidth,
+      cgHeight: this.cgHeight,
+      frontWeightDistribution: this.frontWeightDistribution,
+      engineLayout: this.massEngineLayout,
+      massConcentration: this.massConcentration,
+      yawInertiaOverride:
+        this.yawInertiaOverride !== undefined
+          ? this.yawInertiaOverride *
+            (this.mass / Math.max(this.dryMass, 1))
+          : undefined,
+      unsprungMassPerWheel: this.unsprungMassPerWheel
+    });
+    this.yawInertia = this.massProperties.inertia.yaw;
+    this.pitchInertia = this.massProperties.inertia.pitch;
+    this.rollInertia = this.massProperties.inertia.roll;
+    this.suspensionModel.setSetup(
+      createSuspensionSetup(
+        this.massProperties.sprungMass,
+        this.frontWeightDistribution,
+        this.upgrades.suspensionLevel
+      )
+    );
+  }
+
+  public refuel(fillFraction: number = 1): void {
+    this.fuelLiters =
+      this.fuelCapacityLiters *
+      THREE.MathUtils.clamp(fillFraction, 0, 1);
+    this.fuelDeliveryFactor = 1;
+    this.fuelConsumptionLitersPerHour = 0;
+    this.isEngineStalled = false;
+    this.fuelTowRequired = false;
+    this.refreshMassProperties(true);
+  }
+
+  public getFuelRatio(): number {
+    if (this.fuelCapacityLiters <= 0) return 1;
+    return THREE.MathUtils.clamp(
+      this.fuelLiters / this.fuelCapacityLiters,
+      0,
+      1
+    );
+  }
+
+  private updateFuelSystem(deltaTime: number): void {
+    if (
+      this.powertrainType === 'electric' ||
+      this.fuelCapacityLiters <= 0
+    ) {
+      this.fuelDeliveryFactor = 1;
+      this.fuelConsumptionLitersPerHour = 0;
+      this.isEngineStalled = false;
+      return;
+    }
+
+    this.fuelDeliveryFactor = computeFuelDeliveryFactor(
+      this.fuelLiters,
+      this.fuelCapacityLiters,
+      this.lateralAccel,
+      this.longitudinalAccel
+    );
+    const estimatedEngineTorque =
+      this.getTorque(this.rpm) *
+      this.engineThrottlePosition;
+    const fuelUse = computeFuelConsumption({
+      powertrainType: this.powertrainType,
+      rpm: this.rpm,
+      maxRpm: this.maxRpm,
+      engineTorqueNm: estimatedEngineTorque,
+      throttle: this.engineThrottlePosition,
+      displacementLiters: this.engineDisplacementLiters,
+      brakeSpecificFuelConsumption:
+        this.brakeSpecificFuelConsumption,
+      turboBoost: this.turboSpoolLevel,
+      fuelDensityKgPerLiter: this.fuelDensityKgPerLiter,
+      overrunFuelCut:
+        this.engineThrottlePosition < 0.015 &&
+        this.rpm > 1500 &&
+        this.groundSpeed > 2,
+      deltaTime
+    });
+    this.fuelConsumptionLitersPerHour =
+      fuelUse.litersPerHour;
+    this.fuelLiters = Math.max(
+      0,
+      this.fuelLiters - fuelUse.consumedLiters
+    );
+    this.refreshMassProperties();
+
+    if (this.fuelLiters <= 0.0001) {
+      this.fuelLiters = 0;
+      this.fuelDeliveryFactor = 0;
+      this.isEngineStalled = true;
+      this.fuelTowRequired = true;
+    }
   }
 
   private sampleTorqueCurve(currentRpm: number): number {
@@ -383,13 +598,26 @@ export class Vehicle {
     const highRpmBlend = THREE.MathUtils.smoothstep(currentRpm, this.maxRpm * 0.62, this.maxRpm);
     torque *= 1.0 + highRpmBlend * this.upgrades.engine.portGrindingLevel * 0.04;
 
+    if (this.variableValveTiming) {
+      torque *= getVariableValveTimingMultiplier(
+        currentRpm,
+        this.variableValveEngageRpm,
+        this.variableValveTorqueGain
+      );
+    }
+
     // [UPGRADE IMPACT]: Turbo Aspiration with realistic spool-up lag
     if (this.upgrades.aspiration === 'turbo' && currentRpm > 3200 && currentRpm < 5800) {
       const boostSwell = Math.sin((currentRpm - 3200) / 2600 * Math.PI) * 50;
       torque += boostSwell * this.turboSpoolLevel;
     }
 
-    return Math.max(10, torque);
+    torque *= getEngineTemperatureTorqueMultiplier(
+      this.engineTemperature
+    );
+    torque *= this.fuelDeliveryFactor;
+
+    return Math.max(0, torque);
   }
 
   // ระบบเปลี่ยนเกียร์อัตโนมัติอิงตามรอบเครื่องยนต์ (Auto Gearbox Logic - RPM-based)
@@ -451,9 +679,18 @@ export class Vehicle {
         );
       }
 
-      // [UPGRADE IMPACT]: Gearbox and Flywheel levels lower shifting time
-      const shiftTimeModifier = 1.0 - (this.upgrades.driveTrain.gearboxLevel * 0.12) - (this.upgrades.driveTrain.flywheelLevel * 0.05);
-      const baseShiftTime = desiredGear > this.currentGear ? 0.35 : 0.20;
+      // Transmission hardware changes interruption length and downshift speed.
+      const shiftTimeModifier =
+        1.0 -
+        this.upgrades.driveTrain.gearboxLevel * 0.12 -
+        this.upgrades.driveTrain.flywheelLevel * 0.05;
+      const isUpshift = desiredGear > this.currentGear;
+      const baseShiftTime =
+        this.transmissionType === 'dual_clutch'
+          ? isUpshift ? 0.10 : 0.13
+          : this.transmissionType === 'automatic'
+            ? isUpshift ? 0.28 : 0.22
+            : isUpshift ? 0.38 : 0.24;
       this.shiftTimer = Math.max(0.08, baseShiftTime * shiftTimeModifier);
     }
 
@@ -465,6 +702,32 @@ export class Vehicle {
         this.currentGear = this.targetGear;
       }
     }
+  }
+
+  private getShiftTorqueTransfer(): number {
+    if (!this.isShifting) return 1;
+    if (this.transmissionType === 'dual_clutch') {
+      return Math.min(
+        0.82,
+        0.48 + this.upgrades.driveTrain.gearboxLevel * 0.10
+      );
+    }
+    if (this.transmissionType === 'automatic') {
+      return Math.min(
+        0.38,
+        0.16 + this.upgrades.driveTrain.gearboxLevel * 0.06
+      );
+    }
+    return 0;
+  }
+
+  private getDrivetrainTorqueTransfer(): number {
+    if (this.transmissionType === 'single_speed') return 1;
+    return (
+      this.getShiftTorqueTransfer() *
+      this.clutchEngagement *
+      this.torqueConverterMultiplier
+    );
   }
 
   public rebuild(carId: string, color: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
@@ -1443,13 +1706,43 @@ export class Vehicle {
     this.dragCoeff = config.dragCoeff;
     this.driveType = config.driveType;
     this.powertrainType = config.powertrainType ?? 'combustion';
+    this.engineDisplacementLiters =
+      config.engineDisplacementLiters ??
+      (config.tier === 'Entry Tier'
+        ? 1.8
+        : config.tier === 'Sport Tier'
+          ? 2.5
+          : config.tier === 'Hyper Tier'
+            ? 4.0
+            : 5.0);
+    this.throttleResponse =
+      config.throttleResponse ??
+      (this.powertrainType === 'electric' ? 14 : 8);
+    this.variableValveTiming =
+      config.variableValveTiming ?? false;
+    this.variableValveEngageRpm =
+      config.variableValveEngageRpm ??
+      (config.maxRpm ?? 6500) * 0.68;
+    this.variableValveTorqueGain =
+      config.variableValveTorqueGain ?? 0.1;
+    this.engineCoolingEfficiency =
+      config.engineCoolingEfficiency ?? 1;
+    this.transmissionType =
+      config.transmissionType ??
+      (this.powertrainType === 'electric'
+        ? 'single_speed'
+        : config.tier === 'Hyper Tier' || config.tier === 'Legendary Tier'
+          ? 'dual_clutch'
+          : 'automatic');
+    this.torqueConverterStallRpm = config.torqueConverterStallRpm ?? 2400;
+    this.torqueConverterStallRatio =
+      config.torqueConverterStallRatio ?? 1.85;
     this.speedLimiterMultiplier = config.speedLimiterMultiplier ?? 1.25;
-    if (config.gearRatios) {
-      this.gearRatios = config.gearRatios;
-    }
-    if (config.wheelRadius !== undefined) {
-      this.wheelRadius = config.wheelRadius;
-    }
+    // Reset these on every car change so EV gearing cannot leak into another car.
+    this.gearRatios = config.gearRatios
+      ? [...config.gearRatios]
+      : [0, 3.60, 2.10, 1.50, 1.10, 0.90, 0.80];
+    this.wheelRadius = config.wheelRadius ?? 0.48;
     this.hasSpoiler = config.hasSpoiler;
     this.boosterColor = config.boosterColor;
 
@@ -1466,8 +1759,41 @@ export class Vehicle {
     }
     this.baseMass = baseMass;
 
-    // [UPGRADE IMPACT]: Weight Reduction stage directly drops target mass (lighter = quicker)
-    this.mass = this.baseMass - (this.upgrades.weightReduction * 80);
+    // Database mass is curb/full-tank mass. Derive empty mass so real vehicle
+    // specs remain correct at full fuel and the car becomes lighter as it burns.
+    const upgradedCurbMass =
+      this.baseMass - this.upgrades.weightReduction * 80;
+    this.fuelDensityKgPerLiter =
+      config.fuelDensityKgPerLiter ?? 0.745;
+    this.fuelCapacityLiters =
+      config.fuelCapacityLiters ??
+      this.getDefaultFuelCapacity(config, upgradedCurbMass);
+    this.dryMass = Math.max(
+      100,
+      upgradedCurbMass -
+        this.fuelCapacityLiters * this.fuelDensityKgPerLiter
+    );
+    this.brakeSpecificFuelConsumption =
+      config.brakeSpecificFuelConsumption ??
+      (this.upgrades.aspiration === 'turbo' ? 310 : 285);
+    this.fuelTankHeight =
+      config.fuelTankHeight ??
+      (config.id === 'cybertruck' ? 0.42 : 0.30);
+    const defaultTankPosition =
+      config.engineLayout === 'rear'
+        ? 0.24
+        : config.engineLayout === 'mid'
+          ? 0.02
+          : config.engineLayout === 'front_mid'
+            ? -0.18
+            : -0.28;
+    this.fuelTankLongitudinalPosition =
+      config.fuelTankLongitudinalPosition ??
+      defaultTankPosition;
+    this.fuelLiters = this.fuelCapacityLiters;
+    this.mass =
+      this.dryMass +
+      this.fuelLiters * this.fuelDensityKgPerLiter;
 
     // [UPGRADE IMPACT]: Suspension improves cornering responsive thresholds
     this.handlingRate = config.handlingRate + (this.upgrades.suspensionLevel * 0.005);
@@ -1501,10 +1827,20 @@ export class Vehicle {
     const defaultCd = isTruck ? 0.38 : isEntry ? 0.32 : isSport ? 0.31 : isHyper ? 0.30 : 0.29;
     const defaultCl = config.hasSpoiler ? (isLegendary ? 0.48 : isHyper ? 0.40 : 0.24) : (isHyper || isLegendary ? 0.18 : 0.06);
 
-    this.frontWeightDistribution = config.frontWeightDistribution ?? this.character.weightDistribution;
+    this.dryFrontWeightDistribution =
+      config.frontWeightDistribution ??
+      this.character.weightDistribution;
+    this.frontWeightDistribution =
+      this.dryFrontWeightDistribution;
     this.wheelBase = config.wheelbase ?? defaultWheelbase;
     this.trackWidth = config.trackWidth ?? defaultTrackWidth;
-    this.cgHeight = Math.max(0.25, config.cgHeight ?? (defaultCgHeight - this.upgrades.suspensionLevel * 0.012));
+    this.dryCgHeight = Math.max(
+      0.25,
+      config.cgHeight ??
+        (defaultCgHeight -
+          this.upgrades.suspensionLevel * 0.012)
+    );
+    this.cgHeight = this.dryCgHeight;
     this.frontalArea = config.frontalArea ?? defaultFrontalArea;
     this.dragCoefficient = config.dragCoefficient ?? defaultCd;
     this.liftCoefficient = config.liftCoefficient ?? defaultCl;
@@ -1512,34 +1848,48 @@ export class Vehicle {
     this.tireGripRear = config.tireGripRear ?? this.character.rearGripMultiplier;
     this.corneringStiffnessFront = config.corneringStiffnessFront ?? THREE.MathUtils.clamp(4.8 + config.handling * 0.22, 5.4, 8.2);
     this.corneringStiffnessRear = config.corneringStiffnessRear ?? THREE.MathUtils.clamp(4.8 + config.handling * 0.22, 5.4, 8.2);
+    const defaultCamberDegrees = isEntry ? -0.8 : isSport ? -1.2 : isHyper ? -1.7 : -2.0;
+    const suspensionCamberDegrees = this.upgrades.suspensionLevel * -0.18;
+    this.frontCamberDegrees = config.frontCamberDegrees ?? (defaultCamberDegrees + suspensionCamberDegrees);
+    this.rearCamberDegrees = config.rearCamberDegrees ?? (defaultCamberDegrees + suspensionCamberDegrees * 0.85);
     this.maxSteeringAngle = config.maxSteeringAngle ?? (config.id === 'driftmaster' ? 0.68 : isTruck ? 0.48 : isHyper || isLegendary ? 0.50 : 0.56);
     this.rearSteeringRatio = config.rearSteeringRatio ?? 0;
     this.rearSteeringMaxAngle = config.rearSteeringMaxAngle ?? 0;
     this.steeringResponse = config.steeringResponse ?? 1;
+    this.steeringRackRatio =
+      config.steeringRackRatio ??
+      (isTruck ? 17.0 : isEntry ? 16.5 : isSport ? 15.2 : 14.2);
+    this.powerSteeringType =
+      config.powerSteeringType ??
+      (isEntry ? 'hydraulic' : 'electric');
+    this.pneumaticTrail =
+      config.pneumaticTrail ??
+      (isTruck ? 0.075 : isHyper || isLegendary ? 0.058 : 0.065);
+    this.casterTrail =
+      config.casterTrail ??
+      (isTruck ? 0.045 : isHyper || isLegendary ? 0.034 : 0.038);
     this.rollingResistanceCoefficient = config.rollingResistanceCoefficient ?? (isTruck ? 0.018 : 0.014);
     this.shiftUpMph = config.shiftUpMph ?? [];
     this.brakeForce = config.brakeForce ?? this.mass * (10.2 + this.brakingRate * 1.4 + this.upgrades.brake.level * 1.1);
-    this.massProperties = this.massDynamics.configure({
-      totalMass: this.mass,
-      wheelbase: this.wheelBase,
-      trackWidth: this.trackWidth,
-      cgHeight: this.cgHeight,
-      frontWeightDistribution: this.frontWeightDistribution,
-      engineLayout: config.engineLayout,
-      massConcentration:
-        config.massConcentration ?? this.character.yawInertia,
-      yawInertiaOverride: config.yawInertia
-    });
-    this.yawInertia = this.massProperties.inertia.yaw;
-    this.pitchInertia = this.massProperties.inertia.pitch;
-    this.rollInertia = this.massProperties.inertia.roll;
-    this.suspensionModel.setSetup(
-      createSuspensionSetup(
-        this.massProperties.sprungMass,
-        this.frontWeightDistribution,
-        this.upgrades.suspensionLevel
-      )
+    this.massEngineLayout =
+      config.engineLayout ??
+      (this.dryFrontWeightDistribution >= 0.56
+        ? 'front'
+        : this.dryFrontWeightDistribution >= 0.50
+          ? 'front_mid'
+          : this.dryFrontWeightDistribution >= 0.43
+            ? 'mid'
+            : 'rear');
+    this.massConcentration =
+      config.massConcentration ?? this.character.yawInertia;
+    this.yawInertiaOverride = config.yawInertia;
+    this.unsprungMassPerWheel = THREE.MathUtils.clamp(
+      this.dryMass * 0.032,
+      24,
+      48
     );
+    this.lastConfiguredFuelMass = -1;
+    this.refreshMassProperties(true);
     this.differential = {
       accelLock: config.differential?.accelLock ?? (this.driveType === 'RWD' ? 0.42 : this.driveType === 'AWD' ? 0.35 : 0.22),
       decelLock: config.differential?.decelLock ?? (this.driveType === 'RWD' ? 0.22 : 0.14),
@@ -1551,12 +1901,16 @@ export class Vehicle {
 
     // Sync tire compound from upgrades (fallback to economy if undefined)
     this.tireState.compound = this.upgrades.tireCompound || 'economy';
+    this.tireState.coldPressurePsi =
+      config.tireColdPressurePsi ??
+      TIRE_COMPOUNDS[this.tireState.compound].recommendedColdPressurePsi;
 
-    // Tune the final drive dynamically so that top gear (Gear 6) reaches maxSpeed at (maxRpm - 500)
+    // Tune final drive so the actual top gear reaches max speed near redline.
     if (config.finalDrive !== undefined) {
       this.finalDrive = config.finalDrive;
     } else {
-      const topGearRatio = this.gearRatios[6] || 0.80;
+      const topGearRatio =
+        this.gearRatios[this.gearRatios.length - 1] || 0.80;
       const targetRpm = this.maxRpm - 500;
       const radPerSecToRpm = 60 / (2 * Math.PI);
       this.finalDrive = (targetRpm * this.wheelRadius) / (this.maxSpeed * topGearRatio * radPerSecToRpm);
@@ -1599,6 +1953,34 @@ export class Vehicle {
 
   private processEngineRpm(deltaTime: number, throttleValue: number): void {
     this.handleAutoTransmission(deltaTime);
+    const throttleRate =
+      throttleValue > this.engineThrottlePosition
+        ? this.throttleResponse
+        : this.throttleResponse * 1.45;
+    const throttleResponse =
+      1.0 - Math.exp(-deltaTime * throttleRate);
+    this.engineThrottlePosition = THREE.MathUtils.lerp(
+      this.engineThrottlePosition,
+      throttleValue,
+      throttleResponse
+    );
+
+    if (
+      this.powertrainType === 'combustion' &&
+      this.fuelCapacityLiters > 0 &&
+      this.fuelLiters <= 0
+    ) {
+      this.engineThrottlePosition = 0;
+      this.isEngineStalled = true;
+      this.isRevLimiterCut = false;
+      this.turboSpoolLevel = Math.max(
+        0,
+        this.turboSpoolLevel - deltaTime * 2.5
+      );
+      this.rpm = Math.max(0, this.rpm - deltaTime * 2400);
+      return;
+    }
+    this.isEngineStalled = false;
 
     const gearRatio = this.gearRatios[this.currentGear];
     const wheelRpm =
@@ -1607,17 +1989,82 @@ export class Vehicle {
       this.finalDrive *
       (60 / (2 * Math.PI));
 
-    if (this.powertrainType === 'electric') {
+    if (this.transmissionType === 'single_speed') {
+      this.clutchEngagement = 1;
+      this.torqueConverterMultiplier = 1;
       this.rpm = THREE.MathUtils.clamp(wheelRpm, 0, this.maxRpm);
       this.isRevLimiterCut = wheelRpm >= this.maxRpm;
       this.turboSpoolLevel = 0;
+      const motorThermalState = {
+        temperature: this.engineTemperature
+      };
+      updateEngineTemperature(motorThermalState, {
+        rpm: this.rpm,
+        maxRpm: this.maxRpm,
+        throttle: this.engineThrottlePosition,
+        speed: this.groundSpeed,
+        turboBoost: 0,
+        coolingEfficiency: this.engineCoolingEfficiency,
+        powertrainType: this.powertrainType,
+        deltaTime
+      });
+      this.engineTemperature = motorThermalState.temperature;
       return;
     }
 
     const engineInertia = 0.05 + (0.15 - this.upgrades.driveTrain.flywheelLevel * 0.04) + 0.03;
     const baseTorque = this.getTorque(this.rpm);
-    const combustionTorque = baseTorque * throttleValue;
-    const frictionTorque = 15 + 0.012 * this.rpm;
+    const combustionTorque =
+      baseTorque * this.engineThrottlePosition;
+    const frictionTorque = computeEngineFrictionTorque(
+      this.rpm,
+      this.engineThrottlePosition,
+      this.engineDisplacementLiters,
+      this.engineTemperature
+    );
+    const clutchUpgrade = this.upgrades.driveTrain.clutchLevel;
+
+    if (this.transmissionType === 'automatic') {
+      const converterCoupling = THREE.MathUtils.smoothstep(
+        wheelRpm,
+        450,
+        this.torqueConverterStallRpm
+      );
+      this.clutchEngagement = THREE.MathUtils.lerp(
+        0.46,
+        1.0,
+        converterCoupling
+      );
+      this.torqueConverterMultiplier = THREE.MathUtils.lerp(
+        this.torqueConverterStallRatio,
+        1.0,
+        converterCoupling
+      );
+    } else {
+      const launchCoupling = THREE.MathUtils.smoothstep(
+        wheelRpm,
+        350,
+        1450
+      );
+      const minimumEngagement =
+        this.transmissionType === 'dual_clutch' ? 0.38 : 0.24;
+      const targetEngagement = THREE.MathUtils.lerp(
+        minimumEngagement,
+        1.0,
+        launchCoupling
+      );
+      const engagementRate =
+        (this.transmissionType === 'dual_clutch' ? 10 : 6) +
+        clutchUpgrade * 2.0;
+      const engagementResponse =
+        1.0 - Math.exp(-deltaTime * engagementRate);
+      this.clutchEngagement = THREE.MathUtils.lerp(
+        this.clutchEngagement,
+        targetEngagement,
+        engagementResponse
+      );
+      this.torqueConverterMultiplier = 1;
+    }
 
     // Rev limiter cut logic
     if (this.rpm >= this.maxRpm - 20) {
@@ -1641,18 +2088,55 @@ export class Vehicle {
         this.rpm = Math.max(1000, Math.min(this.maxRpm, this.rpm + rpmChange));
       }
     } else {
-      // Clutch engaged
       if (this.speed < 0) {
         this.rpm = 1000 + Math.abs(this.speed) * 3.6 * 100;
-      } else if (wheelRpm < 1000) {
-        // Clutch slips at launch (drivetrain speed below idle)
-        const slipFactor = Math.max(0, (this.rpm - 1000) / 1000);
-        const clutchCapacity = 300 * (1.0 + this.upgrades.driveTrain.clutchLevel * 0.2);
-        const clutchLoad = clutchCapacity * slipFactor * Math.max(0.1, throttleValue);
-
+      } else if (
+        this.transmissionType === 'automatic' &&
+        wheelRpm < this.torqueConverterStallRpm
+      ) {
+        const converterTargetRpm = Math.max(
+          wheelRpm,
+          1000 +
+            this.engineThrottlePosition *
+              (this.torqueConverterStallRpm - 1000)
+        );
+        const converterResponse = 1.0 - Math.exp(-deltaTime * 8.0);
+        this.rpm = THREE.MathUtils.lerp(
+          this.rpm,
+          converterTargetRpm,
+          converterResponse
+        );
+      } else if (this.clutchEngagement < 0.985 || wheelRpm < 1000) {
+        // Friction clutch progressively couples engine and gearbox at launch.
+        const clutchCapacity =
+          320 *
+          (1.0 + clutchUpgrade * 0.22) *
+          this.clutchEngagement;
+        const clutchSlipRpm = Math.max(0, this.rpm - wheelRpm);
+        const clutchLoad =
+          clutchCapacity *
+          THREE.MathUtils.clamp(clutchSlipRpm / 1800, 0, 1);
         const netTorque = combustionTorque - frictionTorque - clutchLoad;
-        const rpmChange = (netTorque / engineInertia) * (60 / (2 * Math.PI)) * deltaTime;
-        this.rpm = Math.max(1000, Math.min(this.maxRpm, this.rpm + rpmChange));
+        const rpmChange =
+          (netTorque / engineInertia) *
+          (60 / (2 * Math.PI)) *
+          deltaTime;
+        const freeRpm = THREE.MathUtils.clamp(
+          this.rpm + rpmChange,
+          1000,
+          this.maxRpm
+        );
+        this.rpm = THREE.MathUtils.lerp(
+          freeRpm,
+          Math.max(1000, wheelRpm),
+          THREE.MathUtils.clamp(
+            this.clutchEngagement *
+              deltaTime *
+              (5 + clutchUpgrade),
+            0,
+            1
+          )
+        );
       } else {
         // Clutch locked to wheels
         this.rpm = wheelRpm;
@@ -1662,13 +2146,31 @@ export class Vehicle {
     this.rpm = Math.max(1000, Math.min(this.rpm, this.maxRpm));
 
     if (this.upgrades.aspiration === 'turbo') {
-      const inBoostRange = this.rpm > 3200 && this.rpm < 5800 && throttleValue > 0.1;
+      const inBoostRange =
+        this.rpm > 3200 &&
+        this.rpm < 5800 &&
+        this.engineThrottlePosition > 0.1;
       if (inBoostRange) {
         this.turboSpoolLevel = Math.min(1.0, this.turboSpoolLevel + deltaTime * 2.0);
       } else {
         this.turboSpoolLevel = Math.max(0.0, this.turboSpoolLevel - deltaTime * 1.25);
       }
     }
+
+    const engineThermalState = {
+      temperature: this.engineTemperature
+    };
+    updateEngineTemperature(engineThermalState, {
+      rpm: this.rpm,
+      maxRpm: this.maxRpm,
+      throttle: this.engineThrottlePosition,
+      speed: this.groundSpeed,
+      turboBoost: this.turboSpoolLevel,
+      coolingEfficiency: this.engineCoolingEfficiency,
+      powertrainType: this.powertrainType,
+      deltaTime
+    });
+    this.engineTemperature = engineThermalState.temperature;
   }
 
   /**
@@ -1714,7 +2216,8 @@ export class Vehicle {
       this.tireState.compound,
       activeWear,
       surfaceGrip,
-      this.tireState.temperature
+      this.tireState.temperature,
+      this.tireState.coldPressurePsi
     );
     
     return baseGrip;
@@ -1859,6 +2362,23 @@ export class Vehicle {
   ): void {
     const local = this.getLocalVelocity();
     const absForward = Math.abs(local.forward);
+    const changedSteeringDirection =
+      turnInput * this.previousTurnInput < -0.08 &&
+      Math.abs(turnInput) > 0.18 &&
+      Math.abs(this.previousTurnInput) > 0.18;
+    if (changedSteeringDirection && absForward > 8) {
+      this.steeringReversalTimer = 0.42;
+    } else {
+      this.steeringReversalTimer = Math.max(
+        0,
+        this.steeringReversalTimer - deltaTime
+      );
+    }
+    const directionChangeBlend = THREE.MathUtils.clamp(
+      this.steeringReversalTimer / 0.42,
+      0,
+      1
+    );
 
     // --- STEERING INPUT: smoothly interpolate steer angle with speed sensitivity and assists ---
     // At high speeds, full steering angle causes instant tire saturation (extreme understeer).
@@ -1898,22 +2418,42 @@ export class Vehicle {
       assistSteer = -this.driftAngle * assistFactor;
     }
 
-    const targetSteerAngle = turnInput * maxSteer + assistSteer;
-
-    // Dynamic Steering Rate: fast countersteer, smoother turn-in
-    let lerpSpeed = 10; // hands-off return rate
-    if (Math.abs(turnInput) > 0.05) {
-      const isCounterSteer = turnInput * this.driftAngle < 0;
-      lerpSpeed = isCounterSteer ? 22 : 5; // Fast catch, smooth turn-in
-    }
-    const steeringResponse = 1.0 - Math.exp(
-      -lerpSpeed * this.steeringResponse * deltaTime
+    const targetSteerAngle = THREE.MathUtils.clamp(
+      turnInput * maxSteer + assistSteer,
+      -maxSteer,
+      maxSteer
     );
-    this.steerAngle = THREE.MathUtils.lerp(
-      this.steerAngle,
-      targetSteerAngle,
-      steeringResponse
+    const steeringOutput = updateSteeringSystem({
+      currentSteeringWheelAngle: this.steeringWheelAngle,
+      targetRoadWheelAngle: targetSteerAngle,
+      inputMagnitude: Math.abs(turnInput),
+      speed: absForward,
+      slipAngle: this.relaxedFrontSlipAngle,
+      frontAxleLoad:
+        this.dynamicFrontWeight ||
+        this.mass * GRAVITY * this.frontWeightDistribution,
+      gripCoefficient: this.getEffectiveTireGrip() * this.tireGripFront,
+      rackRatio: this.steeringRackRatio,
+      powerSteeringType: this.powerSteeringType,
+      pneumaticTrail: this.pneumaticTrail,
+      casterTrail: this.casterTrail,
+      response: this.steeringResponse,
+      counterSteering:
+        turnInput * this.driftAngle < 0 &&
+        Math.abs(this.driftAngle) > 0.12,
+      directionChangeBlend,
+      deltaTime
+    });
+    this.steeringWheelAngle = steeringOutput.steeringWheelAngle;
+    this.steerAngle = THREE.MathUtils.clamp(
+      steeringOutput.roadWheelAngle,
+      -maxSteer,
+      maxSteer
     );
+    this.steeringWheelAngle =
+      this.steerAngle * this.steeringRackRatio;
+    this.steeringTorqueNm = steeringOutput.steeringTorqueNm;
+    this.steeringAssistFraction = steeringOutput.assistFraction;
 
     // Visual wheel steering: applied to the steerPivot (Y rotation only)
     if (this.leftFrontWheel && this.rightFrontWheel) {
@@ -2042,7 +2582,7 @@ export class Vehicle {
       rearSlipAngle,
       absForward,
       deltaTime,
-      0.12
+      0.07
     );
 
     // Store for external access
@@ -2062,8 +2602,34 @@ export class Vehicle {
     );
 
     // --- TIRE GRIP MODIFIERS ---
-    const frontGrip = baseGripCoeff * this.tireGripFront;
+    let frontGrip = baseGripCoeff * this.tireGripFront;
     let rearGrip = baseGripCoeff * this.tireGripRear;
+    // During a rapid left-right transition, keep the rear axle planted while
+    // briefly softening front bite. This prevents front force reversal from
+    // whipping the chassis faster than the rear contact patches can respond.
+    frontGrip *= THREE.MathUtils.lerp(
+      1.0,
+      0.90,
+      directionChangeBlend
+    );
+    rearGrip *= THREE.MathUtils.lerp(
+      1.0,
+      1.16,
+      directionChangeBlend
+    );
+    const pressureEffects = getTirePressureEffects(
+      this.tireState.compound,
+      this.tireState.temperature,
+      this.tireState.coldPressurePsi
+    );
+    const frontCamberEffects = computeCamberEffects(
+      THREE.MathUtils.degToRad(this.frontCamberDegrees),
+      this.relaxedFrontSlipAngle
+    );
+    const rearCamberEffects = computeCamberEffects(
+      THREE.MathUtils.degToRad(this.rearCamberDegrees),
+      this.relaxedRearSlipAngle
+    );
 
     // Handbrake: dramatically reduce rear grip to initiate drift
     if (handbrake) {
@@ -2072,9 +2638,23 @@ export class Vehicle {
 
     // Lift-off oversteer: sudden throttle release shifts weight forward, unloading rear
     const throttleDrop = this.prevThrottleValue - throttleValue;
-    if (throttleDrop > 0.4 && absForward > 20 && Math.abs(turnInput) > 0.15) {
+    if (
+      throttleDrop > 0.4 &&
+      absForward > 20 &&
+      Math.abs(turnInput) > 0.15
+    ) {
       const liftOffSeverity = throttleDrop * (1.0 - this.character.oversteerResistance) * (1.0 - this.frontWeightDistribution);
-      rearGrip *= (1.0 - liftOffSeverity * 0.28);
+      const transientLiftOffScale = THREE.MathUtils.lerp(
+        1.0,
+        0.0,
+        directionChangeBlend
+      );
+      rearGrip *= (
+        1.0 -
+        liftOffSeverity *
+          0.18 *
+          transientLiftOffScale
+      );
     }
 
     // Power oversteer for RWD: excess throttle on rear tires reduces their lateral grip
@@ -2113,15 +2693,17 @@ export class Vehicle {
     let driveForce = 0;
     if (throttleValue > 0.01) {
       const currentTorque = this.getTorque(this.rpm);
-      let gearEfficiency = (this.isShifting || this.isRevLimiterCut) ? 0.0 : 0.85;
-
-      if (!this.isShifting && !this.isRevLimiterCut) {
-        gearEfficiency = 0.83 + (this.upgrades.driveTrain.clutchLevel * 0.04) + (this.upgrades.driveTrain.propellerShaftLevel * 0.02);
-        if (gearEfficiency > 0.98) gearEfficiency = 0.98;
-      }
+      let gearEfficiency =
+        0.83 +
+        this.upgrades.driveTrain.clutchLevel * 0.04 +
+        this.upgrades.driveTrain.propellerShaftLevel * 0.02;
+      gearEfficiency = Math.min(0.98, gearEfficiency);
+      gearEfficiency *= this.isRevLimiterCut
+        ? 0
+        : this.getDrivetrainTorqueTransfer();
 
       driveForce = (currentTorque * this.gearRatios[this.currentGear] * this.finalDrive * gearEfficiency) / this.wheelRadius;
-      driveForce *= throttleValue;
+      driveForce *= this.engineThrottlePosition;
 
       // TCS: reduce drive force at low speed to prevent wheelspin
       if (this.upgrades.bodyControlModuleLevel > 0 && absForward < 12) {
@@ -2145,18 +2727,41 @@ export class Vehicle {
       ) *
         0.42;
 
-    if (reverseValue > 0.01 && local.forward > 0.5) {
-      const brakePressure = 1.0 - Math.pow(1.0 - THREE.MathUtils.clamp(reverseValue, 0, 1), 1.65);
-      brakeForce = -this.brakeForce * brakePressure * brakeFade;
+    const targetBrakePressure =
+      reverseValue > 0.01 && local.forward > 0.5
+        ? 1.0 -
+          Math.pow(
+            1.0 - THREE.MathUtils.clamp(reverseValue, 0, 1),
+            1.65
+          )
+        : 0;
+    const brakePressureRate =
+      targetBrakePressure > this.serviceBrakePressure ? 10.0 : 16.0;
+    const brakePressureResponse =
+      1.0 - Math.exp(-deltaTime * brakePressureRate);
+    this.serviceBrakePressure = THREE.MathUtils.lerp(
+      this.serviceBrakePressure,
+      targetBrakePressure,
+      brakePressureResponse
+    );
+
+    if (this.serviceBrakePressure > 0.001 && local.forward > 0.5) {
+      brakeForce =
+        -this.brakeForce *
+        this.serviceBrakePressure *
+        brakeFade;
     } else if (reverseValue > 0.01 && local.forward <= 0.5) {
       // Reversing (uses engine torque in 1st/reverse gear instead of accelerationRate)
       if (local.forward > -12.0) { // Limit reverse speed to ~43 km/h
         const currentTorque = this.getTorque(this.rpm);
-        let gearEfficiency = (this.isShifting || this.isRevLimiterCut) ? 0.0 : 0.85;
-        if (!this.isShifting && !this.isRevLimiterCut) {
-          gearEfficiency = 0.83 + (this.upgrades.driveTrain.clutchLevel * 0.04) + (this.upgrades.driveTrain.propellerShaftLevel * 0.02);
-          if (gearEfficiency > 0.98) gearEfficiency = 0.98;
-        }
+        let gearEfficiency =
+          0.83 +
+          this.upgrades.driveTrain.clutchLevel * 0.04 +
+          this.upgrades.driveTrain.propellerShaftLevel * 0.02;
+        gearEfficiency = Math.min(0.98, gearEfficiency);
+        gearEfficiency *= this.isRevLimiterCut
+          ? 0
+          : this.getDrivetrainTorqueTransfer();
         const reverseGearRatio = this.gearRatios[1];
         driveForce = -(currentTorque * reverseGearRatio * this.finalDrive * gearEfficiency * reverseValue) / this.wheelRadius;
       }
@@ -2193,9 +2798,32 @@ export class Vehicle {
     // Engine braking when coasting
     let engineBraking = 0;
     if (throttleValue <= 0.01 && reverseValue <= 0.01 && absForward > 0.5) {
-      const coastDeceleration =
-        this.powertrainType === 'electric' ? 1.15 : 2.5;
-      engineBraking = -coastDeceleration * this.mass * Math.sign(local.forward);
+      if (this.powertrainType === 'electric') {
+        engineBraking =
+          -1.15 * this.mass * Math.sign(local.forward);
+      } else {
+        const frictionTorque = computeEngineFrictionTorque(
+          this.rpm,
+          0,
+          this.engineDisplacementLiters,
+          this.engineTemperature
+        );
+        const gearRatio =
+          this.gearRatios[this.currentGear] || 1;
+        const frictionForce =
+          (frictionTorque *
+            gearRatio *
+            this.finalDrive *
+            0.82) /
+          Math.max(this.wheelRadius, 0.1);
+        engineBraking =
+          -THREE.MathUtils.clamp(
+            frictionForce,
+            this.mass * 0.45,
+            this.mass * 3.2
+          ) *
+          Math.sign(local.forward);
+      }
     }
 
     // Split driveForce and engineBraking per axle based on driveType
@@ -2227,8 +2855,14 @@ export class Vehicle {
 
     const frontMaxGrip = this.computeAxleGripLimit(frontGrip, frontWeight, frontLateralTransfer);
     const rearMaxGrip = this.computeAxleGripLimit(rearGrip, rearWeight, rearLateralTransfer);
-    const frontDriveGripLimit = frontMaxGrip * (0.86 + diffLock * 0.12);
-    const rearDriveGripLimit = rearMaxGrip * (0.86 + diffLock * 0.12);
+    const frontDriveGripLimit =
+      frontMaxGrip *
+      frontCamberEffects.longitudinalGripMultiplier *
+      (0.86 + diffLock * 0.12);
+    const rearDriveGripLimit =
+      rearMaxGrip *
+      rearCamberEffects.longitudinalGripMultiplier *
+      (0.86 + diffLock * 0.12);
 
     // Electronic brake-force distribution follows the grip available at each
     // axle. Under deceleration the front carries more load, so a fixed 60/40
@@ -2245,14 +2879,20 @@ export class Vehicle {
       1
     );
     const loadBasedFrontBias = frontMaxGrip / totalAxleGrip;
+    const highSpeedBrakeBlend = THREE.MathUtils.smoothstep(
+      absForward,
+      24,
+      58
+    );
     const stabilityFrontBias =
       0.60 +
       normalizedBrakeDemand * 0.10 +
-      serviceSteeringDemand * 0.06;
+      serviceSteeringDemand * 0.06 +
+      highSpeedBrakeBlend * normalizedBrakeDemand * 0.07;
     const frontBrakeBias = THREE.MathUtils.clamp(
       Math.max(loadBasedFrontBias, stabilityFrontBias),
       0.58,
-      0.78
+      0.84
     );
     // Most road-car brakes can exceed tire traction and lock the wheels. Make
     // full pedal tire-limited rather than hardware-limited, so installing a
@@ -2268,11 +2908,18 @@ export class Vehicle {
     // Normal service braking uses EBD to keep the rear axle below lock while
     // steering. Excess pressure moves to the front, producing understeer at
     // the limit instead of sudden chicane-entry snap oversteer.
-    const rearServiceGripReserve = THREE.MathUtils.lerp(
-      1.02,
-      0.72,
-      serviceSteeringDemand
+    const straightLineRearUtilization = THREE.MathUtils.lerp(
+      0.92,
+      0.76,
+      highSpeedBrakeBlend * normalizedBrakeDemand
     );
+    const rearServiceGripReserve =
+      straightLineRearUtilization *
+      THREE.MathUtils.lerp(
+        1.0,
+        0.74,
+        serviceSteeringDemand
+      );
     const rearServiceBrakeMagnitude = handbrake
       ? desiredRearBrakeMagnitude
       : Math.min(desiredRearBrakeMagnitude, rearMaxGrip * rearServiceGripReserve);
@@ -2331,39 +2978,63 @@ export class Vehicle {
 
     let frontLongForce = computeLongitudinalForce(
       frontSlipRatio,
-      frontEffectiveGrip,
+      frontEffectiveGrip * frontCamberEffects.longitudinalGripMultiplier,
       frontWeight,
       10.0
     );
     let rearLongForce = computeLongitudinalForce(
       rearSlipRatio,
-      rearEffectiveGrip,
+      rearEffectiveGrip * rearCamberEffects.longitudinalGripMultiplier,
       rearWeight,
       10.0
     );
 
     let frontLatForce = -computeLateralForce(
       this.relaxedFrontSlipAngle,
-      frontEffectiveGrip,
+      frontEffectiveGrip * frontCamberEffects.lateralGripMultiplier,
       frontWeight,
-      this.corneringStiffnessFront
+      this.corneringStiffnessFront *
+        frontCamberEffects.corneringStiffnessMultiplier *
+        pressureEffects.stiffnessMultiplier,
+      TIRE_COMPOUNDS[this.tireState.compound].lateralPeakSlipAngle,
+      TIRE_COMPOUNDS[this.tireState.compound].postPeakGripLoss,
+      TIRE_COMPOUNDS[this.tireState.compound].postPeakFalloff
     );
     let rearLatForce = -computeLateralForce(
       this.relaxedRearSlipAngle,
-      rearEffectiveGrip,
+      rearEffectiveGrip * rearCamberEffects.lateralGripMultiplier,
       rearWeight,
-      this.corneringStiffnessRear
+      this.corneringStiffnessRear *
+        rearCamberEffects.corneringStiffnessMultiplier *
+        pressureEffects.stiffnessMultiplier,
+      TIRE_COMPOUNDS[this.tireState.compound].lateralPeakSlipAngle,
+      TIRE_COMPOUNDS[this.tireState.compound].postPeakGripLoss,
+      TIRE_COMPOUNDS[this.tireState.compound].postPeakFalloff
     );
 
     const lowSpeedDampener = Math.min(1.0, absForward / 4.0);
     frontLatForce *= lowSpeedDampener * brakingSteerReduction;
     rearLatForce *= lowSpeedDampener;
 
-    const frontCombined = combinedGripCircle(frontLatForce, frontLongForce, frontMaxGrip);
+    const frontCombined = combinedGripCircle(
+      frontLatForce,
+      frontLongForce,
+      frontMaxGrip,
+      1.05 * frontCamberEffects.longitudinalGripMultiplier,
+      TIRE_COMPOUNDS[this.tireState.compound].lateralEnvelopeScale *
+        frontCamberEffects.lateralGripMultiplier
+    );
     frontLatForce = frontCombined.lateral;
     frontLongForce = frontCombined.longitudinal;
 
-    const rearCombined = combinedGripCircle(rearLatForce, rearLongForce, rearMaxGrip);
+    const rearCombined = combinedGripCircle(
+      rearLatForce,
+      rearLongForce,
+      rearMaxGrip,
+      1.05 * rearCamberEffects.longitudinalGripMultiplier,
+      TIRE_COMPOUNDS[this.tireState.compound].lateralEnvelopeScale *
+        rearCamberEffects.lateralGripMultiplier
+    );
     rearLatForce = rearCombined.lateral;
     rearLongForce = rearCombined.longitudinal;
 
@@ -2401,7 +3072,15 @@ export class Vehicle {
     // Adjusted multiplier to 1.15 to make the car feel planted and prevent instant oversteer.
     const yawMomentOfInertia = this.yawInertia;
 
-    const yawAccel = yawTorque / Math.max(yawMomentOfInertia, 100);
+    const chicaneYawResponse = THREE.MathUtils.lerp(
+      1.0,
+      0.55,
+      directionChangeBlend
+    );
+    const yawAccel =
+      yawTorque /
+      Math.max(yawMomentOfInertia, 100) *
+      chicaneYawResponse;
 
     // Rear locking reduces the rear axle's ability to resist yaw.
     const handbrakeSteerDemand = THREE.MathUtils.clamp(
@@ -2428,6 +3107,8 @@ export class Vehicle {
       frontEffectiveGrip *
       frontWeight *
       this.corneringStiffnessFront *
+      frontCamberEffects.corneringStiffnessMultiplier *
+      pressureEffects.stiffnessMultiplier *
       1.3 *
       Math.sqrt(
         Math.max(
@@ -2439,6 +3120,8 @@ export class Vehicle {
       rearEffectiveGrip *
       rearWeight *
       this.corneringStiffnessRear *
+      rearCamberEffects.corneringStiffnessMultiplier *
+      pressureEffects.stiffnessMultiplier *
       1.3 *
       Math.sqrt(
         Math.max(
@@ -2453,14 +3136,28 @@ export class Vehicle {
     const linearYawDamping =
       axleYawStiffness /
       (Math.max(yawMomentOfInertia, 100) * Math.max(absForward, 3.0));
-    const minimumSlidingStiffness = handbrake ? 0.18 : 0.52;
+    const compoundPostPeakLoss =
+      TIRE_COMPOUNDS[this.tireState.compound].postPeakGripLoss;
+    const progressiveBreakawayRetention =
+      0.58 +
+      THREE.MathUtils.clamp(
+        (0.18 - compoundPostPeakLoss) * 0.8,
+        0,
+        0.08
+      );
+    const minimumSlidingStiffness = handbrake
+      ? 0.18
+      : progressiveBreakawayRetention;
     const slidingStiffnessRetention = THREE.MathUtils.lerp(
       1.0,
       minimumSlidingStiffness,
       slideSeverity
     );
     const yawDampingPerSecond = THREE.MathUtils.clamp(
-      linearYawDamping * 0.42 * slidingStiffnessRetention,
+      linearYawDamping *
+        0.42 *
+        slidingStiffnessRetention *
+        THREE.MathUtils.lerp(1.0, 2.10, directionChangeBlend),
       rearLockSeverity > 0.5 ? 0.12 : 0.45,
       12.0
     );
@@ -2468,6 +3165,38 @@ export class Vehicle {
     this.yawRate =
       (this.yawRate + yawAccel * deltaTime) *
       Math.exp(-yawDampingPerSecond * deltaTime);
+    const straightBrakeStability =
+      normalizedBrakeDemand *
+      highSpeedBrakeBlend *
+      (1.0 - serviceSteeringDemand) *
+      (handbrake ? 0 : 1);
+    if (straightBrakeStability > 0) {
+      this.yawRate *= Math.exp(
+        -straightBrakeStability * 3.8 * deltaTime
+      );
+      const straightBrakeYawLimit = THREE.MathUtils.lerp(
+        2.2,
+        0.55,
+        straightBrakeStability
+      );
+      this.yawRate = THREE.MathUtils.clamp(
+        this.yawRate,
+        -straightBrakeYawLimit,
+        straightBrakeYawLimit
+      );
+    }
+    if (directionChangeBlend > 0) {
+      const transientYawLimit = THREE.MathUtils.lerp(
+        2.2,
+        1.15,
+        directionChangeBlend
+      );
+      this.yawRate = THREE.MathUtils.clamp(
+        this.yawRate,
+        -transientYawLimit,
+        transientYawLimit
+      );
+    }
 
     const spinThreshold = THREE.MathUtils.lerp(1.9, 1.15, rearLockSeverity);
     if (
@@ -2497,6 +3226,8 @@ export class Vehicle {
 
       const steerNoise = (Math.random() - 0.5) * 0.025 * this.grassInstability * speedRatio;
       this.steerAngle += steerNoise;
+      this.steeringWheelAngle =
+        this.steerAngle * this.steeringRackRatio;
     }
 
     // --- APPLY FORCES TO VELOCITY ---
@@ -2611,16 +3342,29 @@ export class Vehicle {
 
     // --- TIRE WEAR ---
     if (this.tireWearEnabled) {
+      const fullFuelMass =
+        this.fuelCapacityLiters * this.fuelDensityKgPerLiter;
+      const referenceTireLoad =
+        (this.dryMass + fullFuelMass) * GRAVITY * 0.25;
+      const peakFrontTireLoad =
+        (frontWeight + frontLateralTransfer) * 0.5;
+      const peakRearTireLoad =
+        (rearWeight + rearLateralTransfer) * 0.5;
+      const peakNormalLoadRatio =
+        Math.max(peakFrontTireLoad, peakRearTireLoad) /
+        Math.max(referenceTireLoad, 1);
       accumulateWear(
         this.tireState,
         absForward / this.maxSpeed,
         averageSlipAngle,
         brakeIntensity,
-        deltaTime
+        deltaTime,
+        peakNormalLoadRatio
       );
     }
 
     this.prevThrottleValue = throttleValue;
+    this.previousTurnInput = turnInput;
   }
 
   private updatePositionAndEnforceBoundaries(deltaTime: number): void {
@@ -2722,6 +3466,7 @@ export class Vehicle {
     this.brakeInput = activeBrake;
 
     this.processEngineRpm(deltaTime, throttleValue);
+    this.updateFuelSystem(deltaTime);
     this.updateSuspensionModel(deltaTime);
 
     // NEW: unified tire physics replaces the old separate methods
@@ -2782,7 +3527,20 @@ export class Vehicle {
     this.isDrifting = false;
     this.driftAngle = 0;
     this.steerAngle = 0;
+    this.steeringWheelAngle = 0;
+    this.steeringTorqueNm = 0;
+    this.steeringAssistFraction = 0;
     this.turboSpoolLevel = 0;
+    this.engineTemperature = 25;
+    this.engineThrottlePosition = 0;
+    this.fuelConsumptionLitersPerHour = 0;
+    this.fuelDeliveryFactor =
+      this.fuelLiters > 0 || this.fuelCapacityLiters <= 0 ? 1 : 0;
+    this.isEngineStalled =
+      this.powertrainType === 'combustion' &&
+      this.fuelCapacityLiters > 0 &&
+      this.fuelLiters <= 0;
+    this.fuelTowRequired = false;
     this.suspensionOffset = 0;
     this.prevSpeed = 0;
     this.longitudinalAccel = 0;
@@ -2793,6 +3551,9 @@ export class Vehicle {
     this.isSpinning = false;
     this.spinTimer = 0;
     this.prevThrottleValue = 0;
+    this.serviceBrakePressure = 0;
+    this.previousTurnInput = 0;
+    this.steeringReversalTimer = 0;
     this.currentGear = 1;
     this.rpm = this.powertrainType === 'electric' ? 0 : 1000;
     this.isShifting = false;
@@ -2808,6 +3569,8 @@ export class Vehicle {
     this.relaxedFrontSlipAngle = 0;
     this.relaxedRearSlipAngle = 0;
     this.revMatchTargetRpm = 1000;
+    this.clutchEngagement = 1;
+    this.torqueConverterMultiplier = 1;
     this.brakeTemperatureFront = 25;
     this.brakeTemperatureRear = 25;
     this.suspensionModel.reset(pos.y);

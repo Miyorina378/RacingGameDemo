@@ -53,6 +53,49 @@ export class RaceMode extends BaseMode {
     this.vehicle.reset(this.startPos, this.startYaw);
   }
 
+  public handleFuelTow(): void {
+    let nearestIndex = 0;
+    let nearestDistanceSq = Infinity;
+    for (let i = 0; i < this.densePath.length; i++) {
+      const distanceSq =
+        this.vehicle.pos.distanceToSquared(this.densePath[i]);
+      if (distanceSq < nearestDistanceSq) {
+        nearestDistanceSq = distanceSq;
+        nearestIndex = i;
+      }
+    }
+
+    let clockwiseDistance = 0;
+    for (let i = nearestIndex; i > 0; i--) {
+      clockwiseDistance += this.densePath[i].distanceTo(
+        this.densePath[i - 1]
+      );
+    }
+    let counterClockwiseDistance = 0;
+    for (let i = nearestIndex; i < this.densePath.length - 1; i++) {
+      counterClockwiseDistance += this.densePath[i].distanceTo(
+        this.densePath[i + 1]
+      );
+    }
+    const recoveryDistance = Math.min(
+      clockwiseDistance,
+      counterClockwiseDistance
+    );
+    const towPenalty = THREE.MathUtils.clamp(
+      20 + recoveryDistance / 14,
+      20,
+      120
+    );
+
+    this.raceTime += towPenalty;
+    this.vehicle.refuel(1);
+    this.vehicle.reset(this.startPos, this.startYaw);
+    this.engine.callbacks.onGameStatus(
+      'playing',
+      `OUT OF FUEL — TOW PENALTY +${towPenalty.toFixed(1)}s`
+    );
+  }
+
   public init() {
     this.clearEnvironment();
     this.particles.clear();
