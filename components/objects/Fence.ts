@@ -5,11 +5,12 @@ import { Vehicle } from './Vehicle';
  * Enforces fence/track boundary based on callbacks provided in Vehicle.
  * Reflects velocity off the wall normal for realistic bounce-off behavior.
  */
-export function enforceFenceBoundary(vehicle: Vehicle, deltaTime: number): void {
+export function enforceFenceBoundary(vehicle: Vehicle): void {
   if (!vehicle.haveFence || vehicle.trackBoundary <= 0 || !vehicle.getTrackInfo) return;
 
-  const info = vehicle.getTrackInfo(vehicle.pos.x, vehicle.pos.z);
-  const activeBoundary = (info as any).trackBoundary ?? vehicle.trackBoundary;
+  const info = vehicle.getTrackInfo(vehicle.pos.x, vehicle.pos.z, vehicle.pos.y);
+  if (info.fence === false) return;
+  const activeBoundary = info.trackBoundary ?? vehicle.trackBoundary;
   const maxAllowedDist = activeBoundary - 1.2; // half car width
   if (info.dist > maxAllowedDist) {
     // Compute wall normal (pointing from track center toward car)

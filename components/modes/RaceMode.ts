@@ -2,12 +2,15 @@ import * as THREE from 'three';
 import { BaseMode } from './BaseMode';
 import { Checkpoint } from '../objects/Checkpoint';
 import { Obstacle } from '../objects/Obstacle';
-import { TRACKS_DATABASE } from '../config/TrackDatabase';
+import { TRACKS_DATABASE, TrackNode } from '../config/TrackDatabase';
 import { Vehicle } from '../objects/Vehicle';
 import { RacingAI } from '../objects/RacingAI';
 import { CARS_DATABASE } from '../config/CarDatabase';
 import { GameEngine } from '../gameEngine';
 import { ParticleSystem } from '../objects/ParticleSystem';
+
+const isTrackVector = (point: THREE.Vector3 | TrackNode): point is THREE.Vector3 =>
+  point instanceof THREE.Vector3 || 'isVector3' in point;
 
 export class RaceMode extends BaseMode {
   public checkpoints: Checkpoint[] = [];
@@ -113,10 +116,7 @@ export class RaceMode extends BaseMode {
     const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
     const path = trackConfig.path;
 
-    const pathVectors = path.map(p => {
-      if (p instanceof THREE.Vector3 || (p as any).isVector3) return p as THREE.Vector3;
-      return (p as any).pos as THREE.Vector3;
-    });
+    const pathVectors = path.map(p => (isTrackVector(p) ? p : p.pos));
 
     // Position car at the first marker facing the second marker
     const startPt = pathVectors[0];
@@ -158,7 +158,8 @@ export class RaceMode extends BaseMode {
 
     // Assign ground height callbacks for AI vehicles
     this.aiCars.forEach(ai => {
-      ai.vehicle.getGroundHeight = (x: number, z: number) => this.getGroundHeight(x, z);
+      ai.vehicle.getGroundHeight = (x: number, z: number, yHint?: number) =>
+        this.getGroundHeight(x, z, yHint);
     });
 
     // Position AI opponents on grid spots 0, 1, 2, 3, 4 (staggered pole position)
@@ -211,15 +212,17 @@ export class RaceMode extends BaseMode {
 
     // Sync guardrail, track info, and grass callbacks for all AI vehicles and their AI controllers
     const grassCallback = (x: number, z: number) => {
-      if (!trackConfig.HaveGrass) return false;
       const info = this.getTrackInfo(x, z);
-      const grassStart = info.width / 2 + (trackConfig.HaveCrub ? this.curbWidth : 0);
-      return info.dist >= grassStart && info.dist < (info.width / 2 + (trackConfig.HaveCrub ? this.curbWidth : 0) + (trackConfig.GrassWidth ?? 5.0));
+      const grassWidth = info.grassWidth ?? 0;
+      if (grassWidth <= 0) return false;
+      const grassStart = info.width / 2 + (info.curb ? this.curbWidth : 0);
+      return info.dist >= grassStart && info.dist < grassStart + grassWidth;
     };
-    const trackInfoCallback = (x: number, z: number) => this.getTrackInfo(x, z);
+    const trackInfoCallback = (x: number, z: number, yHint?: number) =>
+      this.getTrackInfo(x, z, yHint);
 
     this.aiCars.forEach(aiCar => {
-      aiCar.vehicle.haveFence = trackConfig.HaveFence;
+      aiCar.vehicle.haveFence = this.haveFence;
       aiCar.vehicle.trackBoundary = this.trackBoundary;
       aiCar.vehicle.getTrackInfo = trackInfoCallback;
       aiCar.vehicle.isOnGrass = grassCallback;

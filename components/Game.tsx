@@ -2064,12 +2064,24 @@ export default function Game() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       const getPos = (pt: THREE.Vector3 | TrackNode) => 'isVector3' in pt ? pt : pt.pos;
+      const pathPositions = path.map((pt) => getPos(pt));
+      const minimapCurve =
+        pathPositions.length > 2
+          ? new THREE.CatmullRomCurve3(
+              pathPositions.map((pt) => new THREE.Vector3(pt.x, 0, pt.z)),
+              true,
+              activeTrack.curveType || 'centripetal',
+              activeTrack.tension || 0.5
+            )
+          : null;
+      const minimapPoints = minimapCurve
+        ? minimapCurve.getSpacedPoints(Math.max(96, pathPositions.length * 16))
+        : pathPositions;
 
       // Find boundaries of the track to scale and center it
       let minX = Infinity, maxX = -Infinity;
       let minZ = Infinity, maxZ = -Infinity;
-      path.forEach(pt => {
-        const pos = getPos(pt);
+      minimapPoints.forEach(pos => {
         if (pos.x < minX) minX = pos.x;
         if (pos.x > maxX) maxX = pos.x;
         if (pos.z < minZ) minZ = pos.z;
@@ -2095,9 +2107,9 @@ export default function Game() {
 
       // Draw road line
       ctx.beginPath();
-      ctx.moveTo(mapX(getPos(path[0]).x), mapZ(getPos(path[0]).z));
-      for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(mapX(getPos(path[i]).x), mapZ(getPos(path[i]).z));
+      ctx.moveTo(mapX(minimapPoints[0].x), mapZ(minimapPoints[0].z));
+      for (let i = 1; i < minimapPoints.length; i++) {
+        ctx.lineTo(mapX(minimapPoints[i].x), mapZ(minimapPoints[i].z));
       }
       ctx.closePath();
       ctx.strokeStyle = 'rgba(6, 182, 212, 0.55)'; // cyan road line

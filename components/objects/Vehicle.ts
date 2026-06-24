@@ -85,8 +85,8 @@ export class Vehicle {
   public steeringWheelAngle = 0;
   public steeringTorqueNm = 0;
   public steeringAssistFraction = 0;
-  public getGroundHeight?: (x: number, z: number) => number;
-  public getTrackInfo?: (x: number, z: number) => {
+  public getGroundHeight?: (x: number, z: number, yHint?: number) => number;
+  public getTrackInfo?: (x: number, z: number, yHint?: number) => {
     dist: number;
     closestPt: THREE.Vector3;
     closestIdx?: number;
@@ -96,6 +96,9 @@ export class Vehicle {
     sideSign?: number;
     trackBoundary?: number;
     banking?: number;
+    curb?: boolean;
+    grassWidth?: number;
+    fence?: boolean;
   };
   public onFenceCollision?: (contactPt: THREE.Vector3) => void;
   public haveFence = false;
@@ -2262,7 +2265,7 @@ export class Vehicle {
         this.pos.x + sinYaw * forwardOffset + cosYaw * rightOffset;
       const z =
         this.pos.z + cosYaw * forwardOffset - sinYaw * rightOffset;
-      return this.getGroundHeight(x, z);
+      return this.getGroundHeight(x, z, this.pos.y);
     };
 
     const loadTransfer = this.massDynamics.calculateLoadTransfer({
@@ -2379,15 +2382,40 @@ export class Vehicle {
       0,
       1
     );
+    const compoundConfig =
+      TIRE_COMPOUNDS[this.tireState.compound] || TIRE_COMPOUNDS.normal;
+    const baseGripCoeff = this.getEffectiveTireGrip();
+    const economyColdGrip =
+      TIRE_COMPOUNDS.economy.gripMultiplier *
+      TIRE_COMPOUNDS.economy.coldGripFloor;
+    const racingSoftColdGrip =
+      TIRE_COMPOUNDS.normal.gripMultiplier *
+      TIRE_COMPOUNDS.normal.coldGripFloor;
+    const tireSteeringAuthority = THREE.MathUtils.clamp(
+      (baseGripCoeff - economyColdGrip) /
+        Math.max(racingSoftColdGrip - economyColdGrip, 0.01),
+      0,
+      1
+    );
 
     // --- STEERING INPUT: smoothly interpolate steer angle with speed sensitivity and assists ---
     // At high speeds, full steering angle causes instant tire saturation (extreme understeer).
-    // We scale down the max steering angle based on speed to keep tires near peak grip.
+    // We scale down the max steering angle based on speed to keep tires near peak grip,
+    // but better compounds now earn more usable rack angle instead of feeling capped.
     // However, if the player is drifting or handbraking, we allow a wider steering angle to control the slide or spin.
     const isDriftingOrHandbraking = this.isDrifting || handbrake;
     const steeringSpeedRatio = THREE.MathUtils.clamp(absForward / 45, 0, 1);
     const steeringFalloff = THREE.MathUtils.smoothstep(steeringSpeedRatio, 0.12, 0.92);
-    const highSpeedSteerLimit = this.maxSteeringAngle * (isDriftingOrHandbraking ? 0.38 : 0.16);
+    const highSpeedGripSteerRatio = THREE.MathUtils.clamp(
+      0.16 +
+        tireSteeringAuthority * 0.13 +
+        (this.driveType === 'AWD' && !handbrake ? 0.025 : 0),
+      0.16,
+      0.32
+    );
+    const highSpeedSteerLimit =
+      this.maxSteeringAngle *
+      (isDriftingOrHandbraking ? 0.38 : highSpeedGripSteerRatio);
     const maxSteer = THREE.MathUtils.lerp(this.maxSteeringAngle, highSpeedSteerLimit, steeringFalloff);
 
     // Dynamic Countersteer Assist (Stability Helper)
@@ -2512,11 +2540,9 @@ export class Vehicle {
     });
 
     // --- EFFECTIVE GRIP ---
-    const baseGripCoeff = this.getEffectiveTireGrip();
-
     let bankAngleRad = 0;
     if (this.getTrackInfo) {
-      const info = this.getTrackInfo(this.pos.x, this.pos.z);
+      const info = this.getTrackInfo(this.pos.x, this.pos.z, this.pos.y);
       if (info && info.banking !== undefined) {
         bankAngleRad = info.banking * (Math.PI / 180);
       }
@@ -2709,6 +2735,25 @@ export class Vehicle {
       if (this.upgrades.bodyControlModuleLevel > 0 && absForward < 12) {
         const tcsFactor = 1.0 - (0.12 * this.upgrades.bodyControlModuleLevel);
         driveForce *= tcsFactor;
+      }
+
+      if (this.driveType === 'AWD' && !handbrake) {
+        const steeringDemand = THREE.MathUtils.clamp(
+          Math.abs(this.steerAngle) / Math.max(maxSteer, 0.01),
+          0,
+          1
+        );
+        const cornerTorqueBlend =
+          steeringDemand *
+          THREE.MathUtils.smoothstep(absForward, 8, 34);
+        const torqueVectoringFloor =
+          this.powertrainType === 'electric' ? 0.68 : 0.78;
+        const torqueVectoringFactor = THREE.MathUtils.lerp(
+          1.0,
+          torqueVectoringFloor,
+          cornerTorqueBlend * (0.72 + tireSteeringAuthority * 0.28)
+        );
+        driveForce *= torqueVectoringFactor;
       }
     }
 
@@ -2996,9 +3041,9 @@ export class Vehicle {
       this.corneringStiffnessFront *
         frontCamberEffects.corneringStiffnessMultiplier *
         pressureEffects.stiffnessMultiplier,
-      TIRE_COMPOUNDS[this.tireState.compound].lateralPeakSlipAngle,
-      TIRE_COMPOUNDS[this.tireState.compound].postPeakGripLoss,
-      TIRE_COMPOUNDS[this.tireState.compound].postPeakFalloff
+      compoundConfig.lateralPeakSlipAngle,
+      compoundConfig.postPeakGripLoss,
+      compoundConfig.postPeakFalloff
     );
     let rearLatForce = -computeLateralForce(
       this.relaxedRearSlipAngle,
@@ -3007,9 +3052,9 @@ export class Vehicle {
       this.corneringStiffnessRear *
         rearCamberEffects.corneringStiffnessMultiplier *
         pressureEffects.stiffnessMultiplier,
-      TIRE_COMPOUNDS[this.tireState.compound].lateralPeakSlipAngle,
-      TIRE_COMPOUNDS[this.tireState.compound].postPeakGripLoss,
-      TIRE_COMPOUNDS[this.tireState.compound].postPeakFalloff
+      compoundConfig.lateralPeakSlipAngle,
+      compoundConfig.postPeakGripLoss,
+      compoundConfig.postPeakFalloff
     );
 
     const lowSpeedDampener = Math.min(1.0, absForward / 4.0);
@@ -3021,7 +3066,7 @@ export class Vehicle {
       frontLongForce,
       frontMaxGrip,
       1.05 * frontCamberEffects.longitudinalGripMultiplier,
-      TIRE_COMPOUNDS[this.tireState.compound].lateralEnvelopeScale *
+      compoundConfig.lateralEnvelopeScale *
         frontCamberEffects.lateralGripMultiplier
     );
     frontLatForce = frontCombined.lateral;
@@ -3032,7 +3077,7 @@ export class Vehicle {
       rearLongForce,
       rearMaxGrip,
       1.05 * rearCamberEffects.longitudinalGripMultiplier,
-      TIRE_COMPOUNDS[this.tireState.compound].lateralEnvelopeScale *
+      compoundConfig.lateralEnvelopeScale *
         rearCamberEffects.lateralGripMultiplier
     );
     rearLatForce = rearCombined.lateral;
@@ -3136,8 +3181,7 @@ export class Vehicle {
     const linearYawDamping =
       axleYawStiffness /
       (Math.max(yawMomentOfInertia, 100) * Math.max(absForward, 3.0));
-    const compoundPostPeakLoss =
-      TIRE_COMPOUNDS[this.tireState.compound].postPeakGripLoss;
+    const compoundPostPeakLoss = compoundConfig.postPeakGripLoss;
     const progressiveBreakawayRetention =
       0.58 +
       THREE.MathUtils.clamp(
@@ -3355,7 +3399,7 @@ export class Vehicle {
         Math.max(referenceTireLoad, 1);
       accumulateWear(
         this.tireState,
-        absForward / this.maxSpeed,
+        absForward / Math.max(this.maxSpeed, 1),
         averageSlipAngle,
         brakeIntensity,
         deltaTime,
@@ -3377,7 +3421,7 @@ export class Vehicle {
     this.pos.x += this.velocityX * visualSpeedScale * deltaTime;
     this.pos.z += this.velocityZ * visualSpeedScale * deltaTime;
 
-    enforceFenceBoundary(this, deltaTime);
+    enforceFenceBoundary(this);
   }
 
   private updateGravitySuspensionAndRoll(

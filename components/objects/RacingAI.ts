@@ -24,7 +24,7 @@ export class RacingAI {
   private lateralOffset: number;    // Lane offset in track-normal units
 
   // --- Track awareness callbacks (set externally by RaceMode) ---
-  public getTrackInfo?: (x: number, z: number) => {
+  public getTrackInfo?: (x: number, z: number, yHint?: number) => {
     dist: number;
     closestPt: THREE.Vector3;
     closestIdx?: number;
@@ -34,6 +34,9 @@ export class RacingAI {
     sideSign?: number;
     trackBoundary?: number;
     banking?: number;
+    curb?: boolean;
+    grassWidth?: number;
+    fence?: boolean;
   };
   public isOnGrass?: (x: number, z: number) => boolean;
   public trackBoundary: number = 0;

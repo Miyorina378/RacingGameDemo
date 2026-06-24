@@ -12,6 +12,9 @@ export interface GameMode {
   handleFuelTow(): void;
 }
 
+const isTrackVector = (point: THREE.Vector3 | TrackNode): point is THREE.Vector3 =>
+  point instanceof THREE.Vector3 || 'isVector3' in point;
+
 export abstract class BaseMode implements GameMode {
   protected engine: GameEngine;
   protected scene: THREE.Scene;
@@ -27,6 +30,12 @@ export abstract class BaseMode implements GameMode {
   protected roadSamplePoints: THREE.Vector3[] = [];
   protected roadSampleWidths: number[] = [];
   protected roadSampleBankings: number[] = [];
+  protected roadSampleLeftCurbs: boolean[] = [];
+  protected roadSampleRightCurbs: boolean[] = [];
+  protected roadSampleLeftGrassWidths: number[] = [];
+  protected roadSampleRightGrassWidths: number[] = [];
+  protected roadSampleLeftFences: boolean[] = [];
+  protected roadSampleRightFences: boolean[] = [];
   protected roadSampleLeftPoints: THREE.Vector3[] = [];
   protected roadSampleRightPoints: THREE.Vector3[] = [];
   protected roadSampleLeftScale: number[] = [];
@@ -63,8 +72,10 @@ export abstract class BaseMode implements GameMode {
     this.keys = keys;
 
     // Assign ground height and boundary callbacks to the player vehicle
-    this.vehicle.getGroundHeight = (x: number, z: number) => this.getGroundHeight(x, z);
-    this.vehicle.getTrackInfo = (x: number, z: number) => this.getTrackInfo(x, z);
+    this.vehicle.getGroundHeight = (x: number, z: number, yHint?: number) =>
+      this.getGroundHeight(x, z, yHint);
+    this.vehicle.getTrackInfo = (x: number, z: number, yHint?: number) =>
+      this.getTrackInfo(x, z, yHint);
     this.vehicle.onFenceCollision = (contactPt: THREE.Vector3) => {
       this.particles.emitSparks(2, contactPt, 0xffaa00);
     };
@@ -140,9 +151,7 @@ export abstract class BaseMode implements GameMode {
     this.grassUniforms.uTime.value += deltaTime;
     this.roadUniforms.uTime.value += deltaTime;
     if (this.engine && this.engine.sky) {
-      this.roadUniforms.uTimeOfDayVal.value = (this.engine.sky as any).uTimeOfDayVal !== undefined 
-        ? (this.engine.sky as any).uTimeOfDayVal 
-        : 1.0;
+      this.roadUniforms.uTimeOfDayVal.value = this.engine.sky.getTimeOfDayVal();
     }
   }
 
@@ -161,33 +170,74 @@ export abstract class BaseMode implements GameMode {
     this.haveGrass = config.HaveGrass ?? false;
     this.grassWidth = config.GrassWidth ?? 5.0;
     this.haveCurb = config.HaveCrub ?? false;
-    
-    // We will dynamically calculate trackBoundary in getTrackInfo for variable width, 
-    // but keep a max trackBoundary for fallback if needed.
-    let maxRoadWidth = config.roadWidth;
 
     const pathNodes = pathPointsRaw.map(p => {
-      if (p instanceof THREE.Vector3 || (p as any).isVector3) {
-        return { pos: p as THREE.Vector3, width: config.roadWidth, banking: 0 };
+      if (isTrackVector(p)) {
+        const grassWidth = this.haveGrass ? this.grassWidth : 0;
+        return {
+          pos: p,
+          width: config.roadWidth,
+          banking: 0,
+          leftCurb: this.haveCurb,
+          rightCurb: this.haveCurb,
+          leftGrassWidth: grassWidth,
+          rightGrassWidth: grassWidth,
+          leftFence: this.haveFence,
+          rightFence: this.haveFence
+        };
       }
+
       const tn = p as TrackNode;
-      const w = tn.width ?? config.roadWidth;
-      if (w > maxRoadWidth) maxRoadWidth = w;
-      return { pos: tn.pos, width: w, banking: tn.banking ?? 0 };
+      const bothCurb = tn.curb ?? this.haveCurb;
+      const bothGrassWidth =
+        tn.grassWidth ?? (this.haveGrass ? this.grassWidth : 0);
+      const bothFence = tn.fence ?? this.haveFence;
+
+      return {
+        pos: tn.pos,
+        width: tn.width ?? config.roadWidth,
+        banking: tn.banking ?? 0,
+        leftCurb: tn.leftCurb ?? bothCurb,
+        rightCurb: tn.rightCurb ?? bothCurb,
+        leftGrassWidth: Math.max(0, tn.leftGrassWidth ?? bothGrassWidth),
+        rightGrassWidth: Math.max(0, tn.rightGrassWidth ?? bothGrassWidth),
+        leftFence: tn.leftFence ?? bothFence,
+        rightFence: tn.rightFence ?? bothFence
+      };
     });
 
+    let maxTrackBoundary = config.roadWidth / 2;
+    pathNodes.forEach((node) => {
+      maxTrackBoundary = Math.max(
+        maxTrackBoundary,
+        node.width / 2 +
+          (node.leftCurb ? this.curbWidth : 0) +
+          node.leftGrassWidth,
+        node.width / 2 +
+          (node.rightCurb ? this.curbWidth : 0) +
+          node.rightGrassWidth
+      );
+    });
+    this.haveCurb = pathNodes.some((node) => node.leftCurb || node.rightCurb);
+    this.haveGrass = pathNodes.some(
+      (node) => node.leftGrassWidth > 0.05 || node.rightGrassWidth > 0.05
+    );
+    this.haveFence = pathNodes.some(
+      (node) => node.leftFence || node.rightFence
+    );
+
     this.roadWidth = config.roadWidth;
-    this.trackBoundary = maxRoadWidth / 2 + (this.haveCurb ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0);
+    this.trackBoundary = maxTrackBoundary;
 
     // Sync values to the player vehicle
     this.vehicle.haveFence = this.haveFence;
     this.vehicle.trackBoundary = this.trackBoundary;
     this.vehicle.isOnGrass = (x: number, z: number) => {
-      if (!this.haveGrass) return false;
       const info = this.getTrackInfo(x, z);
-      const scale = info.sideSign === 1 ? (info.leftScale ?? 1.0) : (info.rightScale ?? 1.0);
-      const grassStart = (info.width / 2 + (this.haveCurb ? this.curbWidth : 0)) * scale;
-      const grassEnd = grassStart + this.grassWidth * scale;
+      const grassWidth = info.grassWidth ?? 0;
+      if (grassWidth <= 0) return false;
+      const grassStart = info.width / 2 + (info.curb ? this.curbWidth : 0);
+      const grassEnd = grassStart + grassWidth;
       return info.dist >= grassStart && info.dist < grassEnd;
     };
 
@@ -204,17 +254,24 @@ export abstract class BaseMode implements GameMode {
     const samplePoints = curve.getSpacedPoints(totalSamplePoints);
     this.roadSamplePoints = samplePoints;
     
-    // Calculate interpolated width and banking for each sample point
+    // Calculate interpolated width, banking, and side options for each sample point
     const sampleWidths: number[] = [];
     const sampleBankings: number[] = [];
+    const sampleLeftCurbs: boolean[] = [];
+    const sampleRightCurbs: boolean[] = [];
+    const sampleLeftGrassWidths: number[] = [];
+    const sampleRightGrassWidths: number[] = [];
+    const sampleLeftFences: boolean[] = [];
+    const sampleRightFences: boolean[] = [];
     for (let i = 0; i < samplePoints.length; i++) {
         // Handle closed curve last point duplicating the first
         const u = i === samplePoints.length - 1 ? 1 : i / (samplePoints.length - 1);
         const t = curve.getUtoTmapping(u, 0); // Need distance to t map
-        let exactIdx = t * roadPoints.length;
-        let idx0 = Math.floor(exactIdx) % roadPoints.length;
-        let idx1 = (idx0 + 1) % roadPoints.length;
-        let frac = exactIdx - Math.floor(exactIdx);
+        const exactIdx = t * roadPoints.length;
+        const idx0 = Math.floor(exactIdx) % roadPoints.length;
+        const idx1 = (idx0 + 1) % roadPoints.length;
+        const frac = exactIdx - Math.floor(exactIdx);
+        const nearestNode = frac < 0.5 ? pathNodes[idx0] : pathNodes[idx1];
         
         const w0 = pathNodes[idx0].width;
         const w1 = pathNodes[idx1].width;
@@ -223,9 +280,31 @@ export abstract class BaseMode implements GameMode {
         const b0 = pathNodes[idx0].banking ?? 0;
         const b1 = pathNodes[idx1].banking ?? 0;
         sampleBankings.push(b0 + (b1 - b0) * frac);
+
+        sampleLeftCurbs.push(nearestNode.leftCurb);
+        sampleRightCurbs.push(nearestNode.rightCurb);
+        sampleLeftGrassWidths.push(
+          pathNodes[idx0].leftGrassWidth +
+            (pathNodes[idx1].leftGrassWidth - pathNodes[idx0].leftGrassWidth) *
+              frac
+        );
+        sampleRightGrassWidths.push(
+          pathNodes[idx0].rightGrassWidth +
+            (pathNodes[idx1].rightGrassWidth -
+              pathNodes[idx0].rightGrassWidth) *
+              frac
+        );
+        sampleLeftFences.push(nearestNode.leftFence);
+        sampleRightFences.push(nearestNode.rightFence);
     }
     this.roadSampleWidths = sampleWidths;
     this.roadSampleBankings = sampleBankings;
+    this.roadSampleLeftCurbs = sampleLeftCurbs;
+    this.roadSampleRightCurbs = sampleRightCurbs;
+    this.roadSampleLeftGrassWidths = sampleLeftGrassWidths;
+    this.roadSampleRightGrassWidths = sampleRightGrassWidths;
+    this.roadSampleLeftFences = sampleLeftFences;
+    this.roadSampleRightFences = sampleRightFences;
 
     const leftPoints: THREE.Vector3[] = [];
     const rightPoints: THREE.Vector3[] = [];
@@ -252,12 +331,7 @@ export abstract class BaseMode implements GameMode {
       } else {
         normal.normalize();
       }
-      
-      const bankingAngle = (this.roadSampleBankings[i] ?? 0) * (Math.PI / 180);
-      if (Math.abs(bankingAngle) > 0.0001) {
-        normal.applyAxisAngle(tangent, bankingAngle);
-      }
-      
+
       normals.push(normal);
     }
 
@@ -267,9 +341,15 @@ export abstract class BaseMode implements GameMode {
     
     const getWMax = (idx: number) => {
       const w = sampleWidths[idx] / 2;
-      const curb = this.haveCurb ? this.curbWidth : 0;
-      const grass = this.haveGrass ? this.grassWidth : 0;
-      return w + curb + grass;
+      const left =
+        w +
+        (sampleLeftCurbs[idx] ? this.curbWidth : 0) +
+        sampleLeftGrassWidths[idx];
+      const right =
+        w +
+        (sampleRightCurbs[idx] ? this.curbWidth : 0) +
+        sampleRightGrassWidths[idx];
+      return Math.max(left, right);
     };
 
     const safety = 0.85;
@@ -320,6 +400,51 @@ export abstract class BaseMode implements GameMode {
       }
     }
 
+    const remoteOverlapStep = Math.max(
+      3,
+      Math.floor(samplePoints.length / 700)
+    );
+    const neighborSkip = Math.max(20, Math.floor(samplePoints.length * 0.025));
+    for (let i = 0; i < samplePoints.length; i += remoteOverlapStep) {
+      for (
+        let j = i + neighborSkip;
+        j < samplePoints.length;
+        j += remoteOverlapStep
+      ) {
+        const wrappedGap = Math.min(
+          Math.abs(j - i),
+          samplePoints.length - Math.abs(j - i)
+        );
+        if (wrappedGap < neighborSkip) continue;
+
+        const dx = samplePoints[i].x - samplePoints[j].x;
+        const dz = samplePoints[i].z - samplePoints[j].z;
+        const distance = Math.hypot(dx, dz);
+        const heightGap = Math.abs(samplePoints[i].y - samplePoints[j].y);
+        if (heightGap > 5.5) continue;
+        const reachI = getWMax(i);
+        const reachJ = getWMax(j);
+        const neededClearance = reachI + reachJ + 3.0;
+
+        if (distance < neededClearance) {
+          const scaleI = THREE.MathUtils.clamp(
+            (distance * 0.47) / Math.max(reachI, 1),
+            0.25,
+            1
+          );
+          const scaleJ = THREE.MathUtils.clamp(
+            (distance * 0.47) / Math.max(reachJ, 1),
+            0.25,
+            1
+          );
+          leftScale[i] = Math.min(leftScale[i], scaleI);
+          rightScale[i] = Math.min(rightScale[i], scaleI);
+          leftScale[j] = Math.min(leftScale[j], scaleJ);
+          rightScale[j] = Math.min(rightScale[j], scaleJ);
+        }
+      }
+    }
+
     // Smooth the scale factors to make the transition very smooth
     const smoothScale = (arr: number[]) => {
       const smoothed = [...arr];
@@ -336,21 +461,42 @@ export abstract class BaseMode implements GameMode {
     this.roadSampleLeftScale = smoothScale(leftScale);
     this.roadSampleRightScale = smoothScale(rightScale);
 
+    const roadPointAt = (
+      idx: number,
+      lateralOffset: number,
+      yOffset: number = 0.05
+    ) => {
+      const pt = samplePoints[idx];
+      const normal = normals[idx];
+      const halfWidth = Math.max(sampleWidths[idx] / 2, 1);
+      const bankingAngle =
+        (sampleBankings[idx] ?? 0) * (Math.PI / 180);
+      const bankScale = Math.min(1, 12 / halfWidth);
+      const bankHeight =
+        Math.sin(bankingAngle) *
+        THREE.MathUtils.clamp(lateralOffset, -halfWidth, halfWidth) *
+        bankScale;
+      const y = Math.max(pt.y - 1.1, pt.y + yOffset + bankHeight);
+
+      return new THREE.Vector3(pt.x, y, pt.z).addScaledVector(
+        normal,
+        lateralOffset
+      );
+    };
+
     // 4. Create flat road surface geometry using a custom 2D ribbon mesh
     const roadGeom = new THREE.BufferGeometry();
     const roadPosArray = new Float32Array(samplePoints.length * 2 * 3);
     const roadIndexArray: number[] = [];
 
     for (let i = 0; i < samplePoints.length; i++) {
-      const pt = samplePoints[i];
-      const normal = normals[i];
       const w = sampleWidths[i] / 2;
       const lScale = this.roadSampleLeftScale[i];
       const rScale = this.roadSampleRightScale[i];
 
       // Save points for boundaries and lines
-      const left = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, w * lScale);
-      const right = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, -w * rScale);
+      const left = roadPointAt(i, w * lScale);
+      const right = roadPointAt(i, -w * rScale);
       leftPoints.push(left);
       rightPoints.push(right);
 
@@ -476,15 +622,13 @@ export abstract class BaseMode implements GameMode {
     const lineWidth = 0.15;
 
     for (let i = 0; i < samplePoints.length; i++) {
-      const pt = samplePoints[i];
-      const normal = normals[i];
       const w = sampleWidths[i] / 2;
       const lScale = this.roadSampleLeftScale[i];
       const rScale = this.roadSampleRightScale[i];
 
       // Left edge line
-      const l1 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (w - 0.4) * lScale);
-      const l2 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (w - 0.4 - lineWidth) * lScale);
+      const l1 = roadPointAt(i, (w - 0.4) * lScale, 0.058);
+      const l2 = roadPointAt(i, (w - 0.4 - lineWidth) * lScale, 0.058);
       leftLinePos[i * 6] = l1.x;
       leftLinePos[i * 6 + 1] = l1.y;
       leftLinePos[i * 6 + 2] = l1.z;
@@ -493,8 +637,8 @@ export abstract class BaseMode implements GameMode {
       leftLinePos[i * 6 + 5] = l2.z;
 
       // Right edge line
-      const r1 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (-w + 0.4) * rScale);
-      const r2 = new THREE.Vector3(pt.x, 0.052, pt.z).addScaledVector(normal, (-w + 0.4 + lineWidth) * rScale);
+      const r1 = roadPointAt(i, (-w + 0.4) * rScale, 0.058);
+      const r2 = roadPointAt(i, (-w + 0.4 + lineWidth) * rScale, 0.058);
       rightLinePos[i * 6] = r1.x;
       rightLinePos[i * 6 + 1] = r1.y;
       rightLinePos[i * 6 + 2] = r1.z;
@@ -577,7 +721,9 @@ export abstract class BaseMode implements GameMode {
       this.environmentGroup.add(centerLineMesh);
     }
 
-    if (this.haveCurb) {
+    const hasAnyCurb =
+      sampleLeftCurbs.some(Boolean) || sampleRightCurbs.some(Boolean);
+    if (hasAnyCurb) {
       // 7. Create Alternating Red & White Curbs
       const redCurbGeom = new THREE.BufferGeometry();
       const whiteCurbGeom = new THREE.BufferGeometry();
@@ -636,6 +782,10 @@ export abstract class BaseMode implements GameMode {
         const lScaleNext = this.roadSampleLeftScale[next_i];
         const rScale = this.roadSampleRightScale[i];
         const rScaleNext = this.roadSampleRightScale[next_i];
+        const hasLeftCurbSegment =
+          sampleLeftCurbs[i] || sampleLeftCurbs[next_i];
+        const hasRightCurbSegment =
+          sampleRightCurbs[i] || sampleRightCurbs[next_i];
 
         // Add Left side curbs
         const l_inner_bottom = leftPoints[i];
@@ -657,28 +807,36 @@ export abstract class BaseMode implements GameMode {
 
         if (isRed) {
           // Update red indexes sequentially for both left and right curbs
-          redCurbVertIndex = addCurbFace(
-            l_inner_bottom, l_inner_top, l_outer_top,
-            l_inner_bottom_next, l_inner_top_next, l_outer_top_next,
-            redCurbPos, redCurbIndex, redCurbVertIndex
-          );
-          redCurbVertIndex = addCurbFace(
-            r_inner_bottom, r_inner_top, r_outer_top,
-            r_inner_bottom_next, r_inner_top_next, r_outer_top_next,
-            redCurbPos, redCurbIndex, redCurbVertIndex
-          );
+          if (hasLeftCurbSegment) {
+            redCurbVertIndex = addCurbFace(
+              l_inner_bottom, l_inner_top, l_outer_top,
+              l_inner_bottom_next, l_inner_top_next, l_outer_top_next,
+              redCurbPos, redCurbIndex, redCurbVertIndex
+            );
+          }
+          if (hasRightCurbSegment) {
+            redCurbVertIndex = addCurbFace(
+              r_inner_bottom, r_inner_top, r_outer_top,
+              r_inner_bottom_next, r_inner_top_next, r_outer_top_next,
+              redCurbPos, redCurbIndex, redCurbVertIndex
+            );
+          }
         } else {
           // Update white indexes sequentially for both left and right curbs
-          whiteCurbVertIndex = addCurbFace(
-            l_inner_bottom, l_inner_top, l_outer_top,
-            l_inner_bottom_next, l_inner_top_next, l_outer_top_next,
-            whiteCurbPos, whiteCurbIndex, whiteCurbVertIndex
-          );
-          whiteCurbVertIndex = addCurbFace(
-            r_inner_bottom, r_inner_top, r_outer_top,
-            r_inner_bottom_next, r_inner_top_next, r_outer_top_next,
-            whiteCurbPos, whiteCurbIndex, whiteCurbVertIndex
-          );
+          if (hasLeftCurbSegment) {
+            whiteCurbVertIndex = addCurbFace(
+              l_inner_bottom, l_inner_top, l_outer_top,
+              l_inner_bottom_next, l_inner_top_next, l_outer_top_next,
+              whiteCurbPos, whiteCurbIndex, whiteCurbVertIndex
+            );
+          }
+          if (hasRightCurbSegment) {
+            whiteCurbVertIndex = addCurbFace(
+              r_inner_bottom, r_inner_top, r_outer_top,
+              r_inner_bottom_next, r_inner_top_next, r_outer_top_next,
+              whiteCurbPos, whiteCurbIndex, whiteCurbVertIndex
+            );
+          }
         }
       }
 
@@ -751,7 +909,10 @@ export abstract class BaseMode implements GameMode {
     }
 
     // 7.5. Create Grass Ribbon (after curb but before fence)
-    if (this.haveGrass) {
+    const hasAnyGrass =
+      sampleLeftGrassWidths.some((width) => width > 0.05) ||
+      sampleRightGrassWidths.some((width) => width > 0.05);
+    if (hasAnyGrass) {
       const grassGeom = new THREE.BufferGeometry();
       const grassPos: number[] = [];
       const grassIndex: number[] = [];
@@ -769,20 +930,54 @@ export abstract class BaseMode implements GameMode {
         const rScale = this.roadSampleRightScale[i];
         const rScaleNext = this.roadSampleRightScale[next_i];
 
-        const l_innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * lScale;
-        const l_innerOffsetNext = (this.roadSampleWidths[next_i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * lScaleNext;
-        const l_outerOffset = l_innerOffset + this.grassWidth * lScale;
-        const l_outerOffsetNext = l_innerOffsetNext + this.grassWidth * lScaleNext;
+        const leftGrassWidth = sampleLeftGrassWidths[i];
+        const leftGrassWidthNext = sampleLeftGrassWidths[next_i];
+        const rightGrassWidth = sampleRightGrassWidths[i];
+        const rightGrassWidthNext = sampleRightGrassWidths[next_i];
+        const hasLeftGrassSegment =
+          leftGrassWidth > 0.05 || leftGrassWidthNext > 0.05;
+        const hasRightGrassSegment =
+          rightGrassWidth > 0.05 || rightGrassWidthNext > 0.05;
 
-        const r_innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * rScale;
-        const r_innerOffsetNext = (this.roadSampleWidths[next_i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * rScaleNext;
-        const r_outerOffset = r_innerOffset + this.grassWidth * rScale;
-        const r_outerOffsetNext = r_innerOffsetNext + this.grassWidth * rScaleNext;
+        const l_innerOffset =
+          (this.roadSampleWidths[i] / 2 +
+            (sampleLeftCurbs[i] ? this.curbWidth : 0)) *
+          lScale;
+        const l_innerOffsetNext =
+          (this.roadSampleWidths[next_i] / 2 +
+            (sampleLeftCurbs[next_i] ? this.curbWidth : 0)) *
+          lScaleNext;
+        const l_outerOffset = l_innerOffset + leftGrassWidth * lScale;
+        const l_outerOffsetNext =
+          l_innerOffsetNext + leftGrassWidthNext * lScaleNext;
 
-        const l_in_y = pt.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
-        const l_out_y = pt.y + 0.02;
-        const l_in_y_next = ptNext.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
-        const l_out_y_next = ptNext.y + 0.02;
+        const r_innerOffset =
+          (this.roadSampleWidths[i] / 2 +
+            (sampleRightCurbs[i] ? this.curbWidth : 0)) *
+          rScale;
+        const r_innerOffsetNext =
+          (this.roadSampleWidths[next_i] / 2 +
+            (sampleRightCurbs[next_i] ? this.curbWidth : 0)) *
+          rScaleNext;
+        const r_outerOffset = r_innerOffset + rightGrassWidth * rScale;
+        const r_outerOffsetNext =
+          r_innerOffsetNext + rightGrassWidthNext * rScaleNext;
+
+        const l_in_y =
+          leftPoints[i].y + (sampleLeftCurbs[i] ? this.curbHeight : 0);
+        const l_out_y = Math.max(pt.y + 0.02, l_in_y - 0.24);
+        const l_in_y_next =
+          leftPoints[next_i].y +
+          (sampleLeftCurbs[next_i] ? this.curbHeight : 0);
+        const l_out_y_next = Math.max(ptNext.y + 0.02, l_in_y_next - 0.24);
+
+        const r_in_y =
+          rightPoints[i].y + (sampleRightCurbs[i] ? this.curbHeight : 0);
+        const r_out_y = Math.max(pt.y + 0.02, r_in_y - 0.24);
+        const r_in_y_next =
+          rightPoints[next_i].y +
+          (sampleRightCurbs[next_i] ? this.curbHeight : 0);
+        const r_out_y_next = Math.max(ptNext.y + 0.02, r_in_y_next - 0.24);
 
         // Left grass vertices (sloped from innerHeight down to outerHeight)
         const l_in = new THREE.Vector3(pt.x, l_in_y, pt.z).addScaledVector(normal, l_innerOffset);
@@ -792,31 +987,35 @@ export abstract class BaseMode implements GameMode {
         const l_out_next = new THREE.Vector3(ptNext.x, l_out_y_next, ptNext.z).addScaledVector(normalNext, l_outerOffsetNext);
 
         // Right grass vertices
-        const r_in = new THREE.Vector3(pt.x, l_in_y, pt.z).addScaledVector(normal, -r_innerOffset);
-        const r_out = new THREE.Vector3(pt.x, l_out_y, pt.z).addScaledVector(normal, -r_outerOffset);
+        const r_in = new THREE.Vector3(pt.x, r_in_y, pt.z).addScaledVector(normal, -r_innerOffset);
+        const r_out = new THREE.Vector3(pt.x, r_out_y, pt.z).addScaledVector(normal, -r_outerOffset);
         
-        const r_in_next = new THREE.Vector3(ptNext.x, l_in_y_next, ptNext.z).addScaledVector(normalNext, -r_innerOffsetNext);
-        const r_out_next = new THREE.Vector3(ptNext.x, l_out_y_next, ptNext.z).addScaledVector(normalNext, -r_outerOffsetNext);
+        const r_in_next = new THREE.Vector3(ptNext.x, r_in_y_next, ptNext.z).addScaledVector(normalNext, -r_innerOffsetNext);
+        const r_out_next = new THREE.Vector3(ptNext.x, r_out_y_next, ptNext.z).addScaledVector(normalNext, -r_outerOffsetNext);
 
         // Left side grass ground
-        grassPos.push(l_in.x, l_in.y, l_in.z);
-        grassPos.push(l_out.x, l_out.y, l_out.z);
-        grassPos.push(l_in_next.x, l_in_next.y, l_in_next.z);
-        grassPos.push(l_out_next.x, l_out_next.y, l_out_next.z);
+        if (hasLeftGrassSegment) {
+          grassPos.push(l_in.x, l_in.y, l_in.z);
+          grassPos.push(l_out.x, l_out.y, l_out.z);
+          grassPos.push(l_in_next.x, l_in_next.y, l_in_next.z);
+          grassPos.push(l_out_next.x, l_out_next.y, l_out_next.z);
 
-        grassIndex.push(grassVertIndex + 0, grassVertIndex + 1, grassVertIndex + 2);
-        grassIndex.push(grassVertIndex + 1, grassVertIndex + 3, grassVertIndex + 2);
-        grassVertIndex += 4;
+          grassIndex.push(grassVertIndex + 0, grassVertIndex + 1, grassVertIndex + 2);
+          grassIndex.push(grassVertIndex + 1, grassVertIndex + 3, grassVertIndex + 2);
+          grassVertIndex += 4;
+        }
 
         // Right side grass ground
-        grassPos.push(r_in.x, r_in.y, r_in.z);
-        grassPos.push(r_out.x, r_out.y, r_out.z);
-        grassPos.push(r_in_next.x, r_in_next.y, r_in_next.z);
-        grassPos.push(r_out_next.x, r_out_next.y, r_out_next.z);
+        if (hasRightGrassSegment) {
+          grassPos.push(r_in.x, r_in.y, r_in.z);
+          grassPos.push(r_out.x, r_out.y, r_out.z);
+          grassPos.push(r_in_next.x, r_in_next.y, r_in_next.z);
+          grassPos.push(r_out_next.x, r_out_next.y, r_out_next.z);
 
-        grassIndex.push(grassVertIndex + 0, grassVertIndex + 2, grassVertIndex + 1);
-        grassIndex.push(grassVertIndex + 1, grassVertIndex + 2, grassVertIndex + 3);
-        grassVertIndex += 4;
+          grassIndex.push(grassVertIndex + 0, grassVertIndex + 2, grassVertIndex + 1);
+          grassIndex.push(grassVertIndex + 1, grassVertIndex + 2, grassVertIndex + 3);
+          grassVertIndex += 4;
+        }
       }
 
       grassGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(grassPos), 3));
@@ -968,18 +1167,29 @@ export abstract class BaseMode implements GameMode {
             tangent.subVectors(samplePoints[1], samplePoints[0]).normalize();
           }
 
-          const innerHeight = pt.y + 0.05 + (this.haveCurb ? this.curbHeight : 0);
-          const outerHeight = pt.y + 0.02;
-
           for (let side = 0; side < 2; side++) {
             const sideSign = side === 0 ? 1 : -1;
             const scale = side === 0 ? this.roadSampleLeftScale[i] : this.roadSampleRightScale[i];
+            const grassWidth =
+              side === 0
+                ? sampleLeftGrassWidths[i]
+                : sampleRightGrassWidths[i];
+            if (grassWidth <= 0.05) continue;
 
-            const innerOffset = (this.roadSampleWidths[i] / 2 + (this.haveCurb ? this.curbWidth : 0)) * scale;
+            const hasCurb =
+              side === 0 ? sampleLeftCurbs[i] : sampleRightCurbs[i];
+            const roadEdge = side === 0 ? leftPoints[i] : rightPoints[i];
+            const innerHeight =
+              roadEdge.y + (hasCurb ? this.curbHeight : 0);
+            const outerHeight = Math.max(pt.y + 0.02, innerHeight - 0.24);
+            const innerOffset =
+              (this.roadSampleWidths[i] / 2 +
+                (hasCurb ? this.curbWidth : 0)) *
+              scale;
 
             for (let b = 0; b < bladesPerSegment; b++) {
               // Scatter randomly within the grass strip
-              const randomNormOffset = innerOffset + Math.random() * this.grassWidth * scale;
+              const randomNormOffset = innerOffset + Math.random() * grassWidth * scale;
               const randomTangOffset = (Math.random() - 0.5) * 4.0;
 
               const bladePos = new THREE.Vector3()
@@ -988,7 +1198,7 @@ export abstract class BaseMode implements GameMode {
                 .addScaledVector(tangent, randomTangOffset);
 
               // Interpolate height on the slope
-              const t = (randomNormOffset - innerOffset) / (this.grassWidth * (scale > 0.0001 ? scale : 1));
+              const t = (randomNormOffset - innerOffset) / (grassWidth * (scale > 0.0001 ? scale : 1));
               bladePos.y = THREE.MathUtils.lerp(innerHeight, outerHeight, t);
 
               dummy.position.copy(bladePos);
@@ -1018,7 +1228,9 @@ export abstract class BaseMode implements GameMode {
     }
 
     // 8. Create Normal Racing Fences (Motorsport Steel Guardrails or Silverstone Catch Fences on Concrete Barriers)
-    if (this.haveFence) {
+    const hasAnyFence =
+      sampleLeftFences.some(Boolean) || sampleRightFences.some(Boolean);
+    if (hasAnyFence) {
       const FenceType = config.FenceType || 'guardrail';
       const leftBoundPoints: THREE.Vector3[] = [];
       const rightBoundPoints: THREE.Vector3[] = [];
@@ -1029,15 +1241,33 @@ export abstract class BaseMode implements GameMode {
         const halfWidth = this.roadSampleWidths[i] / 2;
         const lScale = this.roadSampleLeftScale[i];
         const rScale = this.roadSampleRightScale[i];
-        const baseOffset = halfWidth + (this.haveCurb ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0);
-
-        const totalOffsetL = baseOffset * lScale;
-        const totalOffsetR = baseOffset * rScale;
+        const totalOffsetL =
+          (halfWidth +
+            (sampleLeftCurbs[i] ? this.curbWidth : 0) +
+            sampleLeftGrassWidths[i]) *
+          lScale;
+        const totalOffsetR =
+          (halfWidth +
+            (sampleRightCurbs[i] ? this.curbWidth : 0) +
+            sampleRightGrassWidths[i]) *
+          rScale;
+        const leftRoadHeight =
+          leftPoints[i].y + (sampleLeftCurbs[i] ? this.curbHeight : 0);
+        const rightRoadHeight =
+          rightPoints[i].y + (sampleRightCurbs[i] ? this.curbHeight : 0);
+        const leftBaseHeight =
+          sampleLeftGrassWidths[i] > 0.05
+            ? Math.max(pt.y + 0.05, leftRoadHeight - 0.24)
+            : leftRoadHeight;
+        const rightBaseHeight =
+          sampleRightGrassWidths[i] > 0.05
+            ? Math.max(pt.y + 0.05, rightRoadHeight - 0.24)
+            : rightRoadHeight;
 
         // Left boundary point
-        const leftBound = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, totalOffsetL);
+        const leftBound = new THREE.Vector3(pt.x, leftBaseHeight, pt.z).addScaledVector(normal, totalOffsetL);
         // Right boundary point
-        const rightBound = new THREE.Vector3(pt.x, pt.y + 0.05, pt.z).addScaledVector(normal, -totalOffsetR);
+        const rightBound = new THREE.Vector3(pt.x, rightBaseHeight, pt.z).addScaledVector(normal, -totalOffsetR);
 
         leftBoundPoints.push(leftBound);
         rightBoundPoints.push(rightBound);
@@ -1047,7 +1277,11 @@ export abstract class BaseMode implements GameMode {
       const isSilverstone = FenceType === 'silverstone';
       const activeBlockHeight = isSilverstone ? this.concreteHeight : 0.0;
 
-      const createConcreteBlock = (boundPts: THREE.Vector3[], normalSigns: number[]): THREE.Mesh => {
+      const createConcreteBlock = (
+        boundPts: THREE.Vector3[],
+        normalSigns: number[],
+        activeFlags: boolean[]
+      ): THREE.Mesh => {
         const geom = new THREE.BufferGeometry();
         const vertices = new Float32Array(boundPts.length * 4 * 3);
         const indices: number[] = [];
@@ -1082,6 +1316,7 @@ export abstract class BaseMode implements GameMode {
 
         for (let i = 0; i < boundPts.length; i++) {
           const next_i = (i + 1) % boundPts.length;
+          if (!activeFlags[i] && !activeFlags[next_i]) continue;
 
           const c_inB = i * 4;
           const c_inT = i * 4 + 2;
@@ -1122,13 +1357,21 @@ export abstract class BaseMode implements GameMode {
 
       if (isSilverstone) {
         const leftConcreteSigns = Array(samplePoints.length).fill(1);
-        const leftConcrete = createConcreteBlock(leftBoundPoints, leftConcreteSigns);
+        const leftConcrete = createConcreteBlock(
+          leftBoundPoints,
+          leftConcreteSigns,
+          sampleLeftFences
+        );
         leftConcrete.castShadow = true;
         leftConcrete.receiveShadow = true;
         this.environmentGroup.add(leftConcrete);
 
         const rightConcreteSigns = Array(samplePoints.length).fill(-1);
-        const rightConcrete = createConcreteBlock(rightBoundPoints, rightConcreteSigns);
+        const rightConcrete = createConcreteBlock(
+          rightBoundPoints,
+          rightConcreteSigns,
+          sampleRightFences
+        );
         rightConcrete.castShadow = true;
         rightConcrete.receiveShadow = true;
         this.environmentGroup.add(rightConcrete);
@@ -1180,21 +1423,26 @@ export abstract class BaseMode implements GameMode {
           }
 
           // Left leaning post (tilted inwards, base shifted up to concrete top)
-          tempObj.position.set(l_base.x, l_base.y + activeBlockHeight, l_base.z);
-          tempObj.lookAt(tempObj.position.clone().add(tangent));
-          tempObj.rotateZ(-0.25); // tilt inwards (right)
-          tempObj.translateY(1.5); // position half-height up
-          tempObj.updateMatrix();
-          instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          if (sampleLeftFences[i]) {
+            tempObj.position.set(l_base.x, l_base.y + activeBlockHeight, l_base.z);
+            tempObj.lookAt(tempObj.position.clone().add(tangent));
+            tempObj.rotateZ(-0.25); // tilt inwards (right)
+            tempObj.translateY(1.5); // position half-height up
+            tempObj.updateMatrix();
+            instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          }
 
           // Right leaning post (tilted inwards, base shifted up to concrete top)
-          tempObj.position.set(r_base.x, r_base.y + activeBlockHeight, r_base.z);
-          tempObj.lookAt(tempObj.position.clone().add(tangent));
-          tempObj.rotateZ(0.25); // tilt inwards (left)
-          tempObj.translateY(1.5);
-          tempObj.updateMatrix();
-          instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          if (sampleRightFences[i]) {
+            tempObj.position.set(r_base.x, r_base.y + activeBlockHeight, r_base.z);
+            tempObj.lookAt(tempObj.position.clone().add(tangent));
+            tempObj.rotateZ(0.25); // tilt inwards (left)
+            tempObj.translateY(1.5);
+            tempObj.updateMatrix();
+            instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          }
         }
+        instancedPosts.count = postCount;
         this.environmentGroup.add(instancedPosts);
 
         // 2. Draw wire catch fence meshes
@@ -1241,11 +1489,15 @@ export abstract class BaseMode implements GameMode {
           const nextTop = 2 * next_i;
           const nextBottom = 2 * next_i + 1;
 
-          leftFenceIndex.push(currTop, currBottom, nextTop);
-          leftFenceIndex.push(currBottom, nextBottom, nextTop);
+          if (sampleLeftFences[i] || sampleLeftFences[next_i]) {
+            leftFenceIndex.push(currTop, currBottom, nextTop);
+            leftFenceIndex.push(currBottom, nextBottom, nextTop);
+          }
 
-          rightFenceIndex.push(currTop, currBottom, nextTop);
-          rightFenceIndex.push(currBottom, nextBottom, nextTop);
+          if (sampleRightFences[i] || sampleRightFences[next_i]) {
+            rightFenceIndex.push(currTop, currBottom, nextTop);
+            rightFenceIndex.push(currBottom, nextBottom, nextTop);
+          }
         }
 
         leftFenceGeom.setAttribute('position', new THREE.BufferAttribute(leftFencePos, 3));
@@ -1311,11 +1563,15 @@ export abstract class BaseMode implements GameMode {
             const nextTop = 2 * next_i;
             const nextBottom = 2 * next_i + 1;
 
-            leftCableIndex.push(currTop, currBottom, nextTop);
-            leftCableIndex.push(currBottom, nextBottom, nextTop);
+            if (sampleLeftFences[i] || sampleLeftFences[next_i]) {
+              leftCableIndex.push(currTop, currBottom, nextTop);
+              leftCableIndex.push(currBottom, nextBottom, nextTop);
+            }
 
-            rightCableIndex.push(currTop, currBottom, nextTop);
-            rightCableIndex.push(currBottom, nextBottom, nextTop);
+            if (sampleRightFences[i] || sampleRightFences[next_i]) {
+              rightCableIndex.push(currTop, currBottom, nextTop);
+              rightCableIndex.push(currBottom, nextBottom, nextTop);
+            }
           }
 
           leftCableGeom.setAttribute('position', new THREE.BufferAttribute(leftCablePos, 3));
@@ -1390,11 +1646,15 @@ export abstract class BaseMode implements GameMode {
           const nextTop = 2 * next_i;
           const nextBottom = 2 * next_i + 1;
 
-          leftRailIndex.push(currTop, currBottom, nextTop);
-          leftRailIndex.push(currBottom, nextBottom, nextTop);
+          if (sampleLeftFences[i] || sampleLeftFences[next_i]) {
+            leftRailIndex.push(currTop, currBottom, nextTop);
+            leftRailIndex.push(currBottom, nextBottom, nextTop);
+          }
 
-          rightRailIndex.push(currTop, currBottom, nextTop);
-          rightRailIndex.push(currBottom, nextBottom, nextTop);
+          if (sampleRightFences[i] || sampleRightFences[next_i]) {
+            rightRailIndex.push(currTop, currBottom, nextTop);
+            rightRailIndex.push(currBottom, nextBottom, nextTop);
+          }
         }
 
         leftRailGeom.setAttribute('position', new THREE.BufferAttribute(leftRailPos, 3));
@@ -1428,23 +1688,28 @@ export abstract class BaseMode implements GameMode {
 
           // Left post (slightly offset outwards along normal direction)
           const normalL = normals[i];
-          const postL_pos = l_base.clone().addScaledVector(normalL, 0.05); // push post behind the rail
-          tempObj.position.set(postL_pos.x, postL_pos.y + activeBlockHeight + 0.6, postL_pos.z); // center of post
-          tempObj.updateMatrix();
-          instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          if (sampleLeftFences[i]) {
+            const postL_pos = l_base.clone().addScaledVector(normalL, 0.05); // push post behind the rail
+            tempObj.position.set(postL_pos.x, postL_pos.y + activeBlockHeight + 0.6, postL_pos.z); // center of post
+            tempObj.updateMatrix();
+            instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          }
 
           // Right post (slightly offset outwards along negative normal direction)
-          const postR_pos = r_base.clone().addScaledVector(normalL, -0.05);
-          tempObj.position.set(postR_pos.x, postR_pos.y + activeBlockHeight + 0.6, postR_pos.z);
-          tempObj.updateMatrix();
-          instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          if (sampleRightFences[i]) {
+            const postR_pos = r_base.clone().addScaledVector(normalL, -0.05);
+            tempObj.position.set(postR_pos.x, postR_pos.y + activeBlockHeight + 0.6, postR_pos.z);
+            tempObj.updateMatrix();
+            instancedPosts.setMatrixAt(postCount++, tempObj.matrix);
+          }
         }
+        instancedPosts.count = postCount;
         this.environmentGroup.add(instancedPosts);
       }
     }
   }
 
-  public getTrackInfo(x: number, z: number): {
+  public getTrackInfo(x: number, z: number, yHint?: number): {
     dist: number;
     closestPt: THREE.Vector3;
     closestIdx: number;
@@ -1454,9 +1719,25 @@ export abstract class BaseMode implements GameMode {
     sideSign?: number;
     trackBoundary?: number;
     banking?: number;
+    curb?: boolean;
+    grassWidth?: number;
+    fence?: boolean;
   } {
     if (this.roadSamplePoints.length === 0) {
-      return { dist: 0, closestPt: new THREE.Vector3(x, 0, z), closestIdx: 0, width: this.roadWidth, leftScale: 1.0, rightScale: 1.0, sideSign: 1, trackBoundary: this.trackBoundary, banking: 0 };
+      return {
+        dist: 0,
+        closestPt: new THREE.Vector3(x, 0, z),
+        closestIdx: 0,
+        width: this.roadWidth,
+        leftScale: 1.0,
+        rightScale: 1.0,
+        sideSign: 1,
+        trackBoundary: this.trackBoundary,
+        banking: 0,
+        curb: this.haveCurb,
+        grassWidth: this.haveGrass ? this.grassWidth : 0,
+        fence: this.haveFence
+      };
     }
 
     let minDistSq = Infinity;
@@ -1470,7 +1751,8 @@ export abstract class BaseMode implements GameMode {
       const spt = this.roadSamplePoints[i];
       const dx = spt.x - px;
       const dz = spt.z - pz;
-      const distSq = dx * dx + dz * dz;
+      const dy = yHint === undefined ? 0 : spt.y - yHint;
+      const distSq = dx * dx + dz * dz + dy * dy * 0.35;
       if (distSq < minDistSq) {
         minDistSq = distSq;
         closestIdx = i;
@@ -1484,7 +1766,8 @@ export abstract class BaseMode implements GameMode {
       const spt = this.roadSamplePoints[i];
       const dx = spt.x - px;
       const dz = spt.z - pz;
-      const distSq = dx * dx + dz * dz;
+      const dy = yHint === undefined ? 0 : spt.y - yHint;
+      const distSq = dx * dx + dz * dz + dy * dy * 0.35;
       if (distSq < minDistSq) {
         minDistSq = distSq;
         closestIdx = i;
@@ -1511,23 +1794,41 @@ export abstract class BaseMode implements GameMode {
     const dot = toCar.dot(normal);
     const sideSign = dot >= 0 ? 1 : -1;
     const activeScale = sideSign === 1 ? lScale : rScale;
+    const activeCurb =
+      sideSign === 1
+        ? this.roadSampleLeftCurbs[closestIdx]
+        : this.roadSampleRightCurbs[closestIdx];
+    const activeGrassWidth =
+      (sideSign === 1
+        ? this.roadSampleLeftGrassWidths[closestIdx]
+        : this.roadSampleRightGrassWidths[closestIdx]) * activeScale;
+    const activeFence =
+      sideSign === 1
+        ? this.roadSampleLeftFences[closestIdx]
+        : this.roadSampleRightFences[closestIdx];
 
     // Calculate dynamic track boundary on this side
-    const halfWidth = width / 2;
-    const trackBoundary = (halfWidth + (this.haveCurb ? this.curbWidth : 0) + (this.haveGrass ? this.grassWidth : 0)) * activeScale;
+    const halfWidth = (width / 2) * activeScale;
+    const trackBoundary =
+      halfWidth +
+      (activeCurb ? this.curbWidth * activeScale : 0) +
+      activeGrassWidth;
 
     const banking = this.roadSampleBankings[closestIdx] ?? 0;
 
     return {
-      dist: Math.sqrt(minDistSq),
+      dist: Math.abs(dot),
       closestPt: closestPt.clone(),
       closestIdx: closestIdx,
-      width: width,
+      width: halfWidth * 2,
       leftScale: lScale,
       rightScale: rScale,
       sideSign: sideSign,
       trackBoundary: trackBoundary,
-      banking: banking
+      banking: banking,
+      curb: activeCurb,
+      grassWidth: activeGrassWidth,
+      fence: activeFence
     };
   }
 
@@ -1786,12 +2087,11 @@ export abstract class BaseMode implements GameMode {
     });
   }
 
-  public getGroundHeight(x: number, z: number): number {
+  public getGroundHeight(x: number, z: number, yHint?: number): number {
     if (this.roadSamplePoints.length === 0 || this.roadSampleLeftPoints.length === 0 || this.roadSampleRightPoints.length === 0) return 0;
 
-    const info = this.getTrackInfo(x, z);
-    const scale = info.sideSign === 1 ? (info.leftScale ?? 1.0) : (info.rightScale ?? 1.0);
-    const halfWidth = (info.width / 2) * scale;
+    const info = this.getTrackInfo(x, z, yHint);
+    const halfWidth = info.width / 2;
     
     // Find the left and right points for this segment
     const idx = info.closestIdx;
@@ -1819,18 +2119,19 @@ export abstract class BaseMode implements GameMode {
 
     // 2. If on the curb
     const curbStart = halfWidth;
-    const curbEnd = halfWidth + (this.haveCurb ? this.curbWidth : 0) * scale;
-    if (this.haveCurb && info.dist >= curbStart && info.dist <= curbEnd) {
+    const curbEnd = halfWidth + (info.curb ? this.curbWidth : 0);
+    if (info.curb && info.dist >= curbStart && info.dist <= curbEnd) {
       return baseRoadHeight - 0.05 + this.curbHeight;
     }
 
     // 3. If on the grass
     const grassStart = curbEnd;
-    const grassEnd = grassStart + (this.haveGrass ? this.grassWidth : 0) * scale;
-    if (this.haveGrass && info.dist >= grassStart && info.dist < grassEnd) {
-      const t = (info.dist - grassStart) / ((this.grassWidth * scale) || 1);
-      const innerHeight = baseRoadHeight + (this.haveCurb ? this.curbHeight : 0);
-      const outerHeight = baseRoadHeight - 0.03; // matches baseRoadHeight - 0.05 + 0.02
+    const localGrassWidth = info.grassWidth ?? 0;
+    const grassEnd = grassStart + localGrassWidth;
+    if (localGrassWidth > 0 && info.dist >= grassStart && info.dist < grassEnd) {
+      const t = (info.dist - grassStart) / (localGrassWidth || 1);
+      const innerHeight = baseRoadHeight + (info.curb ? this.curbHeight : 0);
+      const outerHeight = Math.max(info.closestPt.y + 0.02, innerHeight - 0.24);
       return THREE.MathUtils.lerp(innerHeight, outerHeight, t);
     }
 

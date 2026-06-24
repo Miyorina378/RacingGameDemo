@@ -190,7 +190,7 @@ export const TIRE_COMPOUNDS: Record<TireCompoundType, TireCompoundConfig> = {
     colorLabel: 'Red'
   },
   super_soft: {
-    id: 'super_soft',     
+    id: 'super_soft',
     name: 'Qualifying',
     gripMultiplier: 2.5,
     wearRate: 3.50,
@@ -208,7 +208,7 @@ export const TIRE_COMPOUNDS: Record<TireCompoundType, TireCompoundConfig> = {
     colorLabel: 'Purple'
   }
 };
-       
+
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - edge0) / Math.max(edge1 - edge0, 0.001)));
   return t * t * (3 - 2 * t);
@@ -368,7 +368,16 @@ export function accumulateWear(
     state.coldPressurePsi
   );
   const baseWearPerSecond = 0.001;
-  const speedFactor = Math.max(0.1, Math.min(1.0, speedRatio));
+  const rollingSpeed = Math.max(0, Math.min(1.0, speedRatio));
+  const slipWork =
+    Math.min(1.0, Math.abs(slipAngle) * 3.0) +
+    Math.min(1.0, brakeForce);
+  if (rollingSpeed < 0.002 && slipWork < 0.01) return;
+
+  const speedFactor = Math.max(
+    rollingSpeed,
+    rollingSpeed * 0.45 + slipWork * 0.08
+  );
   const corneringLoad = 1.0 + Math.abs(slipAngle) * 2.0;
   const brakingLoad = 1.0 + brakeForce * 0.5;
   const overheatLoad = 1.0 + Math.max(0, state.temperature - config.optimalTemperature) * 0.012;
@@ -396,7 +405,7 @@ export function createFreshTireState(compound: TireCompoundType = 'normal'): Tir
   return {
     compound,
     wear: 0,
-    temperature: 25,
+    temperature: 30,
     coldPressurePsi: config.recommendedColdPressurePsi
   };
 }
