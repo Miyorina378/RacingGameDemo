@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { TRACKS_DATABASE, TrackNode } from '../config/TrackDatabase';
 import { HUDConfig } from '../option';
 import { TIRE_COMPOUNDS, TireCompoundType } from '../objects/TireCompound';
+import type { SuggestedGearAdvice } from '../engine/SuggestedGearAdvisor';
 
 const getTempColorClass = (temp: number, compoundId: string) => {
   const config = TIRE_COMPOUNDS[compoundId as TireCompoundType] || TIRE_COMPOUNDS.normal;
@@ -39,6 +40,7 @@ interface HUDProps {
   throttleInput: number;
   speed: number;
   gear: number | string;
+  suggestedGearAdvice: SuggestedGearAdvice | null;
   rpm: number;
   isShifting: boolean;
   fuelLiters: number;
@@ -116,6 +118,7 @@ export default function HUD({
   throttleInput,
   speed,
   gear,
+  suggestedGearAdvice,
   rpm,
   isShifting,
   fuelLiters,
@@ -513,6 +516,20 @@ export default function HUD({
                     <span className={`text-3xl font-black font-mono mt-0.5 transition-all duration-150 ${isShifting ? 'text-zinc-700 scale-95' : 'text-zinc-100'}`}>
                       {speed === 0 ? 'N' : (speed < 0 ? 'R' : gear)}
                     </span>
+                    {suggestedGearAdvice && (
+                      <div
+                        className={`mt-1 px-1.5 py-0.5 border rounded text-[9px] font-black font-mono leading-none tracking-wider whitespace-nowrap ${
+                          suggestedGearAdvice.tooFast
+                            ? 'border-rose-500 bg-rose-950/70 text-rose-300 animate-pulse'
+                            : 'border-cyan-500/50 bg-cyan-950/45 text-cyan-300'
+                        }`}
+                      >
+                        SUG {suggestedGearAdvice.suggestedGear}
+                        <span className="ml-1 text-[8px] opacity-75">
+                          {Math.max(10, Math.round(suggestedGearAdvice.distanceToCorner / 10) * 10)}m
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="h-10 w-px bg-zinc-800" />
                   <div className="flex flex-col items-center">

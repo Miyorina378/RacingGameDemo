@@ -24,15 +24,21 @@ export class TutorialMode extends BaseMode {
     this.crystal = new Crystal(new THREE.Vector3(0, 1.2, -110), 200); // 200 credits reward
     this.environmentGroup.add(this.crystal.mesh);
 
-    // Tutorial mode starts playing immediately without countdown timer
-    this.engine.callbacks.onGameStatus('playing');
+    this.engine.startCountdown(0);
   }
 
   public update(deltaTime: number) {
+    const isCountdown = this.engine.gameStatus === 'countdown';
+
     this.updateScrollingFloor();
 
     // Standard physics updates (active keyboard keys)
-    this.vehicle.update(deltaTime, this.keys);
+    this.vehicle.update(deltaTime, this.keys, isCountdown);
+    if (isCountdown) {
+      this.particles.emitBoosters(this.vehicle.mesh.matrixWorld, this.vehicle.yaw, this.vehicle.speed, this.vehicle.boosterColor);
+      this.particles.update(deltaTime);
+      return;
+    }
 
     // Tire smoke sparks
     if (this.vehicle.isDrifting) {

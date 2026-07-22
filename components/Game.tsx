@@ -3,10 +3,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GameEngine } from './gameEngine';
+import type { SuggestedGearAdvice } from './engine/SuggestedGearAdvisor';
+import type { RaceDifficulty } from './modes/RaceMode';
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig, TrackNode, TrackScenery } from './config/TrackDatabase';
 import {
-  Wrench,
   Coins,
   Award,
   Compass,
@@ -15,7 +16,6 @@ import {
   LogOut,
   Volume2,
   VolumeX,
-  HelpCircle,
   Check,
   Lock,
   Paintbrush,
@@ -40,7 +40,10 @@ import {
   KeyBindings,
   DEFAULT_KEY_BINDINGS,
   loadKeyBindings,
-  saveKeyBindings
+  saveKeyBindings,
+  DrivingMode,
+  loadDrivingMode,
+  saveDrivingMode
 } from './option';
 
 import Garage from './ui/Garage';
@@ -50,6 +53,8 @@ import GameOverlays from './ui/GameOverlays';
 import HelpModal from './ui/HelpModal';
 import HUDCustomizer from './ui/HUDCustomizer';
 import MapEditor from './ui/MapEditor';
+import { FordGtSound } from './audio/FordGtSound';
+import { ProceduralTrack } from './audio/ProceduralTrack';
 import { GraphicsFeatures, QUALITY_PRESETS } from './PostProcessing';
 import {
   DEFAULT_LICENSE_TEST_ID,
@@ -126,6 +131,8 @@ const PAINT_SWATCHES = [
   { name: 'Sunset Orange', hex: '#f97316' },
   { name: 'Deep Purple', hex: '#8b5cf6' }
 ];
+
+type AntiAliasingMode = 'off' | 'fxaa' | 'taa';
 
 const DEFAULT_UPGRADES = {
   mufflers: 0,
@@ -494,6 +501,14 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
 export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const fordGtSoundRef = useRef<FordGtSound | null>(null);
+  const menuMusicRef = useRef<HTMLAudioElement | null>(null);
+  const menuMusicFadeRef = useRef<number | null>(null);
+  const trackMusicRef = useRef<HTMLAudioElement | null>(null);
+  const trackMusicFadeRef = useRef<number | null>(null);
+  const trackMusicGapTimeoutRef = useRef<number | null>(null);
+  const proceduralTrackRef = useRef<ProceduralTrack | null>(null);
+  const activeMusicTrackRef = useRef<'getting-away' | 'procedural'>('getting-away');
   const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const quickPlayOriginalCarRef = useRef<string | null>(null);
 
@@ -513,9 +528,11 @@ export default function Game() {
 
   // Real-time HUD States
   const [speed, setSpeed] = useState<number>(0);
+  const [speedKmh, setSpeedKmh] = useState<number>(0);
   const [rpm, setRpm] = useState<number>(1000);
   const [gear, setGear] = useState<number>(1);
   const [isShifting, setIsShifting] = useState<boolean>(false);
+  const [suggestedGearAdvice, setSuggestedGearAdvice] = useState<SuggestedGearAdvice | null>(null);
   const [throttleInput, setThrottleInput] = useState<number>(0);
   const [brakeInput, setBrakeInput] = useState<number>(0);
   const [fuelLiters, setFuelLiters] = useState<number>(0);
@@ -550,11 +567,14 @@ export default function Game() {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [raceResults, setRaceResults] = useState<any[] | null>(null);
 
-  // Sound toggle (visual only for retro feel)
+  // Sound toggle
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   // Key bindings State
   const [keyBindings, setKeyBindings] = useState<KeyBindings>(DEFAULT_KEY_BINDINGS);
+
+  // Driving Mode State
+  const [drivingMode, setDrivingMode] = useState<DrivingMode>(() => loadDrivingMode());
 
   // Graphics Quality State
   const [graphicsQuality, setGraphicsQuality] = useState<'low' | 'medium' | 'high'>(() => {
@@ -570,7 +590,10 @@ export default function Game() {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('cyberdrive_graphics_features');
       if (saved) {
-        try { return { ...QUALITY_PRESETS['high'], ...JSON.parse(saved) }; } catch { /* fallback */ }
+        try {
+          const parsed = { ...QUALITY_PRESETS['high'], ...JSON.parse(saved) };
+          return parsed.taa ? { ...parsed, fxaa: false } : parsed;
+        } catch { /* fallback */ }
       }
       const q = localStorage.getItem('cyberdrive_graphics_quality');
       if (q === 'low' || q === 'medium' || q === 'high') return { ...QUALITY_PRESETS[q] };
@@ -590,10 +613,40 @@ export default function Game() {
 
   const changeGraphicsFeature = (feature: keyof GraphicsFeatures, value: boolean) => {
     const updated = { ...graphicsFeatures, [feature]: value };
+    if (feature === 'taa' && value) updated.fxaa = false;
+    if (feature === 'fxaa' && value) updated.taa = false;
     setGraphicsFeatures(updated);
     localStorage.setItem('cyberdrive_graphics_features', JSON.stringify(updated));
     if (engineRef.current && engineRef.current.postProcessing) {
-      engineRef.current.postProcessing.setFeatures({ [feature]: value });
+      engineRef.current.postProcessing.setFeatures(
+        feature === 'taa' && value
+          ? { taa: true, fxaa: false }
+          : feature === 'fxaa' && value
+            ? { fxaa: true, taa: false }
+            : { [feature]: value }
+      );
+    }
+  };
+
+  const getAntiAliasingMode = (features: GraphicsFeatures): AntiAliasingMode => {
+    if (features.taa) return 'taa';
+    if (features.fxaa) return 'fxaa';
+    return 'off';
+  };
+
+  const changeAntiAliasingMode = (mode: AntiAliasingMode) => {
+    const updated = {
+      ...graphicsFeatures,
+      taa: mode === 'taa',
+      fxaa: mode === 'fxaa'
+    };
+    setGraphicsFeatures(updated);
+    localStorage.setItem('cyberdrive_graphics_features', JSON.stringify(updated));
+    if (engineRef.current && engineRef.current.postProcessing) {
+      engineRef.current.postProcessing.setFeatures({
+        taa: updated.taa,
+        fxaa: updated.fxaa
+      });
     }
   };
 
@@ -681,6 +734,172 @@ export default function Game() {
     localStorage.setItem('cyberdrive_sfx_volume', val.toString());
   };
 
+  const getTrackMusicVolume = () =>
+    soundEnabled ? (masterVolume / 100) * (musicVolume / 100) * 0.55 : 0;
+
+  const getMenuMusicVolume = () =>
+    soundEnabled ? (masterVolume / 100) * (musicVolume / 100) * 0.48 : 0;
+
+  const clearMenuMusicFade = () => {
+    if (menuMusicFadeRef.current !== null) {
+      window.clearInterval(menuMusicFadeRef.current);
+      menuMusicFadeRef.current = null;
+    }
+  };
+
+  const setMenuMusicVolume = (targetVolume: number, fadeMs: number = 0) => {
+    const music = menuMusicRef.current;
+    if (!music) return;
+
+    clearMenuMusicFade();
+    const clampedTarget = Math.max(0, Math.min(targetVolume, 1));
+
+    if (fadeMs <= 0) {
+      music.volume = clampedTarget;
+      return;
+    }
+
+    const startVolume = music.volume;
+    const startedAt = performance.now();
+    menuMusicFadeRef.current = window.setInterval(() => {
+      const progress = Math.min(1, (performance.now() - startedAt) / fadeMs);
+      music.volume = startVolume + (clampedTarget - startVolume) * progress;
+      if (progress >= 1) {
+        clearMenuMusicFade();
+      }
+    }, 40);
+  };
+
+  const playMenuMusic = (fadeMs: number = 900) => {
+    const music = menuMusicRef.current;
+    if (!music) return;
+
+    const targetVolume = getMenuMusicVolume();
+    if (targetVolume <= 0) {
+      music.pause();
+      return;
+    }
+
+    music.play().catch(() => {
+      // Browser may block until the next user gesture.
+    });
+    setMenuMusicVolume(targetVolume, fadeMs);
+  };
+
+  const pauseMenuMusic = () => {
+    clearMenuMusicFade();
+    menuMusicRef.current?.pause();
+  };
+
+  const clearTrackMusicFade = () => {
+    if (trackMusicFadeRef.current !== null) {
+      window.clearInterval(trackMusicFadeRef.current);
+      trackMusicFadeRef.current = null;
+    }
+  };
+
+  const clearTrackMusicGap = () => {
+    if (trackMusicGapTimeoutRef.current !== null) {
+      window.clearTimeout(trackMusicGapTimeoutRef.current);
+      trackMusicGapTimeoutRef.current = null;
+    }
+  };
+
+  const getProceduralTrack = () => {
+    if (!proceduralTrackRef.current) {
+      proceduralTrackRef.current = new ProceduralTrack();
+    }
+    return proceduralTrackRef.current;
+  };
+
+  const setTrackMusicVolume = (targetVolume: number, fadeMs: number = 0) => {
+    const music = trackMusicRef.current;
+    if (!music) return;
+
+    clearTrackMusicFade();
+    const clampedTarget = Math.max(0, Math.min(targetVolume, 1));
+
+    if (fadeMs <= 0) {
+      music.volume = clampedTarget;
+      return;
+    }
+
+    const startVolume = music.volume;
+    const startedAt = performance.now();
+    trackMusicFadeRef.current = window.setInterval(() => {
+      const progress = Math.min(1, (performance.now() - startedAt) / fadeMs);
+      music.volume = startVolume + (clampedTarget - startVolume) * progress;
+      if (progress >= 1) {
+        clearTrackMusicFade();
+      }
+    }, 40);
+  };
+
+  const primeTrackMusic = () => {
+    const music = trackMusicRef.current;
+    if (!music) return;
+
+    pauseMenuMusic();
+    clearTrackMusicGap();
+    proceduralTrackRef.current?.pause();
+    activeMusicTrackRef.current = 'getting-away';
+    setTrackMusicVolume(0);
+    music.loop = false;
+    music.currentTime = 0;
+    music.play().then(() => {
+      music.pause();
+      music.currentTime = 0;
+    }).catch(() => {
+      // Browser may block until the next user gesture.
+    });
+  };
+
+  const playTrackMusic = (fadeMs: number = 1200) => {
+    const music = trackMusicRef.current;
+    if (!music) return;
+
+    const targetVolume = getTrackMusicVolume();
+    if (targetVolume <= 0) {
+      music.pause();
+      proceduralTrackRef.current?.pause();
+      return;
+    }
+
+    if (activeMusicTrackRef.current === 'procedural') {
+      getProceduralTrack().play(targetVolume);
+      return;
+    }
+
+    music.loop = false;
+    music.play().catch(() => {
+      // Browser may block until the next user gesture.
+    });
+    setTrackMusicVolume(targetVolume, fadeMs);
+  };
+
+  const playProceduralTrackAfterGap = () => {
+    clearTrackMusicGap();
+    activeMusicTrackRef.current = 'procedural';
+    trackMusicGapTimeoutRef.current = window.setTimeout(() => {
+      trackMusicGapTimeoutRef.current = null;
+      if (
+        activeMode !== 'garage' &&
+        !isPaused &&
+        gameStatus === 'playing' &&
+        soundEnabled &&
+        getTrackMusicVolume() > 0
+      ) {
+        getProceduralTrack().play(getTrackMusicVolume());
+      }
+    }, 2000);
+  };
+
+  const pauseTrackMusic = () => {
+    clearTrackMusicFade();
+    clearTrackMusicGap();
+    trackMusicRef.current?.pause();
+    proceduralTrackRef.current?.pause();
+  };
 
   const handleKeyBindingsChange = (newBindings: KeyBindings) => {
     setKeyBindings(newBindings);
@@ -690,6 +909,13 @@ export default function Game() {
     }
   };
 
+  const formatKeyName = (key: string) => {
+    if (!key) return '';
+    if (key === ' ') return 'SPACE';
+    if (key.length === 1) return key.toUpperCase();
+    return key.replace(/([A-Z])/g, ' $1').trim().toUpperCase();
+  };
+
   // UI Upgrades State
   const [carUpgrades, setCarUpgrades] = useState<{ [carId: string]: any }>({});
 
@@ -697,6 +923,8 @@ export default function Game() {
   const [activeGarageTab, setActiveGarageTab] = useState<null | 'drive' | 'dealer' | 'tuning' | 'setting'>(null);
   const [tuningState, setTuningState] = useState<'closed' | 'entering' | 'open' | 'exiting'>('closed');
   const [settingsSubTab, setSettingsSubTab] = useState<'audio' | 'graphics' | 'control' | 'layout'>('graphics');
+  const [pauseSettingsTab, setPauseSettingsTab] = useState<'audio' | 'graphics' | 'control' | 'layout'>('audio');
+  const [pauseSettingsOpen, setPauseSettingsOpen] = useState<boolean>(false);
 
   // Shrink Canvas Preview states & ref
   const placeholderRef = useRef<HTMLDivElement>(null);
@@ -709,7 +937,11 @@ export default function Game() {
   useEffect(() => {
     const isShrunk = (activeGarageTab === 'setting' && settingsSubTab === 'graphics' &&
       (settingsState === 'open' || settingsState === 'exiting_ui' ||
-        settingsState === 'entering')) || (tuningState !== 'closed');
+        settingsState === 'entering')) ||
+      (pauseSettingsOpen && settingsSubTab === 'graphics' &&
+        (settingsState === 'open' || settingsState === 'exiting_ui' ||
+          settingsState === 'entering')) ||
+      (tuningState !== 'closed');
 
     if (!isShrunk) {
       setPlaceholderRect(null);
@@ -740,14 +972,14 @@ export default function Game() {
       window.removeEventListener('resize', updateRect);
       window.removeEventListener('scroll', updateRect, true);
     };
-  }, [activeGarageTab, settingsSubTab, settingsState, tuningState]);
+  }, [activeGarageTab, settingsSubTab, settingsState, tuningState, pauseSettingsOpen]);
 
   // Call resize only at key transition milestones to avoid dynamic layout thrashing
   useEffect(() => {
     if (engineRef.current) {
       engineRef.current.handleResize();
     }
-  }, [activeGarageTab, settingsSubTab, placeholderRect, settingsTransitionComplete, settingsState]);
+  }, [activeGarageTab, settingsSubTab, placeholderRect, settingsTransitionComplete, settingsState, pauseSettingsOpen]);
 
   useEffect(() => {
     if (engineRef.current) {
@@ -866,6 +1098,142 @@ export default function Game() {
     saveSoundEnabled(soundEnabled);
   }, [soundEnabled]);
 
+  useEffect(() => {
+    const music = trackMusicRef.current;
+
+    const targetVolume = getTrackMusicVolume();
+    if (targetVolume <= 0) {
+      pauseTrackMusic();
+    } else if (music && !music.paused) {
+      setTrackMusicVolume(targetVolume, 500);
+    }
+    if (proceduralTrackRef.current?.isPlaying) {
+      proceduralTrackRef.current.setVolume(targetVolume, 500);
+    }
+    if (menuMusicRef.current && !menuMusicRef.current.paused) {
+      setMenuMusicVolume(getMenuMusicVolume(), 500);
+    }
+  }, [masterVolume, musicVolume, soundEnabled]);
+
+  useEffect(() => {
+    const shouldPlayMenuMusic =
+      activeMode === 'garage' &&
+      soundEnabled &&
+      getMenuMusicVolume() > 0;
+
+    if (shouldPlayMenuMusic) {
+      pauseTrackMusic();
+      playMenuMusic();
+    } else {
+      pauseMenuMusic();
+    }
+  }, [activeMode, activeGarageTab, masterVolume, musicVolume, soundEnabled]);
+
+  useEffect(() => {
+    const music = trackMusicRef.current;
+    if (!music) return;
+
+    const isOnTrack =
+      activeMode === 'free_roam' ||
+      activeMode === 'license' ||
+      activeMode === 'race' ||
+      activeMode === 'tutorial';
+    const shouldPlay =
+      isOnTrack &&
+      soundEnabled &&
+      !isPaused &&
+      gameStatus === 'playing' &&
+      getTrackMusicVolume() > 0;
+
+    if (shouldPlay) {
+      playTrackMusic();
+    } else {
+      if (gameStatus !== 'countdown') {
+        pauseTrackMusic();
+      }
+    }
+  }, [activeMode, gameStatus, isPaused, masterVolume, musicVolume, soundEnabled]);
+
+  useEffect(() => {
+    if (!soundEnabled) return;
+
+    const resumeAudio = () => {
+      fordGtSoundRef.current?.resume();
+      if (activeMode === 'garage') {
+        playMenuMusic();
+      }
+    };
+
+    window.addEventListener('pointerdown', resumeAudio);
+    window.addEventListener('keydown', resumeAudio);
+
+    return () => {
+      window.removeEventListener('pointerdown', resumeAudio);
+      window.removeEventListener('keydown', resumeAudio);
+    };
+  }, [activeMode, masterVolume, musicVolume, soundEnabled]);
+
+  useEffect(() => {
+    return () => {
+      fordGtSoundRef.current?.dispose();
+      fordGtSoundRef.current = null;
+      proceduralTrackRef.current?.dispose();
+      proceduralTrackRef.current = null;
+      pauseMenuMusic();
+      pauseTrackMusic();
+    };
+  }, []);
+
+  useEffect(() => {
+    const isFordGt = activeCarId === 'ford_gt_2006';
+
+    if (!soundEnabled || !isFordGt) {
+      fordGtSoundRef.current?.update({
+        active: false,
+        rpm,
+        speedKmh,
+        throttle: 0,
+        brake: 0,
+        gear,
+        isShifting: false
+      });
+      return;
+    }
+
+    if (!fordGtSoundRef.current) {
+      fordGtSoundRef.current = new FordGtSound();
+    }
+
+    const shouldPlay =
+      activeMode !== 'garage' &&
+      !isPaused &&
+      !isEngineStalled &&
+      (gameStatus === 'playing' || gameStatus === 'countdown');
+
+    fordGtSoundRef.current.update({
+      active: shouldPlay,
+      rpm,
+      speedKmh,
+      throttle: throttleInput,
+      brake: brakeInput,
+      gear,
+      isShifting
+    });
+  }, [
+    activeCarId,
+    activeMode,
+    brakeInput,
+    gameStatus,
+    gear,
+    isEngineStalled,
+    isPaused,
+    isShifting,
+    rpm,
+    soundEnabled,
+    speedKmh,
+    throttleInput
+  ]);
+
   // Trigger shift animation on placement changes
   useEffect(() => {
     if (placement !== prevPlacement) {
@@ -897,6 +1265,7 @@ export default function Game() {
     // Callbacks to sync logic from Three.js render loop to React UI state
     const callbacks = {
       onSpeedChange: (s: number) => {
+        setSpeedKmh(s);
         const displayS = hudConfig.speedUnit === 'mph' ? Math.round(s * 0.621371) : s;
         setSpeed(displayS);
         if (engineRef.current && engineRef.current.activeMode === 'tutorial') {
@@ -930,6 +1299,7 @@ export default function Game() {
         tireComp?: string,
         wearEnabled?: boolean
       ) => {
+        setSpeedKmh(s);
         const displayS = hudConfig.speedUnit === 'mph' ? Math.round(s * 0.621371) : s;
         setSpeed(displayS);
         setRpm(r);
@@ -948,6 +1318,9 @@ export default function Game() {
         if (engineRef.current) {
           setCameraViewMode(engineRef.current.cameraViewMode);
         }
+      },
+      onSuggestedGearChange: (advice: SuggestedGearAdvice | null) => {
+        setSuggestedGearAdvice(advice);
       },
       onDriftScoreChange: (score: number, mult: number) => {
         setDriftScore(score);
@@ -1307,6 +1680,7 @@ export default function Game() {
 
   // Launch different modes in engine
   const startFreeRoam = () => {
+    primeTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
@@ -1329,6 +1703,7 @@ export default function Game() {
   };
 
   const startTutorial = () => {
+    primeTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
@@ -1352,6 +1727,7 @@ export default function Game() {
   };
 
   const startLicenseTest = (testId: string = activeLicenseTestId) => {
+    primeTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
@@ -1379,6 +1755,7 @@ export default function Game() {
     if (!track) return;
     if (track.requiresLicense && !hasLicense) return; // Prevent unauthorized entry
 
+    primeTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
@@ -1390,8 +1767,9 @@ export default function Game() {
       setRaceResults(null);
       if (engineRef.current) {
         engineRef.current.isPaused = false;
+        engineRef.current.isQuickPlayRace = false;
         setIsPaused(false);
-        engineRef.current.buildRaceTrack(trackId);
+        engineRef.current.buildRaceTrack(trackId, { drivingMode });
         setActiveMode('race');
       }
     }, 700);
@@ -1405,10 +1783,11 @@ export default function Game() {
     }, 1050);
   };
 
-  const startQuickPlayRace = (carId: string, trackId: string) => {
+  const startQuickPlayRace = (carId: string, trackId: string, lapCount: number = 3, difficulty: RaceDifficulty = 'normal', quickPlayDrivingMode: DrivingMode = 'simulation', opponentCount: number = 5) => {
     const track = TRACKS_DATABASE.find(t => t.id === trackId);
     if (!track) return;
 
+    primeTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
@@ -1422,13 +1801,19 @@ export default function Game() {
       setRaceResults(null);
       if (engineRef.current) {
         engineRef.current.isPaused = false;
+        engineRef.current.isQuickPlayRace = true;
         setIsPaused(false);
-        
+
         const carDb = CARS_DATABASE.find(c => c.id === carId);
         const colorToUse = carDb ? carDb.color : selectedColor;
 
         engineRef.current.setActiveCar(carId, colorToUse, DEFAULT_UPGRADES);
-        engineRef.current.buildRaceTrack(trackId);
+        engineRef.current.buildRaceTrack(trackId, {
+          totalLaps: lapCount,
+          difficulty,
+          drivingMode: quickPlayDrivingMode,
+          opponentCount
+        });
         setActiveMode('race');
       }
     }, 700);
@@ -1443,13 +1828,22 @@ export default function Game() {
   };
 
   const exitToGarage = () => {
+    pauseTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
     setTimeout(() => {
       if (engineRef.current) {
         engineRef.current.isPaused = false;
+        engineRef.current.isQuickPlayRace = false;
         setIsPaused(false);
+        
+        // Restore career car and upgrades in 3D scene
+        const careerCarDb = CARS_DATABASE.find(c => c.id === activeCarId);
+        const careerColor = careerCarDb ? careerCarDb.color : selectedColor;
+        const careerUpgrades = getCarUpgrades(activeCarId);
+        engineRef.current.setActiveCar(activeCarId, careerColor, careerUpgrades);
+
         engineRef.current.buildGarage();
         setActiveMode('garage');
         setGameStatus('idle');
@@ -1597,6 +1991,43 @@ export default function Game() {
       setSettingsTransitionComplete(true);
       setSettingsState('open');
     }, 700);
+  };
+
+  const handlePauseSettingClick = () => {
+    setPauseSettingsOpen(true);
+    setSettingsSubTab('graphics');
+    setSettingsTransitionComplete(false);
+    setSettingsState('entering');
+    setSettingsVisible(true);
+    setIsBlackOverlay(false);
+
+    setTimeout(() => {
+      setSettingsTransitionComplete(true);
+      setSettingsState('open');
+    }, 700);
+  };
+
+  const handlePauseSettingBackClick = () => {
+    if (settingsSubTab !== 'graphics') {
+      setSettingsState('closed');
+      setSettingsVisible(false);
+      setSettingsTransitionComplete(false);
+      setPauseSettingsOpen(false);
+      return;
+    }
+
+    setSettingsState('exiting_ui');
+    setSettingsVisible(false);
+    setSettingsTransitionComplete(false);
+
+    setTimeout(() => {
+      setSettingsState('expanding_canvas');
+    }, 400);
+
+    setTimeout(() => {
+      setSettingsState('closed');
+      setPauseSettingsOpen(false);
+    }, 1100);
   };
 
   const handleSettingBackClick = () => {
@@ -1936,6 +2367,11 @@ export default function Game() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (isPaused && pauseSettingsOpen) {
+          e.preventDefault();
+          handlePauseSettingBackClick();
+          return;
+        }
         // Can only pause during active play or countdown in gameplay modes
         if (
           activeMode !== 'garage' &&
@@ -1957,7 +2393,16 @@ export default function Game() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeMode, gameStatus]);
+  }, [activeMode, gameStatus, isPaused, pauseSettingsOpen]);
+
+  useEffect(() => {
+    if (!isPaused) {
+      setPauseSettingsOpen(false);
+      setSettingsVisible(false);
+      setSettingsTransitionComplete(false);
+      setSettingsState('closed');
+    }
+  }, [isPaused]);
 
   // Bind engine editorState callbacks to React state setters
   useEffect(() => {
@@ -2068,11 +2513,11 @@ export default function Game() {
       const minimapCurve =
         pathPositions.length > 2
           ? new THREE.CatmullRomCurve3(
-              pathPositions.map((pt) => new THREE.Vector3(pt.x, 0, pt.z)),
-              true,
-              activeTrack.curveType || 'centripetal',
-              activeTrack.tension || 0.5
-            )
+            pathPositions.map((pt) => new THREE.Vector3(pt.x, 0, pt.z)),
+            true,
+            activeTrack.curveType || 'centripetal',
+            activeTrack.tension || 0.5
+          )
           : null;
       const minimapPoints = minimapCurve
         ? minimapCurve.getSpacedPoints(Math.max(96, pathPositions.length * 16))
@@ -2182,6 +2627,23 @@ export default function Game() {
         filter: `brightness(${0.4 + (brightness / 5.0) * 0.6})`
       }}
     >
+      <audio
+        ref={menuMusicRef}
+        src="/audio/music/Main%20Menu.mp3"
+        loop
+        preload="auto"
+        className="hidden"
+        aria-hidden="true"
+      />
+      <audio
+        ref={trackMusicRef}
+        src="/audio/music/Getting%20Away%20With....mp3"
+        preload="auto"
+        className="hidden"
+        aria-hidden="true"
+        onEnded={playProceduralTrackAfterGap}
+      />
+
       {/* 3D Canvas Wrapper (decouples CSS transitions from WebGL canvas drawing buffer resizing) */}
       <div
         id="canvas-container"
@@ -2299,6 +2761,7 @@ export default function Game() {
         throttleInput={throttleInput}
         speed={speed}
         gear={speed === 0 ? 'N' : (speed < 0 ? 'R' : gear)}
+        suggestedGearAdvice={suggestedGearAdvice}
         rpm={rpm}
         isShifting={isShifting}
         fuelLiters={fuelLiters}
@@ -2315,193 +2778,327 @@ export default function Game() {
       />
 
       {/* PAUSE MENU OVERLAY (When Esc is pressed in gameplay) */}
-      {isPaused && (
-        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-md z-40 flex items-center justify-center p-6 pointer-events-auto">
-          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col gap-6 animate-scaleIn">
-            {/* Header */}
-            <div className="text-center">
-              <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase">Simulation Paused</span>
-              <h2 className="text-3xl font-black italic text-white tracking-wider mt-1 uppercase">Pause Menu</h2>
-            </div>
-
-            {/* Time / Laps Stats block */}
-            <div className="bg-slate-950/60 border border-slate-800/50 rounded-2xl p-4 flex flex-col gap-3">
-              <div className="flex justify-between items-center px-2">
-                <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Time</span>
-                <span className="text-xl font-mono font-black text-white">
-                  {formatTime(activeMode === 'race' ? totalRaceTime : timeRemaining)}
-                </span>
-              </div>
-
-              {activeMode === 'race' && (
-                <>
-                  <div className="h-px bg-slate-800/85" />
-                  <div className="flex justify-between items-center px-2">
-                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Best Lap Time</span>
-                    <span className="text-xl font-mono font-black text-cyan-400">
-                      {bestLapTime === Infinity ? '--:--.__-' : formatTime(bestLapTime)}
-                    </span>
-                  </div>
-                  <div className="h-px bg-slate-800/85" />
-                  <div className="flex justify-between items-center px-2">
-                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Current Lap</span>
-                    <span className="text-sm font-mono font-bold text-white">
-                      {checkpointIndex} / {totalCheckpoints}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Buttons list */}
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={() => {
-                  setIsPaused(false);
-                  if (engineRef.current) {
-                    engineRef.current.isPaused = false;
-                  }
-                }}
-                className="w-full bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:scale-[1.02] flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                Resume Simulation
-              </button>
-
-              <button
-                onClick={() => {
-                  resetCar();
-                  setIsPaused(false);
-                  if (engineRef.current) {
-                    engineRef.current.isPaused = false;
-                  }
-                }}
-                className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold py-3 px-6 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Reset Car Position (R)
-              </button>
-
-              {/* Customize HUD Layout Button */}
-              <button
-                onClick={() => setShowHUDCustomizer(true)}
-                className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-400 font-bold py-3 px-6 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(34,211,238,0.1)]"
-              >
-                <Wrench className="w-4 h-4 text-cyan-400" />
-                Customize HUD Layout
-              </button>
-
-              {/* Dedicated Settings Section */}
-              <div className="bg-slate-950/60 border border-slate-800/60 rounded-2xl p-4 flex flex-col gap-3.5 text-left select-none">
-                <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase leading-none block mb-1">
-                  SETTINGS
-                </span>
-
-                {/* TPS Rear Mirror Toggle */}
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">TPS Rear Mirror</span>
-                    <span className="text-[9px] text-slate-500">Show mirror overlay in third-person view</span>
-                  </div>
-                  <button
-                    onClick={() => setShowMirrorInTPS(!showMirrorInTPS)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${showMirrorInTPS
-                      ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                      }`}
-                  >
-                    {showMirrorInTPS ? 'ENABLED' : 'DISABLED'}
-                  </button>
-                </div>
-
-                <div className="h-px bg-slate-800/60" />
-
-                {/* Sound Toggle */}
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Game Audio</span>
-                    <span className="text-[9px] text-slate-500">Toggle retro synth engine sound effects</span>
-                  </div>
-                  <button
-                    onClick={() => setSoundEnabled(!soundEnabled)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${soundEnabled
-                      ? 'bg-cyan-950/50 border-cyan-800/80 text-cyan-400'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-350'
-                      }`}
-                  >
-                    {soundEnabled ? 'ENABLED' : 'MUTED'}
-                  </button>
-                </div>
-
-                <div className="h-px bg-slate-800/60" />
-
-                {/* Graphics Quality Settings */}
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-200">Graphics Quality</span>
-                    <span className="text-[9px] text-slate-505">Bloom, anti-aliasing, and speed shaders</span>
-                  </div>
-                  <div className="flex gap-1.5">
-                    {(['low', 'medium', 'high'] as const).map((q) => (
-                      <button
-                        key={q}
-                        onClick={() => changeGraphicsQuality(q)}
-                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all border uppercase cursor-pointer ${graphicsQuality === q
-                          ? 'bg-cyan-950/50 border-cyan-800/85 text-cyan-400 font-extrabold shadow-[0_0_8px_rgba(6,182,212,0.15)]'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
-                          }`}
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {graphicsQuality !== 'low' && (
-                  <>
-                    <div className="h-px bg-slate-800/60" />
-                    {/* Bloom Intensity Toggle */}
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex flex-col text-left">
-                        <span className="text-xs font-bold text-slate-200">Bloom Glow Effect</span>
-                        <span className="text-[9px] text-slate-505">Toggle environment bloom glow</span>
-                      </div>
-                      <button
-                        onClick={() => changeBloomIntensity(bloomIntensity > 0.17 ? 0.05 : 0.30)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${bloomIntensity > 0.17
-                          ? 'bg-slate-900 border border-slate-700 text-cyan-400 font-black'
-                          : 'bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-350'
-                          }`}
-                      >
-                        {bloomIntensity > 0.17 ? 'ON' : 'OFF'}
-                      </button>
+      {isPaused && !pauseSettingsOpen && (
+        <div className={`absolute inset-0 z-40 flex items-center justify-center p-6 ${pauseSettingsOpen ? 'bg-transparent backdrop-blur-0 pointer-events-none' : 'bg-black/82 backdrop-blur-md pointer-events-auto'}`}>
+          <div className={`w-full max-h-[92vh] overflow-hidden border shadow-[0_0_55px_rgba(0,0,0,0.85)] flex flex-col gap-5 p-6 animate-scaleIn transition-all duration-500 pointer-events-auto ${pauseSettingsOpen
+            ? 'max-w-5xl bg-zinc-950/88 border-zinc-850/80'
+            : 'max-w-md bg-zinc-950/96 border-zinc-850'
+            }`}>
+            {!pauseSettingsOpen ? (
+              <div className="flex flex-col gap-5">
+                <div className="text-left pb-4 border-b border-zinc-900">
+                  <h2 className="text-3xl font-black italic bg-gradient-to-r from-zinc-100 via-zinc-300 to-zinc-500 bg-clip-text text-transparent uppercase tracking-wider">
+                    Pause Menu
+                  </h2>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-mono uppercase tracking-wider text-zinc-500">
+                    <div className="bg-zinc-900/55 border border-zinc-850 px-3 py-2">
+                      <span className="block text-zinc-600">Total</span>
+                      <span className="text-zinc-100 font-black">{formatTime(activeMode === 'race' ? totalRaceTime : timeRemaining)}</span>
                     </div>
-                  </>
-                )}
-              </div>
+                    {activeMode === 'race' && (
+                      <div className="bg-zinc-900/55 border border-zinc-850 px-3 py-2">
+                        <span className="block text-zinc-600">Place</span>
+                        <span className="text-zinc-100 font-black">P{placement}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-              {/* Bottom Actions Row */}
-              <div className="grid grid-cols-2 gap-3 mt-1">
-                <button
-                  onClick={() => setShowHelp(!showHelp)}
-                  className={`py-3 px-4 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-2 cursor-pointer ${showHelp
-                    ? 'bg-cyan-950/60 border-cyan-800/85 text-cyan-400'
-                    : 'bg-slate-800/60 border-slate-750 text-slate-355 hover:text-white'
-                    }`}
-                >
-                  <HelpCircle className="w-4 h-4" />
-                  Controls Help
-                </button>
+                <div className="flex flex-col gap-2 w-full">
+                  <button
+                    onClick={() => {
+                      setIsPaused(false);
+                      if (engineRef.current) {
+                        engineRef.current.isPaused = false;
+                      }
+                    }}
+                    className="w-full bg-rose-600 hover:bg-rose-500 border border-rose-500 text-white font-black py-3 px-6 transition-all shadow-[0_0_15px_rgba(244,63,94,0.25)] flex items-center justify-center gap-2 cursor-pointer uppercase tracking-widest"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    Resume
+                  </button>
 
-                <button
-                  onClick={exitToGarage}
-                  className="bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 hover:text-white py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer hover:shadow-[0_0_15px_rgba(244,63,94,0.15)]"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Abort Session
-                </button>
+                  <button
+                    onClick={handlePauseSettingClick}
+                    className="w-full bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-100 font-black py-3 px-6 transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-widest"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Setting
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      resetCar();
+                      setIsPaused(false);
+                      if (engineRef.current) {
+                        engineRef.current.isPaused = false;
+                      }
+                    }}
+                    className="w-full bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-100 font-black py-3 px-6 transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-widest"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Reset Car
+                  </button>
+
+                  <button
+                    onClick={exitToGarage}
+                    className="w-full bg-rose-950/45 hover:bg-rose-900/65 border border-rose-800/60 text-rose-300 hover:text-white py-3 px-6 font-black transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-widest"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Abort Race
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-start pb-4 border-b border-zinc-900">
+                  <div className="text-left">
+                    <h2 className="text-3xl font-black italic bg-gradient-to-r from-zinc-100 via-zinc-300 to-zinc-500 bg-clip-text text-transparent uppercase tracking-wider">
+                      settings
+                    </h2>
+                  </div>
+                  <button
+                    onClick={() => setPauseSettingsOpen(false)}
+                    className="bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-300 hover:text-white px-5 py-2.5 rounded-xl text-xs font-black tracking-widest uppercase transition-all cursor-pointer"
+                  >
+                    Back to Pause
+                  </button>
+                </div>
+
+                <div className="flex justify-start border-b border-rose-600/60 pb-3 w-full">
+                  <div className="flex bg-zinc-950/80 border border-zinc-900 shadow-md transform -skew-x-12 overflow-hidden">
+                    {(['audio', 'graphics', 'control', 'layout'] as const).map((tab) => {
+                      const isActive = pauseSettingsTab === tab;
+                      return (
+                        <button
+                          key={tab}
+                          onClick={() => setPauseSettingsTab(tab)}
+                          className={`px-5 py-2.5 text-xs font-black tracking-widest uppercase transition-all duration-300 border-r border-zinc-800 last:border-r-0 cursor-pointer ${isActive
+                            ? 'bg-rose-600 border-rose-500 text-white shadow-[0_0_15px_rgba(244,63,94,0.3)]'
+                            : 'bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                            }`}
+                        >
+                          <span className="block transform skew-x-12">{tab}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="min-h-[320px] max-h-[48vh] overflow-y-auto pr-1">
+                  {pauseSettingsTab === 'audio' && (
+                    <div className="flex flex-col gap-4 text-left">
+                      {[
+                        { label: 'Master Volume', value: masterVolume, onChange: changeMasterVolume },
+                        { label: 'Music Volume', value: musicVolume, onChange: changeMusicVolume },
+                        { label: 'SFX Volume', value: sfxVolume, onChange: changeSfxVolume }
+                      ].map((row) => (
+                        <div key={row.label} className="flex items-center justify-between gap-4 py-3.5 border-b border-zinc-900/60">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-zinc-200">{row.label}</span>
+                            <span className="text-xs text-zinc-500 mt-0.5">0-100%</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={row.value}
+                              onChange={(e) => row.onChange(parseInt(e.target.value, 10))}
+                              className="w-36 md:w-56 h-1.5 bg-zinc-900 rounded-lg appearance-none cursor-pointer focus:outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-rose-600"
+                            />
+                            <span className="text-xs font-mono font-bold text-rose-500 w-12 text-right">{row.value}%</span>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-4 py-3.5 border-b border-zinc-900/60">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-zinc-200">Game Audio</span>
+                          <span className="text-xs text-zinc-500 mt-0.5">Toggle all music and effects</span>
+                        </div>
+                        <button
+                          onClick={() => setSoundEnabled(!soundEnabled)}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${soundEnabled
+                            ? 'bg-rose-600 border-rose-500 text-white font-black'
+                            : 'bg-zinc-950 border-zinc-900 text-zinc-400'
+                            }`}
+                        >
+                          {soundEnabled ? 'ENABLED' : 'MUTED'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {pauseSettingsTab === 'graphics' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 text-left">
+                      <div className="lg:col-span-2 flex flex-col justify-center">
+                        <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2.5">
+                          Live Scene Preview
+                        </span>
+                        <div
+                          ref={placeholderRef}
+                          className="w-full aspect-video bg-zinc-950/30 border border-rose-600/45 shadow-[0_0_22px_rgba(244,63,94,0.18)] overflow-hidden"
+                        />
+                      </div>
+
+                      <div className="lg:col-span-3 flex flex-col gap-4">
+                        <div className="flex items-center justify-between gap-4 py-3.5 border-b border-zinc-900/60">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-zinc-200">Graphics Quality</span>
+                            <span className="text-xs text-zinc-500 mt-0.5">Preset rendering profile</span>
+                          </div>
+                          <div className="flex gap-2">
+                            {(['low', 'medium', 'high'] as const).map((q) => (
+                              <button
+                                key={q}
+                                onClick={() => changeGraphicsQuality(q)}
+                                className={`px-4 py-2 rounded-xl text-xs font-black transition-all border uppercase cursor-pointer ${graphicsQuality === q
+                                  ? 'bg-rose-600 border-rose-500 text-white'
+                                  : 'bg-zinc-950 border-zinc-850 text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                              >
+                                {q}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {([
+                          ['shadows', 'Shadows'],
+                          ['bloom', 'Bloom Glow Effect'],
+                          ['vignette', 'Vignette & Chromatic Aberration'],
+                          ['motionBlur', 'Motion Blur']
+                        ] as [keyof GraphicsFeatures, string][]).map(([key, label]) => (
+                          <div key={key} className="flex items-center justify-between gap-4 py-3.5 border-b border-zinc-900/60">
+                            <span className="text-sm font-bold text-zinc-200">{label}</span>
+                            <button
+                              onClick={() => changeGraphicsFeature(key, !graphicsFeatures[key])}
+                              className={`px-4 py-2 rounded-xl text-xs font-black transition-all border min-w-[70px] cursor-pointer ${graphicsFeatures[key]
+                                ? 'bg-emerald-600/80 border-emerald-500 text-white'
+                                : 'bg-zinc-950 border-zinc-850 text-zinc-500 hover:text-zinc-300'
+                                }`}
+                            >
+                              {graphicsFeatures[key] ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between gap-4 py-3.5 border-b border-zinc-900/60">
+                          <span className="text-sm font-bold text-zinc-200">Anti-Aliasing</span>
+                          <select
+                            value={getAntiAliasingMode(graphicsFeatures)}
+                            onChange={(e) => changeAntiAliasingMode(e.target.value as AntiAliasingMode)}
+                            className="bg-zinc-950 border border-zinc-850 text-zinc-200 px-4 py-2 rounded-xl text-xs font-black uppercase cursor-pointer focus:outline-none focus:border-rose-500"
+                          >
+                            <option value="off">Off</option>
+                            <option value="fxaa">FXAA</option>
+                            <option value="taa">TAA</option>
+                          </select>
+                        </div>
+                        {graphicsFeatures.bloom && (
+                          <div className="flex items-center justify-between gap-4 py-3.5 border-b border-zinc-900/60">
+                            <span className="text-sm font-bold text-zinc-200">Bloom Intensity</span>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="range"
+                                min="0.05"
+                                max="0.50"
+                                step="0.01"
+                                value={bloomIntensity}
+                                onChange={(e) => changeBloomIntensity(parseFloat(e.target.value))}
+                                className="w-36 md:w-56 h-1.5 bg-zinc-900 rounded-lg appearance-none cursor-pointer focus:outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-rose-600"
+                              />
+                              <span className="text-xs font-mono font-bold text-rose-500 w-12 text-right">{bloomIntensity.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {pauseSettingsTab === 'control' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 text-left">
+                      {([
+                        ['accelerate', 'Accelerate'],
+                        ['brake', 'Brake / Reverse'],
+                        ['steerLeft', 'Steer Left'],
+                        ['steerRight', 'Steer Right'],
+                        ['handbrake', 'Handbrake'],
+                        ['shiftUp', 'Shift Up'],
+                        ['shiftDown', 'Shift Down'],
+                        ['reset', 'Reset Vehicle']
+                      ] as [keyof KeyBindings, string][]).map(([key, label]) => (
+                        <div key={key} className="flex items-center justify-between gap-4 py-3 border-b border-zinc-900/60">
+                          <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide">{label}</span>
+                          <kbd className="px-4 py-2.5 rounded-xl text-xs font-black font-mono border min-w-[110px] text-center bg-zinc-950 border-zinc-850 text-rose-500">
+                            {formatKeyName(keyBindings[key])}
+                          </kbd>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {pauseSettingsTab === 'layout' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 text-left">
+                      {[
+                        { key: 'showLap', label: 'Lap / Gate Counter' },
+                        { key: 'showLength', label: 'Track Length' },
+                        { key: 'showMap', label: 'Minimap Canvas' },
+                        { key: 'showMirror', label: 'Rear View Mirror' },
+                        { key: 'showLapTimer', label: 'Lap Timer' },
+                        { key: 'showPosition', label: 'Race Position' },
+                        { key: 'showStats', label: 'Time Stats Panel' },
+                        { key: 'showSpeedometer', label: 'Gear, Speed & Telemetry' }
+                      ].map((item) => {
+                        const key = item.key as keyof HUDConfig;
+                        return (
+                          <div key={item.key} className="flex items-center justify-between gap-4 py-3 border-b border-zinc-900/60">
+                            <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide">{item.label}</span>
+                            <button
+                              onClick={() => setHudConfig(prev => ({ ...prev, [key]: !prev[key] }))}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border min-w-[58px] cursor-pointer ${hudConfig[key]
+                                ? 'bg-rose-600 border-rose-500 text-white'
+                                : 'bg-zinc-950 border-zinc-850 text-zinc-500 hover:text-zinc-300'
+                                }`}
+                            >
+                              {hudConfig[key] ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                      <div className="flex items-center justify-between gap-4 py-3 border-b border-zinc-900/60">
+                        <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide">Speed Unit</span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setHudConfig(prev => ({ ...prev, speedUnit: 'kmh' }))}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black border cursor-pointer ${hudConfig.speedUnit !== 'mph' ? 'bg-rose-600 border-rose-500 text-white' : 'bg-zinc-950 border-zinc-850 text-zinc-500'}`}
+                          >
+                            KM/H
+                          </button>
+                          <button
+                            onClick={() => setHudConfig(prev => ({ ...prev, speedUnit: 'mph' }))}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black border cursor-pointer ${hudConfig.speedUnit === 'mph' ? 'bg-rose-600 border-rose-500 text-white' : 'bg-zinc-950 border-zinc-850 text-zinc-500'}`}
+                          >
+                            MPH
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 py-3 border-b border-zinc-900/60">
+                        <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide">TPS Rear Mirror</span>
+                        <button
+                          onClick={() => setShowMirrorInTPS(!showMirrorInTPS)}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border min-w-[82px] cursor-pointer ${showMirrorInTPS
+                            ? 'bg-rose-600 border-rose-500 text-white'
+                            : 'bg-zinc-950 border-zinc-850 text-zinc-500 hover:text-zinc-300'
+                            }`}
+                        >
+                          {showMirrorInTPS ? 'ENABLED' : 'DISABLED'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -2533,6 +3130,8 @@ export default function Game() {
             toggleUpgrade={toggleUpgrade}
             startRace={startRace}
             startQuickPlayRace={startQuickPlayRace}
+            drivingMode={drivingMode}
+            setDrivingMode={(mode: DrivingMode) => { setDrivingMode(mode); saveDrivingMode(mode); }}
             startFreeRoam={startFreeRoam}
             startTutorial={startTutorial}
             startLicenseTest={startLicenseTest}
@@ -2545,13 +3144,30 @@ export default function Game() {
             handleExitDealerClick={handleExitDealerClick}
             placeholderRef={placeholderRef}
             setActiveMode={setActiveMode}
+            previewCar={(carId: string) => {
+              if (engineRef.current) {
+                const carDb = CARS_DATABASE.find(c => c.id === carId);
+                const colorToUse = carDb ? carDb.color : selectedColor;
+                const activeUpgrades = getCarUpgrades(carId);
+                engineRef.current.setActiveCar(carId, colorToUse, activeUpgrades);
+              }
+            }}
+            onQuickPlayCarSelectChange={(isCarSelect: boolean, isActiveCarSelectStep: boolean, isInteractable: boolean) => {
+              if (engineRef.current) {
+                (engineRef.current as any).isQuickPlayCarSelect = isCarSelect;
+                (engineRef.current as any).isQuickPlayCarInteractable = isInteractable;
+                if (engineRef.current.vehicle && engineRef.current.vehicle.mesh) {
+                  engineRef.current.vehicle.mesh.visible = !isActiveCarSelectStep || isCarSelect;
+                }
+              }
+            }}
           />
         </div>
       )}
 
       {/* DEDICATED SETTINGS PAGE */}
       <Setting
-        activeGarageTab={activeGarageTab}
+        activeGarageTab={pauseSettingsOpen ? 'setting' : activeGarageTab}
         settingsSubTab={settingsSubTab}
         setSettingsSubTab={handleSettingsSubTabChange}
         settingsVisible={settingsVisible}
@@ -2564,6 +3180,7 @@ export default function Game() {
         changeGraphicsQuality={changeGraphicsQuality}
         graphicsFeatures={graphicsFeatures}
         changeGraphicsFeature={changeGraphicsFeature}
+        changeAntiAliasingMode={changeAntiAliasingMode}
         bloomIntensity={bloomIntensity}
         changeBloomIntensity={changeBloomIntensity}
         placeholderRef={placeholderRef}
@@ -2571,7 +3188,7 @@ export default function Game() {
         hudConfig={hudConfig}
         setHudConfig={setHudConfig}
         defaultHudConfig={DEFAULT_HUD_CONFIG}
-        handleSettingBackClick={handleSettingBackClick}
+        handleSettingBackClick={pauseSettingsOpen ? handlePauseSettingBackClick : handleSettingBackClick}
         keyBindings={keyBindings}
         onKeyBindingsChange={handleKeyBindingsChange}
         brightness={brightness}
@@ -2582,6 +3199,7 @@ export default function Game() {
         changeMusicVolume={changeMusicVolume}
         sfxVolume={sfxVolume}
         changeSfxVolume={changeSfxVolume}
+        backLabel={pauseSettingsOpen ? 'Back to Pause' : 'Back to Garage'}
       />
 
       {/* MAP EDITOR PANEL */}

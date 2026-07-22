@@ -2,6 +2,14 @@ export type GameModeName = 'garage' | 'free_roam' | 'license' | 'race' | 'tutori
 
 export type GameStatus = 'idle' | 'countdown' | 'playing' | 'success' | 'failed';
 
+export interface SuggestedGearAdvice {
+  suggestedGear: number;
+  targetSpeedKmh: number;
+  distanceToCorner: number;
+  severity: number;
+  tooFast: boolean;
+}
+
 export interface EngineCallbacks {
   onSpeedChange: (speed: number) => void;
   onDriftScoreChange: (score: number, multiplier: number) => void;
@@ -27,6 +35,7 @@ export interface EngineCallbacks {
     tireCompound?: string,
     tireWearEnabled?: boolean
   ) => void;
+  onSuggestedGearChange?: (advice: SuggestedGearAdvice | null) => void;
   onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
   onCarLoading?: (loading: boolean, progress: number) => void;
 }

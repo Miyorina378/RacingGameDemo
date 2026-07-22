@@ -8,8 +8,8 @@
 @theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-jetbrains-mono);
+  --font-mono: var(--font-jetbrains-mono);
 
   --animate-fadeIn: fadeIn 0.3s ease-out forwards;
   --animate-scaleIn: scaleIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
@@ -226,12 +226,12 @@ body {
 
 /* Dealer button car */
 .dealer-three-car {
-  width: 76px;
-  height: 44px;
-  opacity: 0.66;
+  width: 96px;
+  height: 56px;
+  opacity: 0.88;
   transform: translate(-50%, -50%);
   transition: opacity 300ms ease, filter 300ms ease;
-  filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.18));
+  filter: drop-shadow(0 0 12px rgba(255, 2, 88, 0.32));
 }
 
 .dealer-three-car canvas {
@@ -242,7 +242,7 @@ body {
 
 .group:hover .dealer-three-car {
   opacity: 1;
-  filter: drop-shadow(0 0 18px rgba(244, 63, 94, 0.35));
+  filter: drop-shadow(0 0 20px rgba(255, 2, 88, 0.52));
 }
 
 /* Dealer city map */
@@ -318,7 +318,315 @@ body {
   }
 }
 
+/* Quick Play map select */
+.quick-play-map-video {
+  background-size:
+    130% 130%,
+    100% 100%,
+    56px 56px,
+    56px 56px;
+  animation: quickPlayVideoPan 10s ease-in-out infinite alternate;
+  will-change: background-position, filter;
+}
+
+.quick-play-map-path-runner {
+  stroke-dasharray: 10 15;
+  animation: quickPlayPathRun 1.9s linear infinite;
+}
+
+.quick-play-black-wipe {
+  animation: quickPlayBlackWipe 760ms cubic-bezier(0.2, 0.72, 0.2, 1) forwards;
+}
+
+.quick-play-center-logo {
+  animation: quickPlayLogoArrive 520ms cubic-bezier(0.2, 0.72, 0.2, 1) both;
+}
+
+.quick-play-center-logo-img {
+  animation: quickPlayLogoImgArrive 520ms cubic-bezier(0.2, 0.72, 0.2, 1) both;
+}
+
+.quick-play-logo-rail {
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.quick-play-logo-token {
+  transform: translateY(8px) scale(0.9);
+}
+
+.quick-play-logo-token.is-active {
+  animation: quickPlayBottomTokenActive 520ms cubic-bezier(0.2, 0.72, 0.2, 1) both;
+}
+
+@keyframes quickPlayVideoPan {
+  0% {
+    background-position:
+      38% 28%,
+      50% 50%,
+      0 0,
+      0 0;
+    filter: saturate(0.95) brightness(0.86);
+  }
+
+  100% {
+    background-position:
+      64% 42%,
+      50% 50%,
+      56px 28px,
+      28px 56px;
+    filter: saturate(1.18) brightness(1);
+  }
+}
+
+@keyframes quickPlayPathRun {
+  to {
+    stroke-dashoffset: -50;
+  }
+}
+
+@keyframes quickPlayBlackWipe {
+  0%,
+  42% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes quickPlayLogoArrive {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 18%) scale(0.58);
+    filter: blur(8px);
+  }
+
+  66% {
+    opacity: 1;
+    transform: translate(-50%, -54%) scale(1.08);
+    filter: blur(0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes quickPlayLogoImgArrive {
+  0% {
+    opacity: 0;
+    transform: scale(0.58);
+    filter: blur(8px);
+  }
+
+  66% {
+    opacity: 1;
+    transform: scale(1.08);
+    filter: blur(0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes quickPlayBottomTokenActive {
+  0% {
+    transform: translateY(12px) scale(0.9);
+  }
+
+  100% {
+    transform: translateY(-10px) scale(1.14);
+  }
+}
+
 /* Exit button walker */
+
+.exit-person-runner {
+  transform: translate(-50%, -50%) scale(1.4);
+  transform-origin: 50% 85%;
+  transition: transform 1000ms cubic-bezier(0.2, 0.72, 0.2, 1);
+  will-change: transform;
+}
+
+.group:hover .exit-person-runner {
+  transform: translate(calc(-50% + 60px), -50%) scale(1.4);
+}
+
+.exit-person {
+  display: block;
+  opacity: 0.85;
+  transform-origin: 50% 85%;
+  transition: opacity 50ms ease-out;
+  will-change: opacity, transform;
+}
+
+.group:hover .exit-person {
+  animation: exitPersonStep 500ms steps(2, end) infinite;
+  opacity: 0;
+  transition-delay: 200ms;
+  transition-duration: 240ms;
+}
+
+@keyframes exitPersonStep {
+
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+
+  50% {
+    transform: translateY(-1px) rotate(2deg);
+  }
+}
+
+@keyframes exitTrailFade {
+  0% {
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 0.95;
+  }
+
+  74% {
+    opacity: 0.75;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+
+/* Smoke puffs */
+.group:hover .exit-smoke-puff {
+  animation: smokePuff 0.9s ease-out forwards;
+}
+
+.group:hover .exit-smoke-1 {
+  animation-delay: 0.5s;
+}
+
+.group:hover .exit-smoke-2 {
+  animation-delay: 0.65s;
+}
+
+.group:hover .exit-smoke-3 {
+  animation-delay: 0.8s;
+}
+
+@keyframes smokePuff {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) translateY(0);
+  }
+
+  30% {
+    opacity: 0.8;
+    transform: scale(1) translateY(-4px);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.8) translateY(-14px);
+  }
+}
+
+/* Tuning button tools animation */
+
+.tuning-screwdriver {
+  transform: translate(-50%, -50%) rotate(0deg);
+  transition: transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.tuning-wrench {
+  transform: translate(-50%, -50%) rotate(0deg);
+  transition: transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.group:hover .tuning-screwdriver {
+  transform: translate(calc(-50% - 12px), -50%) rotate(-45deg) scale(1.1);
+}
+
+.group:hover .tuning-wrench {
+  transform: translate(calc(-50% + 12px), -50%) rotate(45deg) scale(1.1);
+}
+
+.animate-brandPop {
+  animation: brandPop 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes brandPop {
+  from {
+    transform: translateY(32px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Custom Showcase Animations */
+@keyframes lanternSwing {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+
+@keyframes lanternFlicker {
+  0%, 100% { opacity: 0.8; }
+  45%, 55% { opacity: 1.0; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes digitalSnow {
+  0% { transform: translateY(-50px) translateX(0); opacity: 0; }
+  10% { opacity: 0.8; }
+  90% { opacity: 0.8; }
+  100% { transform: translateY(650px) translateX(30px); opacity: 0; }
+}
+
+@keyframes lighthouseRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes speedLinePulse {
+  0%, 100% { opacity: 0.15; transform: scaleX(0.98); }
+  50% { opacity: 0.45; transform: scaleX(1.02); }
+}
+
+.animate-lantern-swing {
+  animation: lanternSwing 3.5s ease-in-out infinite;
+  transform-origin: 50% 0%;
+}
+
+.animate-lantern-flicker {
+  animation: lanternFlicker 2s infinite;
+}
+
+.animate-snow-1 {
+  animation: digitalSnow 6s linear infinite;
+}
+.animate-snow-2 {
+  animation: digitalSnow 8s linear infinite;
+  animation-delay: 1.5s;
+}
+.animate-snow-3 {
+  animation: digitalSnow 7s linear infinite;
+  animation-delay: 3s;
+}
+.animate-snow-4 {
+  animation: digitalSnow 9s linear infinite;
+  animation-delay: 4.5s;
+}
 
 .exit-person-runner {
   transform: translate(-50%, -50%) scale(1.4);
@@ -506,5 +814,51 @@ body {
 
 .animate-speed-line {
   animation: speedLinePulse 2s ease-in-out infinite;
+}
+
+.animate-slideRightToLeft {
+  animation: slideRightToLeft 280ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.animate-slideLeftToRight {
+  animation: slideLeftToRight 280ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes slideRightToLeft {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  35% {
+    transform: translateX(-36px);
+    opacity: 0;
+  }
+  36% {
+    transform: translateX(36px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideLeftToRight {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  35% {
+    transform: translateX(36px);
+    opacity: 0;
+  }
+  36% {
+    transform: translateX(-36px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 

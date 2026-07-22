@@ -22,11 +22,14 @@ export const DEFAULT_HUD_CONFIG: HUDConfig = {
   speedUnit: 'kmh',
 };
 
+export type DrivingMode = 'arcade' | 'simulation';
+
 const STORAGE_KEYS = {
   HUD_CONFIG: 'cyberdrive_hud_config',
   MIRROR_TPS: 'cyberdrive_mirror_tps',
   SOUND_ENABLED: 'cyberdrive_sound_enabled',
   KEY_BINDINGS: 'cyberdrive_key_bindings',
+  DRIVING_MODE: 'cyberdrive_driving_mode',
 };
 
 const isClient = typeof window !== 'undefined';
@@ -120,5 +123,25 @@ export function saveKeyBindings(bindings: KeyBindings): void {
     localStorage.setItem(STORAGE_KEYS.KEY_BINDINGS, JSON.stringify(bindings));
   } catch (e) {
     console.error('Failed to save key bindings:', e);
+  }
+}
+
+export function loadDrivingMode(): DrivingMode {
+  if (!isClient) return 'simulation';
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.DRIVING_MODE);
+    if (saved === 'arcade' || saved === 'simulation') return saved;
+    return 'simulation';
+  } catch (e) {
+    return 'simulation';
+  }
+}
+
+export function saveDrivingMode(mode: DrivingMode): void {
+  if (!isClient) return;
+  try {
+    localStorage.setItem(STORAGE_KEYS.DRIVING_MODE, mode);
+  } catch (e) {
+    console.error('Failed to save driving mode:', e);
   }
 }

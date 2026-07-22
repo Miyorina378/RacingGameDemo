@@ -1717,6 +1717,7 @@ export abstract class BaseMode implements GameMode {
     leftScale?: number;
     rightScale?: number;
     sideSign?: number;
+    normal?: THREE.Vector3;
     trackBoundary?: number;
     banking?: number;
     curb?: boolean;
@@ -1732,6 +1733,7 @@ export abstract class BaseMode implements GameMode {
         leftScale: 1.0,
         rightScale: 1.0,
         sideSign: 1,
+        normal: new THREE.Vector3(1, 0, 0),
         trackBoundary: this.trackBoundary,
         banking: 0,
         curb: this.haveCurb,
@@ -1824,6 +1826,7 @@ export abstract class BaseMode implements GameMode {
       leftScale: lScale,
       rightScale: rScale,
       sideSign: sideSign,
+      normal: normal.clone(),
       trackBoundary: trackBoundary,
       banking: banking,
       curb: activeCurb,

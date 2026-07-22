@@ -249,6 +249,22 @@ export class SuspensionModel {
     const rearCompression =
       (this.corners.rearLeft.compression + this.corners.rearRight.compression) *
       0.5;
+    const frontGroundHeight =
+      (input.groundHeights.frontLeft + input.groundHeights.frontRight) * 0.5;
+    const rearGroundHeight =
+      (input.groundHeights.rearLeft + input.groundHeights.rearRight) * 0.5;
+    const leftGroundHeight =
+      (input.groundHeights.frontLeft + input.groundHeights.rearLeft) * 0.5;
+    const rightGroundHeight =
+      (input.groundHeights.frontRight + input.groundHeights.rearRight) * 0.5;
+    const frontBodyCompression =
+      frontCompression - (frontGroundHeight - averageGroundHeight);
+    const rearBodyCompression =
+      rearCompression - (rearGroundHeight - averageGroundHeight);
+    const leftBodyCompression =
+      leftCompression - (leftGroundHeight - averageGroundHeight);
+    const rightBodyCompression =
+      rightCompression - (rightGroundHeight - averageGroundHeight);
     const averageCompression =
       (frontCompression + rearCompression) * 0.5;
     const staticFrontCompression =
@@ -288,11 +304,11 @@ export class SuspensionModel {
         (this.setup.rideHeight - 0.16) -
         (averageCompression - staticAverageCompression),
       pitch:
-        Math.atan2(frontCompression - rearCompression, input.wheelbase) *
-        pitchResponse,
+        Math.atan2(frontBodyCompression - rearBodyCompression, input.wheelbase) *
+          pitchResponse,
       roll:
-        Math.atan2(leftCompression - rightCompression, input.trackWidth) *
-        rollResponse,
+        Math.atan2(leftBodyCompression - rightBodyCompression, input.trackWidth) *
+          rollResponse,
       averageGroundHeight
     };
   }

@@ -7,6 +7,7 @@ import { FreeRoamMode } from './modes/FreeRoamMode';
 import { PreviewMode } from './modes/PreviewMode';
 import { LicenseMode } from './modes/LicenseMode';
 import { RaceMode } from './modes/RaceMode';
+import type { RaceOptions } from './modes/RaceMode';
 import { TutorialMode } from './modes/TutorialMode';
 import { TRACKS_DATABASE } from './config/TrackDatabase';
 import { Sky } from './objects/Sky';
@@ -17,6 +18,7 @@ import { GameModeName, GameStatus } from './engine/types';
 import { InputController } from './engine/InputController';
 import { createThreeWorld } from './engine/threeWorld';
 import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
+import { SuggestedGearAdvisor, SuggestedGearAdvice } from './engine/SuggestedGearAdvisor';
 import {
   DEFAULT_LICENSE_TEST_ID,
   LicenseProgress,
@@ -59,6 +61,7 @@ export interface EngineCallbacks {
     tireCompound?: string,
     tireWearEnabled?: boolean
   ) => void;
+  onSuggestedGearChange?: (advice: SuggestedGearAdvice | null) => void;
   onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
 }
 
@@ -122,6 +125,8 @@ export class GameEngine {
   public isPaused = false;
   public activeTrackId = 'sprint_circuit';
   public cameraViewMode: 'chase' | 'driver' = 'chase';
+  public isQuickPlayRace = false;
+  private suggestedGearAdvisor = new SuggestedGearAdvisor();
 
   // Player Stats
   public playerCredits = 500;
@@ -288,11 +293,15 @@ export class GameEngine {
 
   public buildGarage() {
     this.sky.updateTimeOfDay('night');
+    this.suggestedGearAdvisor.clear();
+    this.callbacks.onSuggestedGearChange?.(null);
     this.changeMode('garage', new GarageMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
   public buildOpenWorld() {
     this.sky.updateTimeOfDay('night');
+    this.suggestedGearAdvisor.clear();
+    this.callbacks.onSuggestedGearChange?.(null);
     this.changeMode('free_roam', new FreeRoamMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
@@ -304,10 +313,11 @@ export class GameEngine {
     this.activeLicenseTestId = testConfig.id;
     this.sky.updateTimeOfDay('afternoon');
     if (testConfig.time) this.sky.updateTimeOfDay(testConfig.time);
+    this.suggestedGearAdvisor.setTrack(testConfig, true);
     this.changeMode('license', new LicenseMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, testConfig.id));
   }
 
-  public buildRaceTrack(trackId: string = 'sprint_circuit') {
+  public buildRaceTrack(trackId: string = 'sprint_circuit', options: RaceOptions = {}) {
     this.activeTrackId = trackId;
     const trackConfig = TRACKS_DATABASE.find(t => t.id === trackId);
     if (trackConfig && trackConfig.time) {
@@ -315,11 +325,16 @@ export class GameEngine {
     } else {
       this.sky.updateTimeOfDay('night');
     }
-    this.changeMode('race', new RaceMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, trackId));
+    this.suggestedGearAdvisor.setTrack(trackConfig || null, true);
+    // Set player vehicle driving mode
+    this.vehicle.drivingMode = options.drivingMode ?? 'simulation';
+    this.changeMode('race', new RaceMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, trackId, options));
   }
 
   public buildTutorial() {
     this.sky.updateTimeOfDay('afternoon');
+    this.suggestedGearAdvisor.clear();
+    this.callbacks.onSuggestedGearChange?.(null);
     this.changeMode('tutorial', new TutorialMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys));
   }
 
@@ -334,6 +349,8 @@ export class GameEngine {
     if (this.currentModeInstance instanceof PreviewMode) {
       PreviewMode.isRebuilding = true;
     }
+    this.suggestedGearAdvisor.clear();
+    this.callbacks.onSuggestedGearChange?.(null);
     // We treat preview as 'garage' conceptually so it doesn't snap camera behind car, 
     // but the PreviewMode will take over camera control anyway.
     this.changeMode('garage', new PreviewMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, trackId));
@@ -447,7 +464,9 @@ export class GameEngine {
 
       const placeText = place === 1 ? '1st PLACE' : (place === 2 ? '2nd PLACE' : place === 3 ? '3rd PLACE' : `${place}th PLACE`);
 
-      if (place === 1) {
+      if (this.isQuickPlayRace) {
+        creditsReward = 0;
+      } else if (place === 1) {
         creditsReward = baseReward;
       } else if (place === 2) {
         creditsReward = Math.round(baseReward * 0.4);
@@ -465,7 +484,9 @@ export class GameEngine {
       const seconds = Math.floor(this.gameTimer % 60);
       const milliseconds = Math.floor((this.gameTimer % 1) * 1000);
       const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
-      message = `${placeText}! Completed circuit in ${formattedTime}. +${creditsReward} cr`;
+      message = this.isQuickPlayRace
+        ? `${placeText}! Completed circuit in ${formattedTime}. (Quick Play - No Prize)`
+        : `${placeText}! Completed circuit in ${formattedTime}. +${creditsReward} cr`;
     }
 
     this.playerCredits += creditsReward;
@@ -597,6 +618,14 @@ export class GameEngine {
       Math.hypot(this.vehicle.velocityX, this.vehicle.velocityZ) * 3.6
     );
     this.callbacks.onSpeedChange(displaySpeed);
+    if (this.activeMode === 'race' || this.activeMode === 'license') {
+      const advice = this.gameStatus === 'playing'
+        ? this.suggestedGearAdvisor.getAdvice(this.vehicle, displaySpeed)
+        : null;
+      this.callbacks.onSuggestedGearChange?.(advice);
+    } else {
+      this.callbacks.onSuggestedGearChange?.(null);
+    }
     if (this.callbacks.onVehicleStatsChange) {
       this.callbacks.onVehicleStatsChange(
         displaySpeed,
@@ -704,7 +733,7 @@ export class GameEngine {
       return;
     }
     if (this.activeMode === 'garage') {
-      if (this.tuningState !== 'closed') {
+      if (this.tuningState !== 'closed' || (this as any).isQuickPlayCarSelect) {
         this.camera.up.set(0, 1, 0);
 
         // Calculate dynamic dimensions of the vehicle to position camera correctly
@@ -729,6 +758,11 @@ export class GameEngine {
         }
 
         const activeRadius = this.tuningRadius * zoomFactor;
+
+        if ((this as any).isQuickPlayCarSelect && !(this as any).isQuickPlayCarInteractable) {
+          this.tuningTheta = -Math.PI / 4;
+          this.tuningPhi = 1.25;
+        }
 
         // Calculate position in spherical coordinates centered around (0, carHeight * 0.4, 0)
         const targetX = Math.sin(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
@@ -811,31 +845,34 @@ export class GameEngine {
   }
 
   private handlePointerDown = (e: PointerEvent) => {
-    if (this.activeMode !== 'garage' || this.tuningState === 'closed') return;
-    
+    if (this.activeMode !== 'garage' || (this.tuningState === 'closed' && !(this as any).isQuickPlayCarInteractable)) return;
+
+    // Only capture if the click target is the canvas itself, not UI elements on top
+    if (e.target !== this.canvas) return;
+
     const rect = this.canvas.getBoundingClientRect();
     const x = e.clientX;
     const y = e.clientY;
-    
+
     if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
       this.isPointerDown = true;
       this.prevPointerX = e.clientX;
       this.prevPointerY = e.clientY;
       try {
         this.canvas.setPointerCapture(e.pointerId);
-      } catch (err) {}
+      } catch (err) { }
     }
   };
 
   private handlePointerMove = (e: PointerEvent) => {
-    if (!this.isPointerDown || this.activeMode !== 'garage' || this.tuningState === 'closed') return;
-    
+    if (!this.isPointerDown || this.activeMode !== 'garage' || (this.tuningState === 'closed' && !(this as any).isQuickPlayCarInteractable)) return;
+
     const deltaX = e.clientX - this.prevPointerX;
     const deltaY = e.clientY - this.prevPointerY;
-    
+
     this.prevPointerX = e.clientX;
     this.prevPointerY = e.clientY;
-    
+
     this.tuningTheta -= deltaX * 0.005;
     this.tuningPhi = Math.max(0.02, Math.min(Math.PI / 2.2, this.tuningPhi + deltaY * 0.005));
   };
@@ -845,29 +882,29 @@ export class GameEngine {
       this.isPointerDown = false;
       try {
         this.canvas.releasePointerCapture(e.pointerId);
-      } catch (err) {}
+      } catch (err) { }
     }
   };
 
   private handleWheel = (e: WheelEvent) => {
-    if (this.activeMode !== 'garage' || this.tuningState === 'closed') return;
-    
+    if (this.activeMode !== 'garage' || (this.tuningState === 'closed' && !(this as any).isQuickPlayCarInteractable)) return;
+
     const rect = this.canvas.getBoundingClientRect();
     const x = e.clientX;
     const y = e.clientY;
-    
+
     if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
       e.preventDefault();
-      
+
       const zoomAmount = e.deltaY * 0.005;
-      
+
       const box = new THREE.Box3().setFromObject(this.vehicle.mesh);
       const size = box.getSize(new THREE.Vector3());
       const carLength = size.z > 0.5 ? size.z : 4.8;
-      
+
       const minRadius = carLength * 0.4;
       const maxRadius = carLength * 2.5;
-      
+
       this.tuningRadius = Math.max(minRadius, Math.min(maxRadius, this.tuningRadius + zoomAmount * carLength * 0.1));
     }
   };

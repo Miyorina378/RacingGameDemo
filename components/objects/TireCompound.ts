@@ -174,7 +174,7 @@ export const TIRE_COMPOUNDS: Record<TireCompoundType, TireCompoundConfig> = {
   soft: {
     id: 'soft',
     name: 'Racing Super Soft',
-    gripMultiplier: 1.29,
+    gripMultiplier: 2.25,
     wearRate: 2.30,
     optimalTemperature: 98,
     temperatureWindow: 18,
@@ -191,9 +191,9 @@ export const TIRE_COMPOUNDS: Record<TireCompoundType, TireCompoundConfig> = {
   },
   super_soft: {
     id: 'super_soft',
-    name: 'Qualifying',
+    name: 'Racing Qualify Tire',
     gripMultiplier: 2.5,
-    wearRate: 3.50,
+    wearRate: 2.5,
     optimalTemperature: 102,
     temperatureWindow: 16,
     coldGripFloor: 0.84,
@@ -203,7 +203,7 @@ export const TIRE_COMPOUNDS: Record<TireCompoundType, TireCompoundConfig> = {
     postPeakGripLoss: 0.18,
     postPeakFalloff: 0.78,
     recommendedColdPressurePsi: 27,
-    pressureTolerancePsi: 8,
+    pressureTolerancePsi: 8,  
     colorHex: '#a855f7',
     colorLabel: 'Purple'
   }

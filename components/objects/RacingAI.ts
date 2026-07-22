@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Vehicle } from './Vehicle';
 import { Obstacle } from './Obstacle';
+import type { DrivingMode } from '../option';
 
 /**
  * RacingAI — Simcade racing AI controller with PD steering and predictive braking.
@@ -22,6 +23,9 @@ export class RacingAI {
   private densePath: THREE.Vector3[];
   private speedFactor: number;      // 0.0–1.0 personality cap on max speed
   private lateralOffset: number;    // Lane offset in track-normal units
+
+  // Driving mode: 'simulation' uses full PD controller, 'arcade' uses simplified logic
+  public drivingMode: DrivingMode = 'simulation';
 
   // --- Track awareness callbacks (set externally by RaceMode) ---
   public getTrackInfo?: (x: number, z: number, yHint?: number) => {
@@ -114,10 +118,130 @@ export class RacingAI {
   }
 
   /**
+   * Find closest spline point to the vehicle in a local search window.
+   */
+  private findClosestPathIndex(): number {
+    const pathLen = this.densePath.length;
+    const pos = this.vehicle.pos;
+    const searchWindow = 40;
+    let closestIdx = this.prevClosestIdx;
+    let minDistSq = Infinity;
+
+    const searchStart = (this.prevClosestIdx - searchWindow + pathLen) % pathLen;
+    for (let offset = 0; offset < searchWindow * 2; offset++) {
+      const i = (searchStart + offset) % pathLen;
+      const dx = this.densePath[i].x - pos.x;
+      const dz = this.densePath[i].z - pos.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
+        closestIdx = i;
+      }
+    }
+    this.prevClosestIdx = closestIdx;
+    return closestIdx;
+  }
+
+  /**
+   * Arcade AI: simplified single-point lookahead steering + basic throttle/brake.
+   * No PD controller, no curvature scanning, no trail braking.
+   */
+  private computeArcadeInputs(deltaTime: number): { [key: string]: boolean | number } {
+    const keys: { [key: string]: boolean | number } = {
+      w: false, s: false, a: false, d: false, ' ': false,
+      throttleAnalog: 0, reverseAnalog: 0, steerAnalog: 0
+    };
+
+    const pathLen = this.densePath.length;
+    if (pathLen < 3) return keys;
+
+    const pos = this.vehicle.pos;
+    const speed = this.vehicle.speed;
+    const yaw = this.vehicle.yaw;
+    const maxSpeed = this.vehicle.maxSpeed;
+
+    const closestIdx = this.findClosestPathIndex();
+
+    // Single lookahead point: scale with speed
+    const absSpeedKmh = Math.abs(speed) * 3.6;
+    const lookaheadSteps = Math.round(10 + absSpeedKmh * 0.15);
+    const targetIdx = (closestIdx + lookaheadSteps) % pathLen;
+    const targetPt = this.densePath[targetIdx];
+
+    // Apply lateral offset
+    const targetTangent = this.tangents[targetIdx];
+    const targetNormal = new THREE.Vector3(-targetTangent.z, 0, targetTangent.x);
+    const offsetTarget = targetPt.clone().addScaledVector(targetNormal, this.lateralOffset);
+
+    // Compute desired yaw
+    const diff = new THREE.Vector3().subVectors(offsetTarget, pos);
+    diff.y = 0;
+    const targetYaw = Math.atan2(diff.x, diff.z);
+
+    // Normalize yaw error
+    let yawError = targetYaw - yaw;
+    while (yawError < -Math.PI) yawError += Math.PI * 2;
+    while (yawError > Math.PI) yawError -= Math.PI * 2;
+
+    // Simple proportional steering
+    let steer = THREE.MathUtils.clamp(yawError * 2.0, -1.0, 1.0);
+
+    // Smooth steering slightly
+    this.smoothSteer = THREE.MathUtils.lerp(this.smoothSteer, steer, 6.0 * deltaTime);
+    keys.steerAnalog = THREE.MathUtils.clamp(this.smoothSteer, -1.0, 1.0);
+
+    // Simple speed target: just use speedFactor * maxSpeed, slow slightly for steering
+    const steerMag = Math.abs(this.smoothSteer);
+    const cornerSlowdown = Math.max(0.5, 1.0 - steerMag * 0.4);
+    const targetSpeed = maxSpeed * this.speedFactor * cornerSlowdown;
+
+    if (speed < targetSpeed) {
+      keys.throttleAnalog = THREE.MathUtils.clamp((targetSpeed - speed) * 0.15, 0.1, 1.0);
+    } else {
+      keys.reverseAnalog = THREE.MathUtils.clamp((speed - targetSpeed) * 0.2, 0, 0.8);
+    }
+
+    // Simple obstacle avoidance (same as simulation)
+    if (this.obstacles.length > 0 && Math.abs(speed) > 5) {
+      const forwardVec = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      for (const obstacle of this.obstacles) {
+        const toObs = new THREE.Vector3().subVectors(obstacle.pos, pos);
+        toObs.y = 0;
+        const dist = toObs.length();
+        if (dist < 15) {
+          const dot = forwardVec.dot(toObs.normalize());
+          if (dot > 0.3) {
+            const rightVec = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+            const side = rightVec.dot(toObs);
+            const dodgeIntensity = THREE.MathUtils.clamp((15 - dist) / 10, 0, 0.5);
+            if (side > 0) {
+              this.smoothSteer -= dodgeIntensity;
+            } else {
+              this.smoothSteer += dodgeIntensity;
+            }
+            keys.steerAnalog = THREE.MathUtils.clamp(this.smoothSteer, -1.0, 1.0);
+            if (dist < 8) {
+              keys.throttleAnalog = Math.min(keys.throttleAnalog as number, 0.3);
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    return keys;
+  }
+
+  /**
    * Main AI tick — call once per frame.
    * Returns a keys object that can be passed directly to Vehicle.update().
    */
   public computeInputs(deltaTime: number): { [key: string]: boolean | number } {
+    // Arcade mode: use simplified AI
+    if (this.drivingMode === 'arcade') {
+      return this.computeArcadeInputs(deltaTime);
+    }
+
     const keys: { [key: string]: boolean | number } = {
       w: false,
       s: false,
@@ -141,22 +265,7 @@ export class RacingAI {
     // =============================================
     // 1. FIND CLOSEST SPLINE POINT (local window)
     // =============================================
-    const searchWindow = 40;
-    let closestIdx = this.prevClosestIdx;
-    let minDistSq = Infinity;
-
-    const searchStart = (this.prevClosestIdx - searchWindow + pathLen) % pathLen;
-    for (let offset = 0; offset < searchWindow * 2; offset++) {
-      const i = (searchStart + offset) % pathLen;
-      const dx = this.densePath[i].x - pos.x;
-      const dz = this.densePath[i].z - pos.z;
-      const distSq = dx * dx + dz * dz;
-      if (distSq < minDistSq) {
-        minDistSq = distSq;
-        closestIdx = i;
-      }
-    }
-    this.prevClosestIdx = closestIdx;
+    const closestIdx = this.findClosestPathIndex();
 
     // =============================================
     // 2. MULTI-POINT LOOKAHEAD BLENDING

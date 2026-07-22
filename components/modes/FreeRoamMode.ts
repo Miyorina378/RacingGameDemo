@@ -65,11 +65,12 @@ export class FreeRoamMode extends BaseMode {
       this.crystals.push(crystal);
     }
 
-    // Let React UI know
-    this.engine.callbacks.onGameStatus('playing', 'Explore the world! Collect crystals and drift for points.');
+    this.engine.startCountdown(0);
   }
 
   public update(deltaTime: number) {
+    const isCountdown = this.engine.gameStatus === 'countdown';
+
     // 1. Grid scroll repositioning
     this.updateScrollingFloor();
 
@@ -80,7 +81,12 @@ export class FreeRoamMode extends BaseMode {
 
     // 3. Movement update
     const previousPos = this.vehicle.pos.clone();
-    this.vehicle.update(deltaTime, this.keys);
+    this.vehicle.update(deltaTime, this.keys, isCountdown);
+    if (isCountdown) {
+      this.particles.emitBoosters(this.vehicle.mesh.matrixWorld, this.vehicle.yaw, this.vehicle.speed, this.vehicle.boosterColor);
+      this.particles.update(deltaTime);
+      return;
+    }
 
     // 4. Drift point accumulation & smoke
     if (this.vehicle.isDrifting) {

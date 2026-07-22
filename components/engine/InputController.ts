@@ -10,6 +10,13 @@ interface InputControllerOptions {
 }
 
 const DEFAULT_DRIVING_KEYS = ['w', 's', 'a', 'd', ' '];
+const DEFAULT_DRIVING_KEY_MAP: Record<string, string[]> = {
+  w: ['w'],
+  s: ['s'],
+  a: ['a'],
+  d: ['d'],
+  ' ': [' ', 'space', 'spacebar']
+};
 
 export class InputController {
   private options: InputControllerOptions;
@@ -79,7 +86,9 @@ export class InputController {
     }
 
     if (DEFAULT_DRIVING_KEYS.includes(keyLower) && !isReboundDrivingKey) {
-      return;
+      for (const canonicalKey of DEFAULT_DRIVING_KEY_MAP[keyLower] ?? [keyLower]) {
+        keys[canonicalKey] = pressed;
+      }
     }
 
     keys[keyLower] = pressed;

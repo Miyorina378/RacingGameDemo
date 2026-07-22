@@ -5,6 +5,8 @@ import { RotateCcw, HelpCircle, LogOut, Wrench, Map, Timer } from 'lucide-react'
 import { HUDConfig, KeyBindings, DEFAULT_KEY_BINDINGS } from '../option';
 import { GraphicsFeatures, QUALITY_PRESETS } from '../PostProcessing';
 
+type AntiAliasingMode = 'off' | 'fxaa' | 'taa';
+
 interface SettingProps {
   activeGarageTab: string | null;
   settingsSubTab: 'audio' | 'graphics' | 'control' | 'layout';
@@ -19,6 +21,7 @@ interface SettingProps {
   changeGraphicsQuality: (quality: 'low' | 'medium' | 'high') => void;
   graphicsFeatures: GraphicsFeatures;
   changeGraphicsFeature: (feature: keyof GraphicsFeatures, value: boolean) => void;
+  changeAntiAliasingMode: (mode: AntiAliasingMode) => void;
   bloomIntensity: number;
   changeBloomIntensity: (intensity: number) => void;
   placeholderRef: React.RefObject<HTMLDivElement | null>;
@@ -37,6 +40,7 @@ interface SettingProps {
   changeMusicVolume: (val: number) => void;
   sfxVolume: number;
   changeSfxVolume: (val: number) => void;
+  backLabel?: string;
 }
 
 export default function Setting({
@@ -53,6 +57,7 @@ export default function Setting({
   changeGraphicsQuality,
   graphicsFeatures,
   changeGraphicsFeature,
+  changeAntiAliasingMode,
   bloomIntensity,
   changeBloomIntensity,
   placeholderRef,
@@ -71,6 +76,7 @@ export default function Setting({
   changeMusicVolume,
   sfxVolume,
   changeSfxVolume,
+  backLabel = 'Back to Garage',
 }: SettingProps) {
   const [rebindingAction, setRebindingAction] = useState<keyof KeyBindings | null>(null);
 
@@ -162,7 +168,7 @@ export default function Setting({
                 onClick={handleSettingBackClick}
                 className="bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-300 hover:text-white px-5 py-2.5 rounded-xl text-xs font-black tracking-widest uppercase transition-all cursor-pointer"
               >
-                Back to Garage
+                {backLabel}
               </button>
             </div>
           </div>
@@ -320,7 +326,9 @@ export default function Setting({
                         graphicsFeatures.shadows === p.shadows &&
                         graphicsFeatures.bloom === p.bloom &&
                         graphicsFeatures.vignette === p.vignette &&
-                        graphicsFeatures.fxaa === p.fxaa
+                        graphicsFeatures.motionBlur === p.motionBlur &&
+                        graphicsFeatures.fxaa === p.fxaa &&
+                        graphicsFeatures.taa === p.taa
                       );
                     };
                     const effectiveTier: 'low' | 'medium' | 'high' | 'custom' =
@@ -334,7 +342,7 @@ export default function Setting({
                     const tierDescriptions: Record<string, string> = {
                       low: 'Maximum performance. All post-processing disabled. No shadows rendered.',
                       medium: 'Balanced quality. Shadows and bloom glow enabled with moderate intensity.',
-                      high: 'Maximum fidelity. Full bloom, vignette, chromatic aberration, and anti-aliasing.',
+                      high: 'Maximum fidelity. Full bloom, vignette, chromatic aberration, and temporal anti-aliasing.',
                       custom: 'User-modified settings. One or more values differ from presets.',
                     };
 
@@ -342,8 +350,13 @@ export default function Setting({
                       { key: 'shadows', label: 'Shadows', desc: 'Dynamic shadow casting from lights' },
                       { key: 'bloom', label: 'Bloom Glow Effect', desc: 'HDR glow on bright surfaces' },
                       { key: 'vignette', label: 'Vignette & Chromatic Aberration', desc: 'Screen-edge darkening & color fringing' },
-                      { key: 'fxaa', label: 'FXAA Anti-Aliasing', desc: 'Fast approximate anti-aliasing' },
+                      { key: 'motionBlur', label: 'Motion Blur', desc: 'Speed-based camera streaking at high speed' },
                     ];
+                    const antiAliasingMode: AntiAliasingMode = graphicsFeatures.taa
+                      ? 'taa'
+                      : graphicsFeatures.fxaa
+                        ? 'fxaa'
+                        : 'off';
 
                     return (
                       <div className={`mt-1 mb-1 rounded-xl border-2 p-4 transition-all duration-300 border-rose-600/40 bg-rose-950/10'
@@ -443,6 +456,22 @@ export default function Setting({
                               </div>
                             );
                           })}
+
+                          <div className="flex items-center justify-between gap-3 py-1.5">
+                            <div className="flex flex-col">
+                              <span className="text-[11px] font-bold text-zinc-200">Anti-Aliasing</span>
+                              <span className="text-[9px] text-zinc-500">Choose one edge smoothing method</span>
+                            </div>
+                            <select
+                              value={antiAliasingMode}
+                              onChange={(e) => changeAntiAliasingMode(e.target.value as AntiAliasingMode)}
+                              className="bg-zinc-950 border border-zinc-800 text-zinc-200 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase cursor-pointer focus:outline-none focus:border-rose-500"
+                            >
+                              <option value="off">Off</option>
+                              <option value="fxaa">FXAA</option>
+                              <option value="taa">TAA</option>
+                            </select>
+                          </div>
                         </div>
                       </div>
                     );

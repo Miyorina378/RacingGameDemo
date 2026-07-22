@@ -8,15 +8,35 @@ import { RacingAI } from '../objects/RacingAI';
 import { CARS_DATABASE } from '../config/CarDatabase';
 import { GameEngine } from '../gameEngine';
 import { ParticleSystem } from '../objects/ParticleSystem';
+import type { DrivingMode } from '../option';
 
 const isTrackVector = (point: THREE.Vector3 | TrackNode): point is THREE.Vector3 =>
   point instanceof THREE.Vector3 || 'isVector3' in point;
+
+export type RaceDifficulty = 'easy' | 'normal' | 'hard' | 'veryHard';
+
+export interface RaceOptions {
+  totalLaps?: number;
+  difficulty?: RaceDifficulty;
+  drivingMode?: DrivingMode;
+  opponentCount?: number;
+}
+
+const DIFFICULTY_SPEED_MULTIPLIER: Record<RaceDifficulty, number> = {
+  easy: 0.84,
+  normal: 1,
+  hard: 1.12,
+  veryHard: 1.24
+};
 
 export class RaceMode extends BaseMode {
   public checkpoints: Checkpoint[] = [];
   public activeCheckpointIndex = 0;
   private obstacles: Obstacle[] = [];
   private trackId: string;
+  private difficulty: RaceDifficulty;
+  private drivingMode: DrivingMode;
+  private opponentCount = 5;
   private startPos = new THREE.Vector3();
   private startYaw = 0;
   private visitedIndices: Set<number> = new Set();
@@ -46,10 +66,15 @@ export class RaceMode extends BaseMode {
     particles: ParticleSystem,
     environmentGroup: THREE.Group,
     keys: { [key: string]: boolean },
-    trackId: string = 'sprint_circuit'
+    trackId: string = 'sprint_circuit',
+    options: RaceOptions = {}
   ) {
     super(engine, scene, vehicle, particles, environmentGroup, keys);
     this.trackId = trackId;
+    this.totalLaps = THREE.MathUtils.clamp(Math.round(options.totalLaps ?? 3), 1, 99);
+    this.difficulty = options.difficulty ?? 'normal';
+    this.drivingMode = options.drivingMode ?? 'simulation';
+    this.opponentCount = THREE.MathUtils.clamp(Math.round(options.opponentCount ?? 5), 0, 12);
   }
 
   public resetVehicle() {
@@ -133,18 +158,38 @@ export class RaceMode extends BaseMode {
     const aiCurve = new THREE.CatmullRomCurve3(roadPoints, true);
     this.densePath = aiCurve.getSpacedPoints(250);
 
-    // Spawn AI Opponents (Carbon Genesis, Sentinel Cruiser, Volt Interceptor, Neon Cruiser, Rogue Runner)
-    const aiConfigs = [
-      { carId: 'genesis', color: '#1e293b', speedFactor: 0.95, name: 'Chevrolet Carbon Genesis', lateralOffset: -3.5 },
-      { carId: 'sentinel', color: '#8b5cf6', speedFactor: 0.90, name: 'Tesla Sentinel Cruiser', lateralOffset: 3.5 },
-      { carId: 'sport', color: '#06b6d4', speedFactor: 0.86, name: 'Nissan Volt Interceptor', lateralOffset: -1.2 },
-      { carId: 'neon_cruiser', color: '#eab308', speedFactor: 0.80, name: 'Nissan Neon Cruiser', lateralOffset: 1.2 },
-      { carId: 'rogue_runner', color: '#22c55e', speedFactor: 0.74, name: 'Ford Rogue Runner', lateralOffset: 0.0 }
-    ];
+    const difficultyMultiplier = DIFFICULTY_SPEED_MULTIPLIER[this.difficulty] ?? DIFFICULTY_SPEED_MULTIPLIER.normal;
+
+    // Dynamically generate AI configs based on opponentCount
+    const aiConfigs = Array.from({ length: this.opponentCount }).map((_, i) => {
+      // Loop over CARS_DATABASE to pick vehicles.
+      const carDb = CARS_DATABASE[i % CARS_DATABASE.length];
+      
+      // Calculate speed factor. Staggered based on index:
+      const speedFactor = Math.max(0.68, 0.95 - i * 0.045) * difficultyMultiplier;
+      
+      // Stagger lateralOffset from -3.5 to 3.5.
+      let lateralOffset = 0;
+      if (i > 0) {
+        const side = (i % 2 === 0) ? -1 : 1;
+        const layer = Math.ceil(i / 2);
+        lateralOffset = side * (3.5 / layer);
+      }
+      
+      return {
+        carId: carDb.id,
+        color: carDb.color,
+        speedFactor,
+        name: `${carDb.brand} ${carDb.name}`,
+        lateralOffset
+      };
+    });
 
     this.aiCars = aiConfigs.map(cfg => {
       const vehicle = new Vehicle(cfg.carId, cfg.color);
+      vehicle.drivingMode = this.drivingMode;
       const ai = new RacingAI(vehicle, this.densePath, cfg.speedFactor, cfg.lateralOffset);
+      ai.drivingMode = this.drivingMode;
       return {
         vehicle,
         ai,

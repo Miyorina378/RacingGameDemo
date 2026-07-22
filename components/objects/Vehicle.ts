@@ -295,13 +295,14 @@ export class Vehicle {
 
   public carId: string;
   public color: string;
+  public drivingMode: any = 'arcade';
 
-  constructor(carId: string = 'starter', color: string = '#f43f5e') {
+  constructor(carId: string = 'starter', color: string = '#f43f5e', bodyKit?: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
     this.carId = carId;
     this.color = color;
     this.mesh = new THREE.Group();
     this.updateStats();
-    this.buildMesh();
+    this.buildMesh(onLoadProgress, onLoadComplete);
   }
 
   private getDefaultPeakTorque(config: CarConfig): number {
