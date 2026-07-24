@@ -730,6 +730,21 @@ const DEALER_CITY_LABEL_POSITIONS: Record<DealerCityId, { left: string; top: str
   south: { left: '72%', top: '82%' },
 };
 
+const BRAND_STOCK_IMAGES: Record<string, string> = {
+  Ferrari: 'https://images.unsplash.com/photo-1583121274602-3e2820c69888?auto=format&fit=crop&w=1920&q=80',
+  Lamborghini: 'https://images.unsplash.com/photo-1544829099-b9a0c07fad1a?auto=format&fit=crop&w=1920&q=80',
+  Porsche: 'https://images.unsplash.com/photo-1614162692292-7ac56d7f7f1e?auto=format&fit=crop&w=1920&q=80',
+  Nissan: 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?auto=format&fit=crop&w=1920&q=80',
+  Toyota: 'https://images.unsplash.com/photo-1621007947382-bb3c3994e3fb?auto=format&fit=crop&w=1920&q=80',
+  Honda: 'https://images.unsplash.com/photo-1606016159991-dfe4f2746ad5?auto=format&fit=crop&w=1920&q=80',
+  BMW: 'https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1920&q=80',
+  Mercedes: 'https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1920&q=80',
+  Audi: 'https://images.unsplash.com/photo-1603584173870-7f23fdae1b7a?auto=format&fit=crop&w=1920&q=80',
+  Bugatti: 'https://images.unsplash.com/photo-1541348263662-e082662dc370?auto=format&fit=crop&w=1920&q=80',
+  McLaren: 'https://images.unsplash.com/photo-1621135802920-133df287f89c?auto=format&fit=crop&w=1920&q=80'
+};
+const DEFAULT_BRAND_STOCK_IMAGE = 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1920&q=80';
+
 const getDealerBrandInitials = (brand: string) => {
   if (brand === 'Chevrolet') return 'CH';
   return brand.slice(0, 2).toUpperCase();
@@ -2393,20 +2408,18 @@ export default function Garage({
       {/* DEDICATED DEALER CITY MAP */}
       {activeGarageTab === 'dealer' && (
         <div
-          className="absolute inset-0 z-10 overflow-hidden bg-zinc-950 pointer-events-auto"
+          className={`absolute inset-0 z-10 overflow-hidden pointer-events-auto transition-colors duration-700 ${dealerPage === 'city' ? 'bg-transparent' : 'bg-zinc-950'}`}
         >
-          <div
-            style={{
-              transformOrigin: lastSelectedCity ? `${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].left} ${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].top}` : 'center'
-            }}
-            className={`absolute inset-0 transition-all duration-700 ease-out ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
-              ? 'scale-[2.0] opacity-0 blur-md'
-              : dealerPage === 'city'
-                ? 'scale-110 opacity-0 pointer-events-none'
+          {dealerPage !== 'city' && (
+            <div
+              style={{
+                transformOrigin: lastSelectedCity ? `${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].left} ${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].top}` : 'center'
+              }}
+              className={`absolute inset-0 transition-all duration-700 ease-out ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
+                ? 'scale-[2.0] opacity-0 blur-md'
                 : 'scale-100 opacity-100'
-              }`}
-          >
-            {dealerPage !== 'city' && (
+                }`}
+            >
               <DealerCityMapScene
                 selectedCity={dealerCity}
                 lastSelectedCity={lastSelectedCity}
@@ -2414,11 +2427,11 @@ export default function Garage({
                 onHoverCity={setHoveredCity}
                 onClickCity={handleDealerCitySelect}
               />
-            )}
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(244,63,94,0.12),transparent_24%),radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.12),transparent_28%),linear-gradient(90deg,rgba(9,9,11,0.58),rgba(9,9,11,0.28),rgba(9,9,11,0.58))]" aria-hidden="true" />
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-zinc-950 to-transparent" aria-hidden="true" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-zinc-950 to-transparent" aria-hidden="true" />
-          </div>
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(244,63,94,0.12),transparent_24%),radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.12),transparent_28%),linear-gradient(90deg,rgba(9,9,11,0.58),rgba(9,9,11,0.28),rgba(9,9,11,0.58))]" aria-hidden="true" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-zinc-950 to-transparent" aria-hidden="true" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-zinc-950 to-transparent" aria-hidden="true" />
+            </div>
+          )}
 
           {/* TAB: DEALER */}
           {activeGarageTab === 'dealer' && (
@@ -2454,40 +2467,47 @@ export default function Garage({
               )}
 
               {dealerPage === 'city' && dealerCityConfig && (
-                <div className="pointer-events-none absolute left-0 top-8 z-30 flex items-stretch select-none">
-                  {/* City Indicator */}
-                  <div
-                    className={`transition-all duration-500 ease-out pl-8 pr-4 py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s ${selectedBrand !== 'All'
-                      ? 'bg-zinc-900 border-r border-white/10 rounded-r-none'
-                      : 'bg-rose-600 rounded-r-full pr-6 shadow-[0_0_24px_rgba(244,63,94,0.4)]'
-                      }`}
-                  >
-                    {dealerCityConfig.name}
-                  </div>
-                  {/* Extended Brand Indicator */}
-                  <div
-                    className={`transition-all duration-500 ease-out py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s overflow-hidden ${selectedBrand !== 'All'
-                      ? dealerMarketMode !== null
-                        ? 'bg-zinc-900 border-r border-white/10 rounded-r-none pl-4 pr-4'
-                        : 'bg-rose-600 rounded-r-full pl-4 pr-6 shadow-[0_0_24px_rgba(244,63,94,0.4)]'
-                      : 'max-w-0 opacity-0 pl-0 pr-0'
-                      }`}
-                    style={{
-                      maxWidth: selectedBrand !== 'All' ? '200px' : '0px'
-                    }}
-                  >
-                    <span className="whitespace-nowrap">{selectedBrand}</span>
-                  </div>
-                  {/* Extended Market Indicator */}
-                  <div
-                    className={`bg-rose-600 rounded-r-full py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s shadow-[0_0_24px_rgba(244,63,94,0.4)] transition-all duration-500 ease-out overflow-hidden ${dealerMarketMode !== null
-                      ? 'max-w-[200px] opacity-100 pl-4 pr-6'
-                      : 'max-w-0 opacity-0 pl-0 pr-0'
-                      }`}
-                  >
-                    <span className="whitespace-nowrap">
-                      {dealerMarketMode === 'new' ? 'NEW CAR' : 'USED CAR'}
-                    </span>
+                <div className="pointer-events-auto absolute left-0 top-8 z-30 flex items-center select-none gap-3">
+                  <div className="flex items-stretch">
+                    {/* City Indicator */}
+                    <div
+                      className={`transition-all duration-500 ease-out pl-8 pr-4 py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s ${selectedBrand !== 'All'
+                        ? 'bg-zinc-900 border-r border-white/10 rounded-r-none'
+                        : 'bg-rose-600 rounded-r-full pr-6 shadow-[0_0_24px_rgba(244,63,94,0.4)]'
+                        }`}
+                    >
+                      {dealerCityConfig.name}
+                    </div>
+                    {/* Extended Brand Indicator */}
+                    <div
+                      className={`transition-all duration-500 ease-out py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s overflow-hidden ${selectedBrand !== 'All'
+                        ? dealerMarketMode !== null
+                          ? 'bg-zinc-900 border-r border-white/10 rounded-r-none pl-4 pr-4'
+                          : 'bg-rose-600 rounded-r-full pl-4 pr-6 shadow-[0_0_24px_rgba(244,63,94,0.4)]'
+                        : 'max-w-0 opacity-0 pl-0 pr-0'
+                        }`}
+                      style={{
+                        maxWidth: selectedBrand !== 'All' ? '200px' : '0px'
+                      }}
+                    >
+                      <span className="whitespace-nowrap">{selectedBrand}</span>
+                    </div>
+                    {/* Category Indicator Pill */}
+                    {selectedBrand !== 'All' && dealerMarketMode !== null && (
+                      <div className="bg-rose-600 rounded-r-full py-2.5 flex items-center justify-center font-black uppercase tracking-[0.08em] text-white text-s shadow-[0_0_24px_rgba(244,63,94,0.4)] transition-all duration-500 ease-out px-5">
+                        <span className="whitespace-nowrap">
+                          {dealerMarketMode === 'new'
+                            ? 'NEW CAR'
+                            : dealerMarketMode === 'used'
+                              ? 'USED CAR'
+                              : dealerMarketMode === 'race'
+                                ? 'RACE CAR'
+                                : dealerMarketMode === 'museum'
+                                  ? 'HERITAGE'
+                                  : 'ALL CARS'}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -2550,100 +2570,79 @@ export default function Garage({
                 </div>
               )}
 
+              {/* Stock Brand Atmosphere Backdrop (Cross-dissolves straight to 3D Showroom) */}
+              {dealerPage === 'city' && dealerCityConfig && selectedBrand !== 'All' && (() => {
+                const brandColor = getBrandColor(selectedBrand);
+                const stockImageUrl = BRAND_STOCK_IMAGES[selectedBrand] || DEFAULT_BRAND_STOCK_IMAGE;
+                const isShowroom = dealerMarketMode !== null;
+
+                return (
+                  <div
+                    className={`absolute inset-0 z-0 pointer-events-none overflow-hidden transition-all duration-700 ease-in-out bg-zinc-950 ${
+                      isShowroom ? 'opacity-0 scale-105' : 'opacity-100 scale-100'
+                    }`}
+                  >
+                    <img
+                      src={stockImageUrl}
+                      alt={`${selectedBrand} Stock`}
+                      className="absolute inset-0 w-full h-full object-cover opacity-45 filter brightness-90 contrast-110"
+                    />
+                    <div
+                      className="absolute inset-0 opacity-70"
+                      style={{
+                        background: `radial-gradient(ellipse at 50% 50%, ${brandColor}33 0%, rgba(9,9,11,0.85) 65%, rgba(5,5,7,0.98) 100%)`
+                      }}
+                    />
+                  </div>
+                );
+              })()}
+
+              {/* Category Choice Step at bottom before entering 3D Showroom */}
               {dealerPage === 'city' && dealerCityConfig && selectedBrand !== 'All' && !dealerMarketMode && (
-                <div className="pointer-events-auto absolute left-1/2 bottom-8 z-20 w-[min(920px,calc(100%-64px))] -translate-x-1/2 border-y border-white/12 bg-black/92 px-6 py-5 shadow-[0_0_35px_rgba(0,0,0,0.55)]">
-                  <div className="flex flex-col gap-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">Brands</span>
-                      {dealerActiveBrands.map((brand) => (
+                <div className="pointer-events-auto absolute left-1/2 bottom-10 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-8 py-6 backdrop-blur-sm animate-fadeIn">
+                  <div className="flex flex-col gap-5 items-center">
+                    <div className="text-center">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+                        SELECT MARKET CATEGORY
+                      </span>
+                      <h3 className="text-2xl font-black uppercase tracking-wider text-white mt-1">
+                        {selectedBrand}
+                      </h3>
+                    </div>
+
+                    {/* Category Choices (wide gap, sleek icon tokens, non-button feel) */}
+                    <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14 w-full mt-2">
+                      {[
+                        { id: 'new', label: 'NEW CAR', icon: '/icon/new_car.svg', accent: 'group-hover:border-rose-500 group-hover:shadow-[0_0_20px_rgba(244,63,94,0.4)]', textColor: 'group-hover:text-rose-400' },
+                        { id: 'used', label: 'USED CAR', icon: '/icon/used_car.svg', accent: 'group-hover:border-amber-500 group-hover:shadow-[0_0_20px_rgba(245,158,11,0.4)]', textColor: 'group-hover:text-amber-400' },
+                        { id: 'race', label: 'RACE CAR', icon: '/icon/race_car.svg', accent: 'group-hover:border-cyan-500 group-hover:shadow-[0_0_20px_rgba(6,182,212,0.4)]', textColor: 'group-hover:text-cyan-400' },
+                        { id: 'museum', label: 'HERITAGE', icon: '/icon/heritage.svg', accent: 'group-hover:border-purple-500 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]', textColor: 'group-hover:text-purple-400' }
+                      ].map((item) => (
                         <button
-                          key={brand}
-                          onClick={() => handleBrandSelect(brand)}
-                          className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border ${selectedBrand === brand
-                            ? 'border-rose-500 bg-rose-600 text-white'
-                            : 'border-zinc-800 bg-zinc-950/70 text-zinc-300 hover:border-zinc-650'
-                            }`}
+                          key={item.id}
+                          onClick={() => handleDealerMarketChoice(item.id as DealerMarketMode)}
+                          className="group relative flex flex-col items-center gap-3 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 active:scale-95"
                         >
-                          {brand}
+                          {/* Circular icon token */}
+                          <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-950/80 border border-white/12 transition-all duration-300 ${item.accent}`}>
+                            <img
+                              src={item.icon}
+                              alt={item.label}
+                              className="h-8 w-8 filter invert opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
+                            />
+                          </div>
+                          {/* Label */}
+                          <span className={`text-xs font-black uppercase tracking-widest text-zinc-300 transition-colors duration-300 ${item.textColor}`}>
+                            {item.label}
+                          </span>
                         </button>
                       ))}
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-black uppercase tracking-wide text-white">
-                        {selectedBrand !== 'All' ? selectedBrand : dealerCityConfig.brands.join(' / ')}
-                      </h3>
-                      <p className="mt-1 text-xs font-bold leading-relaxed text-zinc-400">
-                        {dealerCityConfig.description}
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                      <button
-                        onClick={() => handleDealerMarketChoice('new')}
-                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-rose-500 hover:bg-rose-600 hover:text-white cursor-pointer"
-                      >
-                        New Car
-                      </button>
-                      <button
-                        onClick={() => handleDealerMarketChoice('used')}
-                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-amber-500 hover:bg-amber-600 hover:text-zinc-950 cursor-pointer"
-                      >
-                        Used Car
-                      </button>
-                      <button
-                        onClick={() => handleDealerMarketChoice('race')}
-                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-red-500 hover:bg-red-650 hover:text-white cursor-pointer"
-                      >
-                        Race Car
-                      </button>
-                      <button
-                        onClick={() => handleDealerMarketChoice('museum')}
-                        className="border border-zinc-800 bg-zinc-950/80 px-5 py-4 text-left text-xs font-black uppercase tracking-widest text-zinc-200 transition-all hover:border-purple-500 hover:bg-purple-650 hover:text-white cursor-pointer"
-                      >
-                        Museum
-                      </button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && (
-                <div className="pointer-events-auto mt-20 flex shrink-0 items-center justify-between gap-4 border-y border-white/12 bg-black/82 px-5 py-3">
-                  <div>
-                    <h3 className="text-base font-black uppercase tracking-wide text-white">
-                      {dealerMarketMode === 'museum'
-                        ? 'Brand Heritage Museum'
-                        : dealerMarketMode === 'race'
-                          ? 'Race Car Stock'
-                          : dealerMarketMode === 'new'
-                            ? 'New Car Stock'
-                            : 'Used Car Lot'}
-                    </h3>
-                    <span className="text-[9px] font-black uppercase tracking-[0.24em] text-zinc-500">
-                      {dealerCityConfig.name} / {selectedBrand} {dealerMarketMode === 'museum' ? '/ History' : ''}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {dealerActiveBrands.map((brand) => (
-                      <button
-                        key={brand}
-                        onClick={() => setSelectedBrand(brand)}
-                        className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-wider border transition-all cursor-pointer ${selectedBrand === brand
-                          ? 'border-rose-500 bg-rose-600 text-white'
-                          : 'border-zinc-800 bg-zinc-950/70 text-zinc-400 hover:text-zinc-200'
-                          }`}
-                      >
-                        {brand}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => setDealerMarketMode(null)}
-                      className="border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-zinc-400 transition-all hover:text-zinc-200 cursor-pointer"
-                    >
-                      Choices
-                    </button>
-                  </div>
-                </div>
-              )}
+
 
               {selectedBrand === '__legacy__' && !dealerCityConfig && (
                 <div className="relative mx-auto grid w-full max-w-5xl flex-1 min-h-0 content-center grid-cols-2 gap-5 py-4">
@@ -2860,147 +2859,181 @@ export default function Garage({
                 );
               })()}
 
-              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketMode !== 'museum' && dealerMarketCars.length > 0 && (
-                <div className="pointer-events-auto grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-6 pr-2 xl:grid-cols-2">
-                  {dealerMarketCars.map((car) => {
-                    const isUnlocked = purchasedCars.includes(car.id);
-                    const isActive = activeCarId === car.id;
-                    const canAfford = playerCredits >= car.price;
-                    const isSuperLocked = car.requiresLicense && !hasLicense;
+              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketMode !== 'museum' && dealerMarketCars.length > 0 && (() => {
+                const activeDealerCar = CARS_DATABASE.find((c) => c.id === dealerSelectedCarId) || dealerMarketCars[0];
+                const isCarUnlocked = purchasedCars.includes(activeDealerCar.id);
+                const isCarActive = activeCarId === activeDealerCar.id;
+                const canAffordCar = playerCredits >= activeDealerCar.price;
+                const isSuperLockedCar = activeDealerCar.requiresLicense && !hasLicense;
 
-                    return (
-                      <div
-                        key={car.id}
-                        onClick={() => setDealerSelectedCarId(car.id)}
-                        className={`border p-4 rounded-2xl transition-all flex flex-col gap-3 cursor-pointer ${
-                          (dealerSelectedCarId || activeCarId) === car.id
-                            ? 'bg-zinc-900/60 border-cyan-400/80 shadow-[0_0_15px_rgba(6,182,212,0.2)]'
-                            : 'bg-zinc-900/20 border-zinc-855 hover:border-zinc-700'
-                          }`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-bold text-zinc-100 text-sm">
-                              {car.brand} {car.name}
-                            </h3>
-                            <div className="flex gap-2 items-center mt-0.5">
-                              <span className="text-[9px] font-bold tracking-wider uppercase text-rose-500">
-                                {car.tier}
-                              </span>
-                              <span className="text-zinc-700 text-[9px] font-bold">•</span>
-                              <span className="text-[9px] font-bold tracking-wider uppercase text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
-                                {car.driveType}
-                              </span>
+                return (
+                  <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col animate-fadeIn">
+                    {/* Bottom Specs & Action Bar */}
+                    <div className="pointer-events-auto w-full border-t border-white/10 bg-gradient-to-r from-zinc-950/95 via-zinc-900/90 to-zinc-950/95 py-3.5 px-6 shadow-[0_-8px_32px_rgba(0,0,0,0.7)] backdrop-blur-2xl flex flex-col md:flex-row justify-between items-center gap-4 text-left">
+                      {/* Left: Brand + Car Name + Price */}
+                      <div className="flex items-center gap-3 text-left w-full md:w-auto">
+                        <span className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-[10px] font-black text-cyan-400 tracking-widest uppercase">
+                          {activeDealerCar.brand}
+                        </span>
+                        <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-wider drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                          {activeDealerCar.name}
+                        </h2>
+                        <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/40 border border-amber-800/40 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                          <Coins className="w-3.5 h-3.5 text-amber-500" />
+                          {isCarUnlocked ? 'OWNED' : `${activeDealerCar.price.toLocaleString()} CR`}
+                        </span>
+                      </div>
+
+                      {/* Center: Stat Bars (SPD / ACC / HDL) */}
+                      {(() => {
+                        const upgradesForCar = getCarUpgradesSafe(activeDealerCar.id);
+                        const upgradedStats = getUpgradedStats(activeDealerCar, upgradesForCar);
+                        return (
+                          <div className="flex gap-5 items-center text-xs font-bold text-zinc-300 w-full md:w-auto justify-between md:justify-start">
+                            {/* Speed */}
+                            <div className="flex flex-col gap-1 w-20">
+                              <div className="flex justify-between items-center text-[9px] font-black tracking-wider text-zinc-400 uppercase">
+                                <span>SPD</span>
+                                <span className="text-cyan-400 font-extrabold">{Math.round(upgradedStats.speed * 10)}%</span>
+                              </div>
+                              <div className="w-full h-1.5 bg-zinc-800/80 rounded-full overflow-hidden border border-white/5 p-0.5">
+                                <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-400 rounded-full transition-all duration-500 shadow-[0_0_6px_#06b6d4]" style={{ width: `${Math.min(100, Math.round(upgradedStats.speed * 10))}%` }} />
+                              </div>
+                            </div>
+
+                            {/* Acceleration */}
+                            <div className="flex flex-col gap-1 w-20">
+                              <div className="flex justify-between items-center text-[9px] font-black tracking-wider text-zinc-400 uppercase">
+                                <span>ACC</span>
+                                <span className="text-cyan-400 font-extrabold">{Math.round(upgradedStats.acceleration * 10)}%</span>
+                              </div>
+                              <div className="w-full h-1.5 bg-zinc-800/80 rounded-full overflow-hidden border border-white/5 p-0.5">
+                                <div className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 rounded-full transition-all duration-500 shadow-[0_0_6px_#06b6d4]" style={{ width: `${Math.min(100, Math.round(upgradedStats.acceleration * 10))}%` }} />
+                              </div>
+                            </div>
+
+                            {/* Handling */}
+                            <div className="flex flex-col gap-1 w-20">
+                              <div className="flex justify-between items-center text-[9px] font-black tracking-wider text-zinc-400 uppercase">
+                                <span>HDL</span>
+                                <span className="text-cyan-400 font-extrabold">{Math.round(upgradedStats.handling * 10)}%</span>
+                              </div>
+                              <div className="w-full h-1.5 bg-zinc-800/80 rounded-full overflow-hidden border border-white/5 p-0.5">
+                                <div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500 shadow-[0_0_6px_#06b6d4]" style={{ width: `${Math.min(100, Math.round(upgradedStats.handling * 10))}%` }} />
+                              </div>
+                            </div>
+
+                            {/* Drive Type Pill */}
+                            <div className="bg-zinc-900/90 px-3 py-1.5 rounded-lg border border-white/10 text-[10px] font-black tracking-widest uppercase text-cyan-300 shadow-inner">
+                              {activeDealerCar.driveType}
                             </div>
                           </div>
-                          {isUnlocked ? (
-                            <span className="text-[9px] font-bold text-rose-500 bg-rose-950/20 border border-rose-900/30 px-2.5 py-0.5 rounded-lg">
-                              Owned
-                            </span>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <Coins className="w-3.5 h-3.5 text-amber-500" />
-                              <span className="text-xs font-mono font-bold text-amber-500">{car.price} Cr</span>
-                            </div>
-                          )}
-                        </div>
+                        );
+                      })()}
 
-                        {/* Spec bars */}
-                        {(() => {
-                          const upgradesForCar = getCarUpgradesSafe(car.id);
-                          const upgradedStats = getUpgradedStats(car, upgradesForCar);
-                          return (
-                            <div className="flex flex-col gap-2 mt-0.5 bg-zinc-950/50 p-3 rounded-xl border border-zinc-900">
-                              {/* Speed */}
-                              <div>
-                                <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
-                                  <span>TOP SPEED</span>
-                                  <span>{Math.round(upgradedStats.speed * 10)}%</span>
-                                </div>
-                                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
-                                  <div
-                                    className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
-                                    style={{ width: `${Math.min(100, upgradedStats.speed * 10)}%` }}
-                                  />
-                                  <div
-                                    className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
-                                    style={{ width: `${Math.min(100, car.speed * 10)}%` }}
-                                  />
-                                </div>
-                              </div>
-                              {/* Acceleration */}
-                              <div>
-                                <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
-                                  <span>ACCELERATION</span>
-                                  <span>{Math.round(upgradedStats.acceleration * 10)}%</span>
-                                </div>
-                                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
-                                  <div
-                                    className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
-                                    style={{ width: `${Math.min(100, upgradedStats.acceleration * 10)}%` }}
-                                  />
-                                  <div
-                                    className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
-                                    style={{ width: `${Math.min(100, car.acceleration * 10)}%` }}
-                                  />
-                                </div>
-                              </div>
-                              {/* Handling */}
-                              <div>
-                                <div className="flex justify-between text-[9px] font-bold text-zinc-500 mb-1">
-                                  <span>HANDLING</span>
-                                  <span>{Math.round(upgradedStats.handling * 10)}%</span>
-                                </div>
-                                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden relative">
-                                  <div
-                                    className="absolute left-0 top-0 h-full bg-rose-600 transition-all duration-300"
-                                    style={{ width: `${Math.min(100, upgradedStats.handling * 10)}%` }}
-                                  />
-                                  <div
-                                    className="absolute left-0 top-0 h-full bg-zinc-450 transition-all duration-300"
-                                    style={{ width: `${Math.min(100, car.handling * 10)}%` }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                      {/* Right: Action Buttons */}
+                      <div className="flex gap-3 items-center w-full md:w-auto justify-end">
+                        <button
+                          onClick={() => setDealerMarketMode(null)}
+                          className="px-4 py-2.5 border border-cyan-500/30 hover:border-cyan-400 bg-zinc-900/80 hover:bg-cyan-950/40 text-[10px] font-black uppercase tracking-widest text-cyan-300 rounded-xl transition-all cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.15)] hover:shadow-[0_0_16px_rgba(6,182,212,0.35)]"
+                        >
+                          CATEGORIES
+                        </button>
 
-                        {/* Dealership Action Buttons */}
-                        {isUnlocked ? (
+                        {isCarUnlocked ? (
                           <button
-                            disabled={isActive}
-                            onClick={() => selectCar(car.id)}
-                            className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${isActive
-                              ? 'bg-zinc-950 border border-zinc-900 text-zinc-650 cursor-default'
-                              : 'bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-200'
+                            disabled={isCarActive}
+                            onClick={() => selectCar(activeDealerCar.id)}
+                            className={`group relative flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${isCarActive
+                              ? 'bg-zinc-900 border border-zinc-800 text-zinc-500 cursor-default'
+                              : 'bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-zinc-950 shadow-[0_0_20px_rgba(6,182,212,0.5)] hover:scale-105 active:scale-95'
                               }`}
                           >
-                            {isActive ? 'Active Vehicle' : 'Select Vehicle'}
+                            <span>{isCarActive ? 'ACTIVE VEHICLE' : 'EQUIP VEHICLE'}</span>
+                            {!isCarActive && <Check className="w-4 h-4" />}
                           </button>
                         ) : (
                           <button
-                            disabled={!canAfford || isSuperLocked}
-                            onClick={() => buyCar(car)}
-                            className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${isSuperLocked
-                              ? 'bg-zinc-800 border border-zinc-750 text-zinc-550 cursor-not-allowed'
-                              : canAfford
-                                ? 'bg-rose-600 hover:bg-rose-500 border border-rose-500 text-white'
-                                : 'bg-zinc-800 border border-zinc-750 text-zinc-550 cursor-not-allowed'
+                            disabled={!canAffordCar || isSuperLockedCar}
+                            onClick={() => {
+                              buyCar(activeDealerCar);
+                              if (typeof window !== 'undefined') {
+                                (window as any).gameEngine?.triggerPurchaseCelebration?.();
+                              }
+                            }}
+                            className={`group relative flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${isSuperLockedCar
+                              ? 'bg-zinc-900 border border-zinc-800 text-zinc-500 cursor-not-allowed'
+                              : canAffordCar
+                                ? 'bg-gradient-to-r from-rose-600 via-amber-600 to-yellow-500 hover:from-rose-500 hover:to-yellow-400 text-white shadow-[0_0_24px_rgba(244,63,94,0.6)] hover:scale-105 active:scale-95'
+                                : 'bg-zinc-900 border border-zinc-800 text-zinc-500 cursor-not-allowed'
                               }`}
                           >
-                            {isSuperLocked
-                              ? 'Requires Bronze License'
-                              : canAfford
-                                ? `Purchase Vehicle (-${car.price} CR)`
-                                : 'Insufficient Credits'}
+                            <span>
+                              {isSuperLockedCar
+                                ? 'REQUIRES BRONZE LICENSE'
+                                : canAffordCar
+                                  ? `PURCHASE VEHICLE (-${activeDealerCar.price.toLocaleString()} CR)`
+                                  : 'INSUFFICIENT CREDITS'}
+                            </span>
+                            {canAffordCar && !isSuperLockedCar && <Coins className="w-4 h-4 fill-current" />}
                           </button>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    </div>
+
+                    {/* Bottom Horizontal Car Carousel Slider */}
+                    <div className="pointer-events-auto h-32 overflow-hidden border-t border-white/5 bg-zinc-950/60 px-16 flex items-center backdrop-blur-2xl shadow-[0_-12px_36px_rgba(0,0,0,0.7)]">
+                      <div className="flex h-full w-full items-center justify-start gap-4 overflow-x-auto py-2 scrollbar-none px-4">
+                        {dealerMarketCars.map((car) => {
+                          const isSelected = car.id === activeDealerCar.id;
+                          const isUnlocked = purchasedCars.includes(car.id);
+                          const isActive = car.id === activeCarId;
+
+                          return (
+                            <button
+                              key={car.id}
+                              type="button"
+                              onClick={() => {
+                                setDealerSelectedCarId(car.id);
+                              }}
+                              className={`quick-play-logo-token group relative flex items-center justify-center transition-all duration-300 cursor-pointer border rounded-2xl bg-gradient-to-b from-zinc-900/90 to-black text-white shrink-0 h-22 w-44 overflow-hidden ${isSelected
+                                ? 'border-cyan-400 shadow-[0_0_24px_rgba(6,182,212,0.5)] scale-105 bg-gradient-to-b from-cyan-950/40 to-zinc-950 ring-1 ring-cyan-400/50'
+                                : 'border-white/10 opacity-75 hover:opacity-100 hover:border-white/30 hover:scale-105'
+                                }`}
+                              title={`${car.brand} ${car.name}`}
+                            >
+                              {/* Status Badge */}
+                              {isActive ? (
+                                <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-cyan-400 text-zinc-950 text-[8px] font-black uppercase px-1.5 py-0.5 rounded-md shadow-[0_0_8px_#06b6d4]">
+                                  <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                  <span>ACTIVE</span>
+                                </div>
+                              ) : isUnlocked ? (
+                                <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-rose-500 text-white text-[8px] font-black uppercase px-1.5 py-0.5 rounded-md shadow-[0_0_8px_rgba(244,63,94,0.5)]">
+                                  <span>OWNED</span>
+                                </div>
+                              ) : (
+                                <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-amber-500/90 text-zinc-950 text-[8px] font-black uppercase px-1.5 py-0.5 rounded-md shadow-[0_0_8px_rgba(245,158,11,0.5)]">
+                                  <Coins className="w-2.5 h-2.5 stroke-[3]" />
+                                  <span>{car.price} CR</span>
+                                </div>
+                              )}
+
+                              {/* Drive Type badge */}
+                              <span className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded-md text-[8px] font-black bg-black/75 border border-white/10 text-cyan-300 uppercase tracking-wider backdrop-blur-sm">
+                                {car.driveType}
+                              </span>
+
+                              {/* 3D Car Icon */}
+                              <DealerThreeCarIcon car={car} isSliderIcon={true} className="absolute inset-0 w-full h-full z-0 pointer-events-none opacity-85 group-hover:opacity-100 transition-opacity" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 

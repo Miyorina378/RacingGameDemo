@@ -13,6 +13,9 @@ export class GarageMode extends BaseMode {
   private mainGarageSpot?: THREE.SpotLight;
   private tuningSpot?: THREE.SpotLight;
   private wasTuningState = 'closed';
+  private srOuterRingMat?: THREE.MeshBasicMaterial;
+  private srCenterPoint?: THREE.PointLight;
+  private purchaseCelebrationTimer = 0;
   private quickPlayLeftLight?: THREE.DirectionalLight;
   private quickPlayRightLight?: THREE.DirectionalLight;
   private tuningIntroTime = 0;
@@ -83,11 +86,11 @@ export class GarageMode extends BaseMode {
     // Stage Subtle Neutral Gray Accent Ring
     const srOuterRingGeom = new THREE.RingGeometry(5.2, 5.35, 48);
     srOuterRingGeom.rotateX(-Math.PI / 2);
-    const srOuterRingMat = new THREE.MeshBasicMaterial({
-      color: 0x3f3f46,
+    this.srOuterRingMat = new THREE.MeshBasicMaterial({
+      color: 0x06b6d4,
       side: THREE.DoubleSide,
     });
-    const srOuterRing = new THREE.Mesh(srOuterRingGeom, srOuterRingMat);
+    const srOuterRing = new THREE.Mesh(srOuterRingGeom, this.srOuterRingMat);
     srOuterRing.position.y = 0.205;
     this.showroomGroup.add(srOuterRing);
 
@@ -151,9 +154,13 @@ export class GarageMode extends BaseMode {
     this.showroomGroup.add(this.srTopSpot);
 
     // High-Luminance Overhead Center Point Fill Light
-    const srCenterPoint = new THREE.PointLight(0xffffff, 100.0, 20, 0);
-    srCenterPoint.position.set(0, 7.0, 0);
-    this.showroomGroup.add(srCenterPoint);
+    this.srCenterPoint = new THREE.PointLight(0xffffff, 100.0, 20, 0);
+    this.srCenterPoint.position.set(0, 7.0, 0);
+    this.showroomGroup.add(this.srCenterPoint);
+
+    (this.engine as any).triggerPurchaseCelebration = () => {
+      this.purchaseCelebrationTimer = 2.5;
+    };
 
     this.showroomGroup.visible = false;
     this.environmentGroup.add(this.showroomGroup);
@@ -250,7 +257,7 @@ export class GarageMode extends BaseMode {
     const isTuning = tuningState !== 'closed';
     const progress = (this.engine as any).tuningCameraProgress || 0;
     const isQuickPlay = (this.engine as any).isQuickPlayCarSelect;
-    const isShowroomMode = isQuickPlay || (this.engine as any).activeGarageTab === 'dealer';
+    const isShowroomMode = isQuickPlay || ((this.engine as any).activeGarageTab === 'dealer' && (this.engine as any).dealerMarketMode !== null);
 
     if (isTuning) {
       // Keep vehicle stationary facing the camera directly
@@ -337,11 +344,48 @@ export class GarageMode extends BaseMode {
       if (this.engine.sky) this.engine.sky.setVisible(true);
       if (this.engine.scene) this.engine.scene.background = null;
 
-      // Pure 100% Overhead Downward Studio Lighting (Camera dirLight set to 0)
-      if (this.engine.ambientLight) {
-        this.engine.ambientLight.color.setHex(0xd1d5db);
-        this.engine.ambientLight.intensity = 0.4;
+      // Calculate dynamic dimensions of the vehicle to position top spotlight correctly
+      const box = new THREE.Box3().setFromObject(this.vehicle.mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const carHeight = size.y > 0.5 ? size.y : 1.2;
+      const targetLightY = Math.max(10, carHeight + 9.0);
+
+      // Handle Purchase Celebration Lighting Animation
+      if (this.purchaseCelebrationTimer > 0) {
+        this.purchaseCelebrationTimer -= deltaTime;
+        const progress = Math.max(0, this.purchaseCelebrationTimer / 2.5);
+        const pulse = Math.sin(progress * Math.PI * 6) * 0.5 + 0.5;
+
+        if (this.srTopSpot) {
+          this.srTopSpot.position.set(0, targetLightY, 0);
+          this.srTopSpot.intensity = 40.0 + pulse * 60.0;
+        }
+        if (this.srCenterPoint) {
+          this.srCenterPoint.intensity = 100.0 + pulse * 150.0;
+        }
+        if (this.srOuterRingMat) {
+          this.srOuterRingMat.color.setHex(pulse > 0.5 ? 0x06b6d4 : 0xf59e0b);
+        }
+        if (this.engine.ambientLight) {
+          this.engine.ambientLight.intensity = 0.2 + pulse * 0.3;
+        }
+      } else {
+        if (this.srTopSpot) {
+          this.srTopSpot.position.set(0, targetLightY, 0);
+          this.srTopSpot.intensity = 40.0;
+        }
+        if (this.srCenterPoint) {
+          this.srCenterPoint.intensity = 100.0;
+        }
+        if (this.srOuterRingMat) {
+          this.srOuterRingMat.color.setHex(0x06b6d4);
+        }
+        if (this.engine.ambientLight) {
+          this.engine.ambientLight.color.setHex(0xd1d5db);
+          this.engine.ambientLight.intensity = 0.4;
+        }
       }
+
       if (this.engine.dirLight) {
         this.engine.dirLight.intensity = 0; // ZERO light from camera direction!
       }
