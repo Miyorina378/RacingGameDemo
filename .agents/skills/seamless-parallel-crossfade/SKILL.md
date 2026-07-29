@@ -24,6 +24,11 @@ This skill documents the pattern for achieving 100% smooth, simultaneous UI scre
 4. **No Dark Vignettes**:
    - Avoid heavy radial vignette overlays (`rgba(9,9,11,0.85) 65%`) that obscure screen edges. Use light linear gradients instead.
 
+5. **Symmetrical Reverse Cross-Fade on Back Navigation**:
+   - When clicking the Back button, the active detail/dealer view runs `animate-crossFadeOut` (**opacity 1.0 → 0.0** over 0.6s).
+   - Simultaneously, the selection grid view mounts and runs `animate-crossFadeIn` (**opacity 0.0 → 1.0** over 0.6s).
+   - State (`setSelectedBrand('All')`) is finalized at 600ms when the reverse cross-fade finishes.
+
 ---
 
 ## Critical Bug to Avoid: Child Animation Fill-Mode Locking
