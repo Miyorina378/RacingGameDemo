@@ -724,10 +724,10 @@ const getDealerCityCars = (city: DealerCityId | null) => {
 };
 
 const DEALER_CITY_LABEL_POSITIONS: Record<DealerCityId, { left: string; top: string }> = {
-  west: { left: '52%', top: '56%' },
-  north: { left: '78%', top: '48%' },
-  east: { left: '86%', top: '61%' },
-  south: { left: '72%', top: '82%' },
+  west: { left: '22%', top: '52%' },
+  north: { left: '42%', top: '38%' },
+  east: { left: '78%', top: '48%' },
+  south: { left: '62%', top: '72%' },
 };
 
 const BRAND_STOCK_IMAGES: Record<string, string> = {
@@ -972,6 +972,41 @@ const getDealerCityClasses = (accent: string) => {
   };
 };
 
+// ============================================================================
+// DEALER MAP CAMERA CONFIGURATION
+// Edit these values to configure the overview camera and city zoom behavior!
+// ============================================================================
+const DEALER_MAP_CAMERA_CONFIG = {
+  // Field of View in degrees
+  fov: 42,
+
+  // Default camera position in overview mode (X, Y, Z) - lower Y and Z to zoom in closer
+  defaultPosition: { x: 0, y: 8, z: 10 },
+
+  // Point where camera looks in overview mode (X, Y, Z)
+  defaultLookAt: { x: 0, y: 0.5, z: 0 },
+
+  // Tilt angle of the 3D map board in radians (-0.08 default)
+  mapTiltX: -0.08,
+  mapTiltY: 0,
+  mapTiltZ: 0,
+
+  // Position offset of the map board root in 3D space (X, Y, Z)
+  mapRootOffset: { x: 0, y: 0, z: 0 },
+
+  // Offset of the 3D map models to center all city buildings and landmarks dead-center at (0,0,0)
+  mapContentOffset: { x: -0.18, y: 0, z: 0.8 },
+
+  // Automatic distance scaling for narrow portrait mobile screens (< 1.0 aspect)
+  autoScalePortrait: true,
+
+  // Camera offset when zoomed into a city (relative to city position)
+  cityZoomOffset: { x: 0, y: 4.6, z: 5.5 },
+
+  // LookAt target offset when zoomed into a city (relative to city position)
+  cityZoomTargetOffset: { x: 0, y: 0.75, z: -0.5 },
+};
+
 const DealerCityMapScene = ({
   selectedCity,
   lastSelectedCity,
@@ -1007,20 +1042,34 @@ const DealerCityMapScene = ({
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x050507, 8, 22);
+    scene.fog = new THREE.Fog(0x050507, 15, 80);
 
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 60);
-    camera.position.set(0, 8.5, 11);
-    camera.lookAt(0, 0, 0);
+    const { fov, defaultPosition, defaultLookAt } = DEALER_MAP_CAMERA_CONFIG;
+    const camera = new THREE.PerspectiveCamera(fov, 1, 0.1, 80);
+    camera.position.set(defaultPosition.x, defaultPosition.y, defaultPosition.z);
+    camera.lookAt(defaultLookAt.x, defaultLookAt.y, defaultLookAt.z);
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
     mount.appendChild(renderer.domElement);
 
     const mapRoot = new THREE.Group();
-    mapRoot.rotation.x = -0.08;
+    mapRoot.rotation.x = DEALER_MAP_CAMERA_CONFIG.mapTiltX;
+    mapRoot.rotation.y = DEALER_MAP_CAMERA_CONFIG.mapTiltY;
+    mapRoot.rotation.z = DEALER_MAP_CAMERA_CONFIG.mapTiltZ;
+    const { mapRootOffset } = DEALER_MAP_CAMERA_CONFIG;
+    mapRoot.position.set(mapRootOffset.x, mapRootOffset.y, mapRootOffset.z);
     scene.add(mapRoot);
+
+    // mapContent container shifts all 3D models (cities, roads, landmarks) so their geometric center aligns with (0,0,0)
+    const mapContent = new THREE.Group();
+    const { mapContentOffset } = DEALER_MAP_CAMERA_CONFIG;
+    mapContent.position.set(mapContentOffset.x, mapContentOffset.y, mapContentOffset.z);
+    mapRoot.add(mapContent);
 
     const cityColors: Record<DealerCityId, number> = {
       east: 0xff0258,
@@ -1040,11 +1089,11 @@ const DealerCityMapScene = ({
       new THREE.MeshBasicMaterial({ color: 0x0b0f0d, transparent: true, opacity: 0.92 })
     );
     base.position.y = -0.08;
-    mapRoot.add(base);
+    mapContent.add(base);
 
     const grid = new THREE.GridHelper(12, 24, 0x3f3f46, 0x27272a);
     grid.position.y = 0.01;
-    mapRoot.add(grid);
+    mapContent.add(grid);
 
     const roadMat = new THREE.MeshBasicMaterial({ color: 0x171719, transparent: true, opacity: 0.96 });
     const laneMat = new THREE.MeshBasicMaterial({ color: 0xb7b7a6, transparent: true, opacity: 0.42 });
@@ -1067,12 +1116,12 @@ const DealerCityMapScene = ({
       const road = new THREE.Mesh(new THREE.BoxGeometry(width, 0.04, depth), roadMat);
       road.position.set(x, 0.04, z);
       road.rotation.y = rotation;
-      mapRoot.add(road);
+      mapContent.add(road);
       if (lane) {
         const laneStrip = new THREE.Mesh(new THREE.BoxGeometry(width * 0.84, 0.012, Math.max(depth * 0.08, 0.018)), laneMat);
         laneStrip.position.set(x, 0.068, z);
         laneStrip.rotation.y = rotation;
-        mapRoot.add(laneStrip);
+        mapContent.add(laneStrip);
       }
       return road;
     };
@@ -1094,7 +1143,7 @@ const DealerCityMapScene = ({
       const park = new THREE.Mesh(new THREE.BoxGeometry(width, 0.025, depth), grassMat);
       park.position.set(x, 0.055, z);
       park.rotation.y = rotation;
-      mapRoot.add(park);
+      mapContent.add(park);
     });
 
     const makeTree = (x: number, z: number, scale = 1) => {
@@ -1106,7 +1155,7 @@ const DealerCityMapScene = ({
       leaves.position.y = 0.56 * scale;
       tree.add(leaves);
       tree.position.set(x, 0.04, z);
-      mapRoot.add(tree);
+      mapContent.add(tree);
       return tree;
     };
 
@@ -1248,7 +1297,7 @@ const DealerCityMapScene = ({
       });
 
       cityMaterials[city.id] = { pad: padMat, ring: ringMat, buildingMats };
-      mapRoot.add(cityGroup);
+      mapContent.add(cityGroup);
     });
 
     // Add invisible hit-test spheres for easier raycasting
@@ -1260,7 +1309,7 @@ const DealerCityMapScene = ({
       );
       hitSphere.position.copy(cityPositions[city.id]);
       hitSphere.position.y = 0.5;
-      mapRoot.add(hitSphere);
+      mapContent.add(hitSphere);
       hitSpheres.push(hitSphere);
       meshToCityId.set(hitSphere, city.id);
     });
@@ -1276,6 +1325,16 @@ const DealerCityMapScene = ({
       const width = Math.max(1, rect.width);
       const height = Math.max(1, rect.height);
       camera.aspect = width / height;
+
+      const { defaultPosition, defaultLookAt, autoScalePortrait } = DEALER_MAP_CAMERA_CONFIG;
+      const scale = autoScalePortrait && camera.aspect < 1.0 ? Math.max(1.0, 1.0 / camera.aspect) : 1.0;
+
+      camera.position.set(
+        defaultPosition.x * scale,
+        defaultPosition.y * scale,
+        defaultPosition.z * scale
+      );
+      camera.lookAt(defaultLookAt.x, defaultLookAt.y, defaultLookAt.z);
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
     };
@@ -1316,49 +1375,53 @@ const DealerCityMapScene = ({
     let frameId = 0;
     const startTime = performance.now();
     let lastTime = performance.now();
-    let zoomProgress = 0;
+    let zoomProgress = selectedCityRef.current !== null ? 1 : 0;
     let lastActiveCityId: DealerCityId | null = selectedCityRef.current;
-
-    if (selectedCityRef.current === null && lastSelectedCityRef.current !== null) {
-      zoomProgress = 1;
-      lastActiveCityId = lastSelectedCityRef.current;
-    }
 
     const animate = (time: number) => {
       const t = (time - startTime) / 1000;
-      mapRoot.rotation.y = Math.sin(t * 0.18) * 0.05;
+      mapRoot.rotation.x = DEALER_MAP_CAMERA_CONFIG.mapTiltX;
+      mapRoot.rotation.y = DEALER_MAP_CAMERA_CONFIG.mapTiltY + Math.sin(t * 0.18) * 0.05;
+      mapRoot.rotation.z = DEALER_MAP_CAMERA_CONFIG.mapTiltZ;
+
+      const { mapRootOffset } = DEALER_MAP_CAMERA_CONFIG;
+      mapRoot.position.set(mapRootOffset.x, mapRootOffset.y, mapRootOffset.z);
 
       const now = performance.now();
       const deltaTime = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
-      // Update zoom progress
+      // Update zoom progress over 1.0 second
       const isZoomed = selectedCityRef.current !== null;
       if (isZoomed) {
-        zoomProgress = Math.min(1, zoomProgress + deltaTime / 0.68);
+        zoomProgress = Math.min(1, zoomProgress + deltaTime / 1.0);
       } else {
-        zoomProgress = Math.max(0, zoomProgress - deltaTime / 0.68);
+        zoomProgress = Math.max(0, zoomProgress - deltaTime / 1.0);
       }
 
       if (selectedCityRef.current) {
         lastActiveCityId = selectedCityRef.current;
       }
 
-      // Cosine ease-in-out
-      const easeT = 0.5 - Math.cos(zoomProgress * Math.PI) / 2;
+      // Linear transition (1 second duration)
+      const easeT = zoomProgress;
 
-      const defaultCamPos = new THREE.Vector3(0, 8.5, 11);
-      const defaultLookAt = new THREE.Vector3(0, 0, 0);
+      const { defaultLookAt, cityZoomOffset, cityZoomTargetOffset } = DEALER_MAP_CAMERA_CONFIG;
+      const defaultLookAtVec = new THREE.Vector3(defaultLookAt.x, defaultLookAt.y, defaultLookAt.z);
+
+      // Default camera position comes from resize function (scaled for viewport aspect)
+      const defaultCamPos = camera.position.clone();
 
       const targetCamPos = new THREE.Vector3().copy(defaultCamPos);
-      const targetLookAt = new THREE.Vector3().copy(defaultLookAt);
+      const targetLookAt = new THREE.Vector3().copy(defaultLookAtVec);
 
-      const activeCityId = selectedCityRef.current || lastActiveCityId;
-      if (activeCityId) {
-        const cityPos = cityPositions[activeCityId];
-        const zoomedCamPos = cityPos.clone().addScaledVector(defaultCamPos, 0.28);
+      const activeCityId = selectedCityRef.current ? selectedCityRef.current : (zoomProgress > 0.001 ? lastActiveCityId : null);
+      if (activeCityId && zoomProgress > 0.001) {
+        const cityPos = cityPositions[activeCityId].clone().add(mapContent.position);
+        const cityCenterTarget = cityPos.clone().add(new THREE.Vector3(cityZoomTargetOffset.x, cityZoomTargetOffset.y, cityZoomTargetOffset.z));
+        const zoomedCamPos = cityPos.clone().add(new THREE.Vector3(cityZoomOffset.x, cityZoomOffset.y, cityZoomOffset.z));
         targetCamPos.lerpVectors(defaultCamPos, zoomedCamPos, easeT);
-        targetLookAt.lerpVectors(defaultLookAt, cityPos, easeT);
+        targetLookAt.lerpVectors(defaultLookAtVec, cityCenterTarget, easeT);
       }
 
       camera.position.copy(targetCamPos);
@@ -1939,9 +2002,12 @@ export default function Garage({
   const [dealerMapTransitioning, setDealerMapTransitioning] = useState(false);
   const [dealerExiting, setDealerExiting] = useState(false);
   const [dealerBrandTransitioning, setDealerBrandTransitioning] = useState(false);
+  const [showSlowLoadingOverlay, setShowSlowLoadingOverlay] = useState(false);
+  const [brandCrossFadeTarget, setBrandCrossFadeTarget] = useState<string | null>(null);
   const dealerCityTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dealerExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dealerBrandTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slowLoadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickPlayCarouselDragStartRef = useRef<number | null>(null);
 
   React.useEffect(() => {
@@ -2044,30 +2110,39 @@ export default function Garage({
   const handleDealerCitySelect = React.useCallback((cityId: DealerCityId) => {
     if (dealerMapTransitioning || dealerExiting) return;
     if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
+    if (slowLoadingTimeoutRef.current) clearTimeout(slowLoadingTimeoutRef.current);
+
     setDealerCity(cityId);
     setDealerMarketMode(null);
     setSelectedBrand('All');
     setHoveredCity(null);
     setDealerMapTransitioning(true);
 
+    // Fallback loading overlay timer (triggers ONLY if loading takes > 500ms on slow computers)
+    slowLoadingTimeoutRef.current = setTimeout(() => {
+      setShowSlowLoadingOverlay(true);
+    }, 500);
+
     dealerCityTransitionTimeoutRef.current = setTimeout(() => {
+      if (slowLoadingTimeoutRef.current) clearTimeout(slowLoadingTimeoutRef.current);
+      setShowSlowLoadingOverlay(false);
       setDealerPage('city');
       setDealerMapTransitioning(false);
-    }, 680);
+    }, 1000);
   }, [dealerExiting, dealerMapTransitioning, setSelectedBrand]);
 
   const handleBrandSelect = React.useCallback((brand: string) => {
-    if (dealerBrandTransitioning) return;
-    setDealerBrandTransitioning(true);
+    if (brandCrossFadeTarget !== null) return;
+    setBrandCrossFadeTarget(brand);
 
     if (dealerBrandTransitionTimeoutRef.current) clearTimeout(dealerBrandTransitionTimeoutRef.current);
 
     dealerBrandTransitionTimeoutRef.current = setTimeout(() => {
       setSelectedBrand(brand);
       setDealerMarketMode(null);
-      setDealerBrandTransitioning(false);
-    }, 450);
-  }, [dealerBrandTransitioning, setSelectedBrand]);
+      setBrandCrossFadeTarget(null);
+    }, 600);
+  }, [brandCrossFadeTarget, setSelectedBrand]);
 
   const handleDealerReturnToMap = React.useCallback(() => {
     setDealerPage('map');
@@ -2178,13 +2253,14 @@ export default function Garage({
   const dealerCars = getDealerCityCars(dealerCity);
   const dealerHoverConfig = DEALER_CITIES.find((city) => city.id === hoveredCity);
   const dealerFilteredCars = dealerCars.filter((car) => selectedBrand === 'All' || car.brand === selectedBrand);
-  const dealerMarketCars = dealerMarketMode === 'used'
+  const rawMarketCars = dealerMarketMode === 'used'
     ? dealerFilteredCars.filter((car) => car.tier === 'Entry Tier' || car.price <= 1800)
     : dealerMarketMode === 'race'
       ? dealerFilteredCars.filter((car) => car.tier === 'Hyper Tier' || car.tier === 'Legendary Tier' || car.requiresLicense)
       : dealerMarketMode === 'new'
         ? dealerFilteredCars.filter((car) => car.tier !== 'Hyper Tier' && car.tier !== 'Legendary Tier' && !car.requiresLicense)
         : dealerFilteredCars;
+  const dealerMarketCars = rawMarketCars.length > 0 ? rawMarketCars : (dealerFilteredCars.length > 0 ? dealerFilteredCars : dealerCars);
   const dealerActiveBrands = dealerCityConfig?.brands || [];
   const quickPlayTracks = getRaceableQuickPlayTracks().filter(
     (track) => getQuickPlayTrackMeta(track).category === quickPlayMapFilter
@@ -2408,16 +2484,48 @@ export default function Garage({
       {/* DEDICATED DEALER CITY MAP */}
       {activeGarageTab === 'dealer' && (
         <div
-          className={`absolute inset-0 z-10 overflow-hidden pointer-events-auto transition-colors duration-700 ${dealerPage === 'city' ? 'bg-transparent' : 'bg-zinc-950'}`}
+          className="absolute inset-0 z-10 overflow-hidden pointer-events-auto bg-zinc-950"
         >
+          {/* FALLBACK GAME LOGO LOADING OVERLAY (Triggers ONLY if user's computer/network takes >500ms) */}
+          {showSlowLoadingOverlay && (
+            <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-md transition-opacity duration-300 animate-fadeIn">
+              <div className="relative flex flex-col items-center justify-center gap-5">
+                {/* Outer spinning ring & pulsing game logo */}
+                <div className="relative flex h-28 w-28 items-center justify-center">
+                  {/* Outer glowing spinning ring */}
+                  <div className="absolute inset-0 rounded-full border-2 border-rose-500/20 border-t-rose-500 border-r-rose-500/40 animate-spin" />
+                  {/* Inner reverse spinning ring */}
+                  <div className="absolute inset-2 rounded-full border-2 border-cyan-500/20 border-b-cyan-400 border-l-cyan-400/40 animate-spin [animation-duration:1.4s] [animation-direction:reverse]" />
+
+                  {/* Game Logo Emblem */}
+                  <div
+                    className="h-12 w-12 bg-gradient-to-tr from-rose-500 via-rose-400 to-cyan-400 animate-pulse drop-shadow-[0_0_18px_rgba(244,63,94,0.7)]"
+                    style={{
+                      maskImage: "url('/icon/logo.svg')",
+                      maskRepeat: "no-repeat",
+                      maskSize: "contain",
+                      maskPosition: "center",
+                      WebkitMaskImage: "url('/icon/logo.svg')",
+                      WebkitMaskRepeat: "no-repeat",
+                      WebkitMaskSize: "contain",
+                      WebkitMaskPosition: "center",
+                    }}
+                  />
+                </div>
+                <span className="text-[11px] font-black uppercase tracking-[0.35em] text-zinc-400 animate-pulse drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]">
+                  LOADING...
+                </span>
+              </div>
+            </div>
+          )}
           {dealerPage !== 'city' && (
             <div
               style={{
                 transformOrigin: lastSelectedCity ? `${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].left} ${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].top}` : 'center'
               }}
-              className={`absolute inset-0 transition-all duration-700 ease-out ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
-                ? 'scale-[2.0] opacity-0 blur-md'
-                : 'scale-100 opacity-100'
+              className={`absolute inset-0 transition-opacity duration-1000 ease-linear ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
+                ? 'opacity-0 blur-md'
+                : 'opacity-100'
                 }`}
             >
               <DealerCityMapScene
@@ -2427,9 +2535,7 @@ export default function Garage({
                 onHoverCity={setHoveredCity}
                 onClickCity={handleDealerCitySelect}
               />
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(244,63,94,0.12),transparent_24%),radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.12),transparent_28%),linear-gradient(90deg,rgba(9,9,11,0.58),rgba(9,9,11,0.28),rgba(9,9,11,0.58))]" aria-hidden="true" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-zinc-950 to-transparent" aria-hidden="true" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-zinc-950 to-transparent" aria-hidden="true" />
+              {/* Clear canvas overlay without dark vignette */}
             </div>
           )}
 
@@ -2513,7 +2619,7 @@ export default function Garage({
               )}
 
               {dealerPage === 'city' && dealerCityConfig && selectedBrand === 'All' && !dealerMarketMode && (
-                <div className="pointer-events-auto absolute left-1/2 top-1/2 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 -translate-y-1/2 animate-fadeIn">
+                <div className={`pointer-events-auto absolute left-1/2 top-1/2 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 -translate-y-1/2 transition-opacity duration-[600ms] ease-linear ${brandCrossFadeTarget ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                   <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
                     {dealerActiveBrands.map((brand, index) => {
                       const brandColor = getBrandColor(brand);
@@ -2523,7 +2629,7 @@ export default function Garage({
                           onClick={() => handleBrandSelect(brand)}
                           onMouseEnter={() => setHoveredBrand(brand)}
                           onMouseLeave={() => setHoveredBrand(null)}
-                          className="group flex flex-col items-center justify-center gap-4 py-8 px-6 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 hover:brightness-125 animate-brandPop"
+                          className={`group flex flex-col items-center justify-center gap-4 py-8 px-6 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 hover:brightness-125 ${!brandCrossFadeTarget ? 'animate-brandPop' : ''}`}
                           style={{ animationDelay: `${index * 80}ms` }}
                         >
                           {/* Circular double-ring emblem */}
@@ -2571,26 +2677,26 @@ export default function Garage({
               )}
 
               {/* Stock Brand Atmosphere Backdrop (Cross-dissolves straight to 3D Showroom) */}
-              {dealerPage === 'city' && dealerCityConfig && selectedBrand !== 'All' && (() => {
-                const brandColor = getBrandColor(selectedBrand);
-                const stockImageUrl = BRAND_STOCK_IMAGES[selectedBrand] || DEFAULT_BRAND_STOCK_IMAGE;
+              {dealerPage === 'city' && dealerCityConfig && (selectedBrand !== 'All' || brandCrossFadeTarget !== null) && (() => {
+                const activeDisplayBrand = brandCrossFadeTarget || selectedBrand;
+                const brandColor = getBrandColor(activeDisplayBrand);
+                const stockImageUrl = BRAND_STOCK_IMAGES[activeDisplayBrand] || DEFAULT_BRAND_STOCK_IMAGE;
                 const isShowroom = dealerMarketMode !== null;
 
                 return (
                   <div
-                    className={`absolute inset-0 z-0 pointer-events-none overflow-hidden transition-all duration-700 ease-in-out bg-zinc-950 ${
-                      isShowroom ? 'opacity-0 scale-105' : 'opacity-100 scale-100'
-                    }`}
+                    className={`absolute inset-0 z-0 pointer-events-none overflow-hidden bg-zinc-950 ${isShowroom ? 'opacity-0' : brandCrossFadeTarget ? 'animate-crossFadeIn' : 'opacity-100'
+                      }`}
                   >
                     <img
                       src={stockImageUrl}
-                      alt={`${selectedBrand} Stock`}
+                      alt={`${activeDisplayBrand} Stock`}
                       className="absolute inset-0 w-full h-full object-cover opacity-45 filter brightness-90 contrast-110"
                     />
                     <div
-                      className="absolute inset-0 opacity-70"
+                      className="absolute inset-0 opacity-30"
                       style={{
-                        background: `radial-gradient(ellipse at 50% 50%, ${brandColor}33 0%, rgba(9,9,11,0.85) 65%, rgba(5,5,7,0.98) 100%)`
+                        background: `linear-gradient(180deg, ${brandColor}22 0%, rgba(9,9,11,0.4) 100%)`
                       }}
                     />
                   </div>
@@ -2598,49 +2704,53 @@ export default function Garage({
               })()}
 
               {/* Category Choice Step at bottom before entering 3D Showroom */}
-              {dealerPage === 'city' && dealerCityConfig && selectedBrand !== 'All' && !dealerMarketMode && (
-                <div className="pointer-events-auto absolute left-1/2 bottom-10 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-8 py-6 backdrop-blur-sm animate-fadeIn">
-                  <div className="flex flex-col gap-5 items-center">
-                    <div className="text-center">
-                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                        SELECT MARKET CATEGORY
-                      </span>
-                      <h3 className="text-2xl font-black uppercase tracking-wider text-white mt-1">
-                        {selectedBrand}
-                      </h3>
-                    </div>
+              {dealerPage === 'city' && dealerCityConfig && (selectedBrand !== 'All' || brandCrossFadeTarget !== null) && !dealerMarketMode && (() => {
+                const activeDisplayBrand = brandCrossFadeTarget || selectedBrand;
 
-                    {/* Category Choices (wide gap, sleek icon tokens, non-button feel) */}
-                    <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14 w-full mt-2">
-                      {[
-                        { id: 'new', label: 'NEW CAR', icon: '/icon/new_car.svg', accent: 'group-hover:border-rose-500 group-hover:shadow-[0_0_20px_rgba(244,63,94,0.4)]', textColor: 'group-hover:text-rose-400' },
-                        { id: 'used', label: 'USED CAR', icon: '/icon/used_car.svg', accent: 'group-hover:border-amber-500 group-hover:shadow-[0_0_20px_rgba(245,158,11,0.4)]', textColor: 'group-hover:text-amber-400' },
-                        { id: 'race', label: 'RACE CAR', icon: '/icon/race_car.svg', accent: 'group-hover:border-cyan-500 group-hover:shadow-[0_0_20px_rgba(6,182,212,0.4)]', textColor: 'group-hover:text-cyan-400' },
-                        { id: 'museum', label: 'HERITAGE', icon: '/icon/heritage.svg', accent: 'group-hover:border-purple-500 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]', textColor: 'group-hover:text-purple-400' }
-                      ].map((item) => (
-                        <button
-                          key={item.id}
-                          onClick={() => handleDealerMarketChoice(item.id as DealerMarketMode)}
-                          className="group relative flex flex-col items-center gap-3 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 active:scale-95"
-                        >
-                          {/* Circular icon token */}
-                          <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-950/80 border border-white/12 transition-all duration-300 ${item.accent}`}>
-                            <img
-                              src={item.icon}
-                              alt={item.label}
-                              className="h-8 w-8 filter invert opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
-                            />
-                          </div>
-                          {/* Label */}
-                          <span className={`text-xs font-black uppercase tracking-widest text-zinc-300 transition-colors duration-300 ${item.textColor}`}>
-                            {item.label}
-                          </span>
-                        </button>
-                      ))}
+                return (
+                  <div className={`pointer-events-auto absolute left-1/2 bottom-10 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-8 py-6 backdrop-blur-sm ${brandCrossFadeTarget ? 'animate-crossFadeIn' : 'opacity-100'}`}>
+                    <div className="flex flex-col gap-5 items-center">
+                      <div className="text-center">
+                        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+                          SELECT MARKET CATEGORY
+                        </span>
+                        <h3 className="text-2xl font-black uppercase tracking-wider text-white mt-1">
+                          {activeDisplayBrand}
+                        </h3>
+                      </div>
+
+                      {/* Category Choices (wide gap, sleek icon tokens, non-button feel) */}
+                      <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14 w-full mt-2">
+                        {[
+                          { id: 'new', label: 'NEW CAR', icon: '/icon/new_car.svg', accent: 'group-hover:border-rose-500 group-hover:shadow-[0_0_20px_rgba(244,63,94,0.4)]', textColor: 'group-hover:text-rose-400' },
+                          { id: 'used', label: 'USED CAR', icon: '/icon/used_car.svg', accent: 'group-hover:border-amber-500 group-hover:shadow-[0_0_20px_rgba(245,158,11,0.4)]', textColor: 'group-hover:text-amber-400' },
+                          { id: 'race', label: 'RACE CAR', icon: '/icon/race_car.svg', accent: 'group-hover:border-cyan-500 group-hover:shadow-[0_0_20px_rgba(6,182,212,0.4)]', textColor: 'group-hover:text-cyan-400' },
+                          { id: 'museum', label: 'HERITAGE', icon: '/icon/heritage.svg', accent: 'group-hover:border-purple-500 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]', textColor: 'group-hover:text-purple-400' }
+                        ].map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => handleDealerMarketChoice(item.id as DealerMarketMode)}
+                            className="group relative flex flex-col items-center gap-3 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 active:scale-95"
+                          >
+                            {/* Circular icon token */}
+                            <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-950/80 border border-white/12 transition-all duration-300 ${item.accent}`}>
+                              <img
+                                src={item.icon}
+                                alt={item.label}
+                                className="h-8 w-8 filter invert opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
+                              />
+                            </div>
+                            {/* Label */}
+                            <span className={`text-xs font-black uppercase tracking-widest text-zinc-300 transition-colors duration-300 ${item.textColor}`}>
+                              {item.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
 
 

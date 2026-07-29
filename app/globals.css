@@ -21,6 +21,9 @@
   --animate-slideOutRight: slideOutRight 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-fadeOut: fadeOut 0.7s ease-out forwards;
   --animate-dealerFadeIn: fadeIn 0.7s ease-out forwards;
+  --animate-dealerBrandIn: fadeIn 1s linear forwards;
+  --animate-crossFadeIn: crossFadeIn 0.6s linear forwards;
+  --animate-crossFadeOut: crossFadeOut 0.6s linear forwards;
   --animate-dealerContentIn: dealerContentIn 0.7s ease-out forwards;
   --animate-dealerBlackIn: dealerBlackIn 0.7s ease-out forwards;
   --animate-dealerBlackOut: dealerBlackOut 0.7s ease-out forwards;
@@ -34,6 +37,26 @@
 
     to {
       opacity: 1;
+    }
+  }
+
+  @keyframes crossFadeIn {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes crossFadeOut {
+    from {
+      opacity: 1;
+    }
+
+    to {
+      opacity: 0;
     }
   }
 

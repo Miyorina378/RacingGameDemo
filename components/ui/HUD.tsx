@@ -148,12 +148,6 @@ export default function HUD({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
-      if (!activeTrack) return;
-
-      const path = activeTrack.path;
-      if (path.length === 0) return;
-
       // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -161,27 +155,55 @@ export default function HUD({
       ctx.fillStyle = 'rgba(9, 13, 22, 0.45)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      const getPos = (pt: THREE.Vector3 | TrackNode) => 'isVector3' in pt ? pt : pt.pos;
-
-      // Find boundaries of the track to scale and center it
-      let minX = Infinity, maxX = -Infinity;
-      let minZ = Infinity, maxZ = -Infinity;
-      path.forEach(pt => {
-        const pos = getPos(pt);
-        if (pos.x < minX) minX = pos.x;
-        if (pos.x > maxX) maxX = pos.x;
-        if (pos.z < minZ) minZ = pos.z;
-        if (pos.z > maxZ) maxZ = pos.z;
-      });
-
-      // Add padding to bounds
       const padding = 15;
       const width = canvas.width - padding * 2;
       const height = canvas.height - padding * 2;
 
+      let minX = Infinity, maxX = -Infinity;
+      let minZ = Infinity, maxZ = -Infinity;
+      let drawRoad = false;
+      let minimapPoints: THREE.Vector3[] = [];
+
+      if (activeMode === 'free_roam' || activeMode === 'tutorial') {
+        // Open world bounds (-140 to 140) covering the 260x260 grid & buildings
+        minX = -140;
+        maxX = 140;
+        minZ = -140;
+        maxZ = 140;
+      } else {
+        const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
+        if (activeTrack && activeTrack.path.length > 0) {
+          drawRoad = true;
+          const getPos = (pt: THREE.Vector3 | TrackNode) => 'isVector3' in pt ? pt : pt.pos;
+          const pathPositions = activeTrack.path.map(pt => getPos(pt));
+          const minimapCurve = pathPositions.length > 2
+            ? new THREE.CatmullRomCurve3(
+                pathPositions.map(pt => new THREE.Vector3(pt.x, 0, pt.z)),
+                true,
+                activeTrack.curveType || 'centripetal',
+                activeTrack.tension || 0.5
+              )
+            : null;
+          minimapPoints = minimapCurve
+            ? minimapCurve.getSpacedPoints(Math.max(96, pathPositions.length * 16))
+            : pathPositions.map(p => new THREE.Vector3(p.x, 0, p.z));
+
+          minimapPoints.forEach(pos => {
+            if (pos.x < minX) minX = pos.x;
+            if (pos.x > maxX) maxX = pos.x;
+            if (pos.z < minZ) minZ = pos.z;
+            if (pos.z > maxZ) maxZ = pos.z;
+          });
+        } else {
+          minX = -100;
+          maxX = 100;
+          minZ = -100;
+          maxZ = 100;
+        }
+      }
+
       const rangeX = maxX - minX || 1;
       const rangeZ = maxZ - minZ || 1;
-
       const scale = Math.min(width / rangeX, height / rangeZ);
 
       // Center offsets
@@ -191,18 +213,31 @@ export default function HUD({
       const mapX = (x: number) => offsetX + (x - minX) * scale;
       const mapZ = (z: number) => offsetZ + (z - minZ) * scale;
 
-      // Draw road line
-      ctx.beginPath();
-      ctx.moveTo(mapX(getPos(path[0]).x), mapZ(getPos(path[0]).z));
-      for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(mapX(getPos(path[i]).x), mapZ(getPos(path[i]).z));
+      // In Open World mode, draw grid boundary frame
+      if (activeMode === 'free_roam') {
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.35)';
+        ctx.lineWidth = 1.5;
+        const bX = mapX(-130);
+        const bZ = mapZ(-130);
+        const bW = 260 * scale;
+        const bH = 260 * scale;
+        ctx.strokeRect(bX, bZ, bW, bH);
       }
-      ctx.closePath();
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.55)'; // cyan road line
-      ctx.lineWidth = 3.5;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.stroke();
+
+      // Draw road line for race mode
+      if (drawRoad && minimapPoints.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(mapX(minimapPoints[0].x), mapZ(minimapPoints[0].z));
+        for (let i = 1; i < minimapPoints.length; i++) {
+          ctx.lineTo(mapX(minimapPoints[i].x), mapZ(minimapPoints[i].z));
+        }
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.55)'; // cyan road line
+        ctx.lineWidth = 3.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
 
       // Draw AI Opponents
       if (activeMode === 'race' && engine.currentModeInstance && 'aiCars' in engine.currentModeInstance) {
