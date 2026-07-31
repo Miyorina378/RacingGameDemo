@@ -56,83 +56,93 @@ export class GarageMode extends BaseMode {
     this.ring.position.y = 0.16;
     this.environmentGroup.add(this.ring);
 
-    // --- DEDICATED 3D SHOWROOM ENVIRONMENT (GRAY & BLACK LOW-LIGHT TONE) ---
+    // --- DEDICATED 3D SHOWROOM ENVIRONMENT (ULTRA-LUXURY STUDIO ATMOSPHERE) ---
     this.showroomGroup = new THREE.Group();
 
-    // 1. Smooth Dark Reflective Showroom Floor (No Grid Floor!)
-    const srFloorGeom = new THREE.PlaneGeometry(100, 100);
+    // 1. Matte Non-Reflective Showroom Floor (Zero shiny reflections)
+    const srFloorGeom = new THREE.PlaneGeometry(120, 120);
     const srFloorMat = new THREE.MeshStandardMaterial({
-      color: 0x08080a,
-      roughness: 0.22,
-      metalness: 0.78,
+      color: 0x0f1115,
+      roughness: 0.95,
+      metalness: 0.0,
     });
     const srFloor = new THREE.Mesh(srFloorGeom, srFloorMat);
     srFloor.rotation.x = -Math.PI / 2;
     srFloor.receiveShadow = true;
     this.showroomGroup.add(srFloor);
 
-    // 2. Luxury Low-Profile Charcoal Stage Pedestal
-    const srStageGeom = new THREE.CylinderGeometry(5.2, 5.5, 0.2, 48);
+    // 2. Matte Charcoal Stage Pedestal
+    const srStageGeom = new THREE.CylinderGeometry(5.2, 5.5, 0.22, 64);
     const srStageMat = new THREE.MeshStandardMaterial({
-      color: 0x121318,
-      roughness: 0.3,
-      metalness: 0.7,
+      color: 0x12151c,
+      roughness: 0.95,
+      metalness: 0.0,
     });
     const srStage = new THREE.Mesh(srStageGeom, srStageMat);
-    srStage.position.y = 0.1;
+    srStage.position.y = 0.11;
     srStage.receiveShadow = true;
     this.showroomGroup.add(srStage);
 
-    // Stage Subtle Neutral Gray Accent Ring
-    const srOuterRingGeom = new THREE.RingGeometry(5.2, 5.35, 48);
+    // Dual Concentric Glowing Stage Rings (Subtle Cyber Cyan Outer + Rose Accent Inner)
+    const srOuterRingGeom = new THREE.RingGeometry(5.2, 5.35, 64);
     srOuterRingGeom.rotateX(-Math.PI / 2);
     this.srOuterRingMat = new THREE.MeshBasicMaterial({
-      color: 0x06b6d4,
+      color: 0x0284c7,
       side: THREE.DoubleSide,
     });
     const srOuterRing = new THREE.Mesh(srOuterRingGeom, this.srOuterRingMat);
-    srOuterRing.position.y = 0.205;
+    srOuterRing.position.y = 0.225;
     this.showroomGroup.add(srOuterRing);
 
-    // 3. Overhead Dark Slate Halo Rig
-    const srHaloGeom = new THREE.TorusGeometry(6.5, 0.10, 16, 64);
+    const srInnerRingGeom = new THREE.RingGeometry(4.4, 4.48, 64);
+    srInnerRingGeom.rotateX(-Math.PI / 2);
+    const srInnerRingMat = new THREE.MeshBasicMaterial({
+      color: 0xe11d48,
+      side: THREE.DoubleSide,
+    });
+    const srInnerRing = new THREE.Mesh(srInnerRingGeom, srInnerRingMat);
+    srInnerRing.position.y = 0.226;
+    this.showroomGroup.add(srInnerRing);
+
+    // 3. Soft Overhead Halo Ring
+    const srHaloGeom = new THREE.TorusGeometry(6.5, 0.14, 16, 64);
     srHaloGeom.rotateX(Math.PI / 2);
     const srHaloMat = new THREE.MeshBasicMaterial({
-      color: 0x27272a,
+      color: 0x334155,
     });
     const srHalo = new THREE.Mesh(srHaloGeom, srHaloMat);
-    srHalo.position.set(0, 7.5, 0);
+    srHalo.position.set(0, 8.0, 0);
     this.showroomGroup.add(srHalo);
 
-    // 4. Rear Architectural Matte Charcoal Backdrop Wall
+    // 4. Rear Architectural Studio Wall with Soft LED Accent Columns
     const wallBack = new THREE.Group();
-    wallBack.position.set(0, 0, -12);
+    wallBack.position.set(0, 0, -14);
 
-    const backWallGeom = new THREE.PlaneGeometry(50, 18);
+    const backWallGeom = new THREE.PlaneGeometry(60, 22);
     const backWallMat = new THREE.MeshStandardMaterial({
-      color: 0x050507,
-      roughness: 0.90,
-      metalness: 0.10,
+      color: 0x030406,
+      roughness: 0.95,
+      metalness: 0.0,
     });
     const backWallMesh = new THREE.Mesh(backWallGeom, backWallMat);
-    backWallMesh.position.y = 9;
+    backWallMesh.position.y = 11;
     wallBack.add(backWallMesh);
 
-    // 6 Vertical Dark Gray Accent Pillars
-    for (let i = -3; i <= 3; i++) {
+    // Soft Glowing Vertical Columns
+    for (let i = -4; i <= 4; i++) {
       if (i === 0) continue;
-      const pillarGeom = new THREE.BoxGeometry(0.12, 14, 0.12);
+      const pillarGeom = new THREE.BoxGeometry(0.15, 16, 0.15);
       const pillarMat = new THREE.MeshBasicMaterial({
-        color: 0x27272a,
+        color: i % 2 === 0 ? 0x0369a1 : 0x1e40af,
       });
       const pillar = new THREE.Mesh(pillarGeom, pillarMat);
-      pillar.position.set(i * 5.0, 7, 0.1);
+      pillar.position.set(i * 4.5, 8, 0.1);
       wallBack.add(pillar);
     }
     this.showroomGroup.add(wallBack);
 
-    // 5. 100% Overhead Top-Down Studio Lighting Rig (Directly Above Car)
-    const srTopDir = new THREE.DirectionalLight(0xffffff, 3.5);
+    // 5. Overhead Soft Studio Lighting Rig
+    const srTopDir = new THREE.DirectionalLight(0xffffff, 0.4);
     srTopDir.position.set(0, 40, 0);
     const srTopDirTarget = new THREE.Object3D();
     srTopDirTarget.position.set(0, 0, 0);
@@ -140,8 +150,8 @@ export class GarageMode extends BaseMode {
     srTopDir.target = srTopDirTarget;
     this.showroomGroup.add(srTopDir);
 
-    // Direct Top-Down Spotlight (Positioned at 0, 12, 0)
-    this.srTopSpot = new THREE.SpotLight(0xffffff, 40.0, 30, Math.PI / 3, 0.4, 0);
+    // Soft Low-Intensity Spotlight
+    this.srTopSpot = new THREE.SpotLight(0xffffff, 3.5, 30, Math.PI / 3, 0.8, 0.5);
     this.srTopSpot.position.set(0, 12, 0);
     const spotTarget = new THREE.Object3D();
     spotTarget.position.set(0, 0, 0);
@@ -153,8 +163,8 @@ export class GarageMode extends BaseMode {
     this.srTopSpot.shadow.bias = -0.0008;
     this.showroomGroup.add(this.srTopSpot);
 
-    // High-Luminance Overhead Center Point Fill Light
-    this.srCenterPoint = new THREE.PointLight(0xffffff, 100.0, 20, 0);
+    // Soft Overhead Fill Light
+    this.srCenterPoint = new THREE.PointLight(0xffffff, 5.0, 20, 0);
     this.srCenterPoint.position.set(0, 7.0, 0);
     this.showroomGroup.add(this.srCenterPoint);
 
@@ -330,7 +340,7 @@ export class GarageMode extends BaseMode {
       if (this.quickPlayRightLight) this.quickPlayRightLight.visible = false;
     } else if (isShowroomMode) {
       // DEDICATED 3D SHOWROOM MODE (Quick Play Car Select OR Dealer Car Showroom)
-      this.vehicle.mesh.rotation.y = (145 * Math.PI) / 180;
+      this.vehicle.mesh.rotation.y = 0;
       this.vehicle.mesh.position.set(0, 0, 0);
 
       // Show 3D Showroom background, hide standard garage grid/stand/room
@@ -358,31 +368,31 @@ export class GarageMode extends BaseMode {
 
         if (this.srTopSpot) {
           this.srTopSpot.position.set(0, targetLightY, 0);
-          this.srTopSpot.intensity = 40.0 + pulse * 60.0;
+          this.srTopSpot.intensity = 10.0 + pulse * 15.0;
         }
         if (this.srCenterPoint) {
-          this.srCenterPoint.intensity = 100.0 + pulse * 150.0;
+          this.srCenterPoint.intensity = 18.0 + pulse * 30.0;
         }
         if (this.srOuterRingMat) {
           this.srOuterRingMat.color.setHex(pulse > 0.5 ? 0x06b6d4 : 0xf59e0b);
         }
         if (this.engine.ambientLight) {
-          this.engine.ambientLight.intensity = 0.2 + pulse * 0.3;
+          this.engine.ambientLight.intensity = 0.25 + pulse * 0.2;
         }
       } else {
         if (this.srTopSpot) {
           this.srTopSpot.position.set(0, targetLightY, 0);
-          this.srTopSpot.intensity = 40.0;
+          this.srTopSpot.intensity = 3.5;
         }
         if (this.srCenterPoint) {
-          this.srCenterPoint.intensity = 100.0;
+          this.srCenterPoint.intensity = 5.0;
         }
         if (this.srOuterRingMat) {
-          this.srOuterRingMat.color.setHex(0x06b6d4);
+          this.srOuterRingMat.color.setHex(0x0284c7);
         }
         if (this.engine.ambientLight) {
           this.engine.ambientLight.color.setHex(0xd1d5db);
-          this.engine.ambientLight.intensity = 0.4;
+          this.engine.ambientLight.intensity = 0.25;
         }
       }
 
@@ -412,7 +422,7 @@ export class GarageMode extends BaseMode {
     } else {
       // DEFAULT MAIN GARAGE MODE
       this.vehicle.mesh.position.set(0, 0, 0);
-      this.vehicle.mesh.rotation.y += 0.1 * deltaTime;
+      this.vehicle.mesh.rotation.y = 0;
 
       // Show standard garage components, hide showroom and room
       if (this.showroomGroup) this.showroomGroup.visible = false;

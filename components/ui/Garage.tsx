@@ -58,6 +58,35 @@ const MechanicalGearIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const BrandLogoDisplay = ({
+  brand,
+  className = "h-10 max-w-[200px] object-contain drop-shadow-[0_0_12px_rgba(255,255,255,0.5)]",
+  textFallbackClass = "text-2xl font-black uppercase tracking-wider text-white"
+}: {
+  brand: string;
+  className?: string;
+  textFallbackClass?: string;
+}) => {
+  const [imgError, setImgError] = React.useState(false);
+  const logoSlug = brand.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const logoUrl = `/logo/brands/${logoSlug}.svg`;
+
+  if (imgError) {
+    return <span className={textFallbackClass}>{brand}</span>;
+  }
+
+  return (
+    <img
+      src={logoUrl}
+      alt={`${brand} Logo`}
+      className={className}
+      onError={() => setImgError(true)}
+    />
+  );
+};
+
+const CAR_ICON_CACHE = new Map<string, string>();
+
 const DealerThreeCarIcon = ({
   car,
   className = "dealer-three-car absolute left-[80%] top-1/2 z-10",
@@ -70,9 +99,14 @@ const DealerThreeCarIcon = ({
   isSliderIcon?: boolean;
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const [staticImageUrl, setStaticImageUrl] = useState<string | null>(null);
+  const cacheKey = `${car.id}_${car.color}_${car.hasSpoiler || false}_${centerModel || false}`;
+  const [staticImageUrl, setStaticImageUrl] = useState<string | null>(() => CAR_ICON_CACHE.get(cacheKey) || null);
 
   useEffect(() => {
+    if (isSliderIcon && CAR_ICON_CACHE.has(cacheKey)) {
+      setStaticImageUrl(CAR_ICON_CACHE.get(cacheKey)!);
+      return;
+    }
     const mount = mountRef.current;
     if (!mount) return;
 
@@ -273,6 +307,7 @@ const DealerThreeCarIcon = ({
         if (isFitted && isGltfLoaded && sliderRetryCount > 3) {
           // Model is loaded and fitted, capture the image
           const dataUrl = renderer.domElement.toDataURL('image/png');
+          CAR_ICON_CACHE.set(cacheKey, dataUrl);
           setStaticImageUrl(dataUrl);
 
           // Dispose everything - free the WebGL context
@@ -2004,11 +2039,45 @@ export default function Garage({
   const [dealerBrandTransitioning, setDealerBrandTransitioning] = useState(false);
   const [showSlowLoadingOverlay, setShowSlowLoadingOverlay] = useState(false);
   const [brandCrossFadeTarget, setBrandCrossFadeTarget] = useState<string | null>(null);
+  const [brandBackCrossFade, setBrandBackCrossFade] = useState<string | null>(null);
+  const [marketCrossFadeTarget, setMarketCrossFadeTarget] = useState<DealerMarketMode | null>(null);
+  const [marketBackCrossFade, setMarketBackCrossFade] = useState<DealerMarketMode | null>(null);
   const dealerCityTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dealerExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dealerBrandTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dealerMarketTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowLoadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickPlayCarouselDragStartRef = useRef<number | null>(null);
+  const hasVisitedDealerRef = useRef(false);
+  const hasVisitedBrandGridRef = useRef(false);
+  const hasVisitedCategoryRef = useRef(false);
+
+  React.useEffect(() => {
+    if (activeGarageTab === 'dealer') {
+      const timer = setTimeout(() => {
+        hasVisitedDealerRef.current = true;
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeGarageTab]);
+
+  React.useEffect(() => {
+    if (selectedBrand === 'All' && activeGarageTab === 'dealer') {
+      const timer = setTimeout(() => {
+        hasVisitedBrandGridRef.current = true;
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedBrand, activeGarageTab]);
+
+  React.useEffect(() => {
+    if (selectedBrand !== 'All' && !dealerMarketMode && activeGarageTab === 'dealer') {
+      const timer = setTimeout(() => {
+        hasVisitedCategoryRef.current = true;
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedBrand, dealerMarketMode, activeGarageTab]);
 
   React.useEffect(() => {
     if (dealerCity) {
@@ -2141,7 +2210,7 @@ export default function Garage({
       setSelectedBrand(brand);
       setDealerMarketMode(null);
       setBrandCrossFadeTarget(null);
-    }, 600);
+    }, 400);
   }, [brandCrossFadeTarget, setSelectedBrand]);
 
   const handleDealerReturnToMap = React.useCallback(() => {
@@ -2153,10 +2222,36 @@ export default function Garage({
   }, [setSelectedBrand]);
 
   const handleDealerBackClick = React.useCallback(() => {
-    if (selectedBrand !== 'All' || dealerMarketMode !== null) {
-      setSelectedBrand('All');
-      setDealerMarketMode(null);
-    } else if (dealerPage === 'city') {
+    if (brandCrossFadeTarget !== null || brandBackCrossFade !== null || marketCrossFadeTarget !== null || marketBackCrossFade !== null) return;
+
+    if (dealerMarketMode !== null) {
+      const leavingMode = dealerMarketMode;
+      setMarketBackCrossFade(leavingMode);
+
+      if (dealerMarketTransitionTimeoutRef.current) clearTimeout(dealerMarketTransitionTimeoutRef.current);
+
+      dealerMarketTransitionTimeoutRef.current = setTimeout(() => {
+        setDealerMarketMode(null);
+        setMarketBackCrossFade(null);
+      }, 400);
+      return;
+    }
+
+    if (selectedBrand !== 'All') {
+      const leavingBrand = selectedBrand;
+      setBrandBackCrossFade(leavingBrand);
+
+      if (dealerBrandTransitionTimeoutRef.current) clearTimeout(dealerBrandTransitionTimeoutRef.current);
+
+      dealerBrandTransitionTimeoutRef.current = setTimeout(() => {
+        setSelectedBrand('All');
+        setDealerMarketMode(null);
+        setBrandBackCrossFade(null);
+      }, 400);
+      return;
+    }
+
+    if (dealerPage === 'city') {
       handleDealerReturnToMap();
     } else {
       if (dealerExitTimeoutRef.current) clearTimeout(dealerExitTimeoutRef.current);
@@ -2167,13 +2262,22 @@ export default function Garage({
       setLastSelectedCity(null);
       handleExitDealerClick();
     }
-  }, [selectedBrand, dealerMarketMode, dealerPage, handleDealerReturnToMap, handleExitDealerClick, setLastSelectedCity]);
+  }, [brandCrossFadeTarget, brandBackCrossFade, marketCrossFadeTarget, marketBackCrossFade, dealerMarketMode, dealerPage, handleDealerReturnToMap, handleExitDealerClick, selectedBrand, setLastSelectedCity, setSelectedBrand]);
 
   const handleDealerMarketChoice = React.useCallback((mode: DealerMarketMode) => {
-    setDealerMarketMode(mode);
+    if (marketCrossFadeTarget !== null || marketBackCrossFade !== null || brandCrossFadeTarget !== null || brandBackCrossFade !== null) return;
+
+    setMarketCrossFadeTarget(mode);
     const cityConfig = DEALER_CITIES.find((city) => city.id === dealerCity);
     if (selectedBrand === 'All' && cityConfig?.brands[0]) setSelectedBrand(cityConfig.brands[0]);
-  }, [dealerCity, selectedBrand, setSelectedBrand]);
+
+    if (dealerMarketTransitionTimeoutRef.current) clearTimeout(dealerMarketTransitionTimeoutRef.current);
+
+    dealerMarketTransitionTimeoutRef.current = setTimeout(() => {
+      setDealerMarketMode(mode);
+      setMarketCrossFadeTarget(null);
+    }, 400);
+  }, [dealerCity, marketCrossFadeTarget, marketBackCrossFade, brandCrossFadeTarget, brandBackCrossFade, selectedBrand, setSelectedBrand]);
 
   const handleExitClick = () => {
     // If Tauri
@@ -2253,11 +2357,12 @@ export default function Garage({
   const dealerCars = getDealerCityCars(dealerCity);
   const dealerHoverConfig = DEALER_CITIES.find((city) => city.id === hoveredCity);
   const dealerFilteredCars = dealerCars.filter((car) => selectedBrand === 'All' || car.brand === selectedBrand);
-  const rawMarketCars = dealerMarketMode === 'used'
+  const activeMarketMode = marketCrossFadeTarget || dealerMarketMode || marketBackCrossFade;
+  const rawMarketCars = activeMarketMode === 'used'
     ? dealerFilteredCars.filter((car) => car.tier === 'Entry Tier' || car.price <= 1800)
-    : dealerMarketMode === 'race'
+    : activeMarketMode === 'race'
       ? dealerFilteredCars.filter((car) => car.tier === 'Hyper Tier' || car.tier === 'Legendary Tier' || car.requiresLicense)
-      : dealerMarketMode === 'new'
+      : activeMarketMode === 'new'
         ? dealerFilteredCars.filter((car) => car.tier !== 'Hyper Tier' && car.tier !== 'Legendary Tier' && !car.requiresLicense)
         : dealerFilteredCars;
   const dealerMarketCars = rawMarketCars.length > 0 ? rawMarketCars : (dealerFilteredCars.length > 0 ? dealerFilteredCars : dealerCars);
@@ -2276,7 +2381,7 @@ export default function Garage({
   const hideGarageBackground = isQuickPlayMapSelect && (!isQuickPlayCarSelectStep || !quickPlayCarHasBeenClicked);
 
   const dealerSelectedCarConfig = CARS_DATABASE.find((c) => c.id === dealerSelectedCarId);
-  const isShowroomActive = isQuickPlayCarSelectStep || activeGarageTab === 'dealer';
+  const isShowroomActive = isQuickPlayCarSelectStep || (activeGarageTab === 'dealer' && (dealerMarketMode !== null || marketCrossFadeTarget !== null));
   const showroomBrandName = activeGarageTab === 'dealer'
     ? (selectedBrand !== 'All' ? selectedBrand : (dealerSelectedCarConfig?.brand || activeCarConfig.brand))
     : ((quickPlaySelectedBrand && quickPlaySelectedBrand !== 'All') ? quickPlaySelectedBrand : activeCarConfig.brand);
@@ -2484,7 +2589,7 @@ export default function Garage({
       {/* DEDICATED DEALER CITY MAP */}
       {activeGarageTab === 'dealer' && (
         <div
-          className="absolute inset-0 z-10 overflow-hidden pointer-events-auto bg-zinc-950"
+          className={`absolute inset-0 z-10 overflow-hidden ${(dealerMarketMode || marketCrossFadeTarget) ? 'bg-transparent pointer-events-none' : 'bg-zinc-950 pointer-events-auto'}`}
         >
           {/* FALLBACK GAME LOGO LOADING OVERLAY (Triggers ONLY if user's computer/network takes >500ms) */}
           {showSlowLoadingOverlay && (
@@ -2523,7 +2628,7 @@ export default function Garage({
               style={{
                 transformOrigin: lastSelectedCity ? `${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].left} ${DEALER_CITY_LABEL_POSITIONS[lastSelectedCity].top}` : 'center'
               }}
-              className={`absolute inset-0 transition-opacity duration-1000 ease-linear ${!dealerExiting ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
+              className={`absolute inset-0 transition-opacity duration-1000 ease-linear ${(!dealerExiting && !hasVisitedDealerRef.current) ? 'animate-dealerContentIn' : ''} ${dealerMapTransitioning
                 ? 'opacity-0 blur-md'
                 : 'opacity-100'
                 }`}
@@ -2541,7 +2646,7 @@ export default function Garage({
 
           {/* TAB: DEALER */}
           {activeGarageTab === 'dealer' && (
-            <div className={`pointer-events-none fixed inset-0 z-10 flex min-h-0 flex-col gap-6 p-8 text-left ${!dealerExiting ? 'animate-dealerContentIn' : 'animate-fadeOut'}`}>
+            <div className={`pointer-events-none fixed inset-0 z-10 flex min-h-0 flex-col gap-6 p-8 text-left ${(!dealerExiting && !hasVisitedDealerRef.current) ? 'animate-dealerContentIn' : dealerExiting ? 'animate-fadeOut' : ''}`}>
               <div className="pointer-events-auto absolute right-8 top-8 z-30">
                 <button
                   onClick={handleDealerBackClick}
@@ -2618,8 +2723,8 @@ export default function Garage({
                 </div>
               )}
 
-              {dealerPage === 'city' && dealerCityConfig && selectedBrand === 'All' && !dealerMarketMode && (
-                <div className={`pointer-events-auto absolute left-1/2 top-1/2 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 -translate-y-1/2 transition-opacity duration-[600ms] ease-linear ${brandCrossFadeTarget ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+              {dealerPage === 'city' && dealerCityConfig && (selectedBrand === 'All' || brandBackCrossFade !== null) && !dealerMarketMode && (
+                <div className={`pointer-events-auto absolute left-1/2 top-1/2 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 -translate-y-1/2 ${brandCrossFadeTarget ? 'animate-crossFadeOut pointer-events-none' : brandBackCrossFade ? 'animate-crossFadeIn' : 'opacity-100'}`}>
                   <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
                     {dealerActiveBrands.map((brand, index) => {
                       const brandColor = getBrandColor(brand);
@@ -2629,46 +2734,17 @@ export default function Garage({
                           onClick={() => handleBrandSelect(brand)}
                           onMouseEnter={() => setHoveredBrand(brand)}
                           onMouseLeave={() => setHoveredBrand(null)}
-                          className={`group flex flex-col items-center justify-center gap-4 py-8 px-6 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 hover:brightness-125 ${!brandCrossFadeTarget ? 'animate-brandPop' : ''}`}
+                          className={`group flex flex-col items-center justify-center gap-4 py-8 px-6 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 hover:brightness-125 ${(!brandCrossFadeTarget && !brandBackCrossFade && !hasVisitedBrandGridRef.current) ? 'animate-brandPop' : ''}`}
                           style={{ animationDelay: `${index * 80}ms` }}
                         >
-                          {/* Circular double-ring emblem */}
-                          <div className="relative flex h-24 w-24 items-center justify-center">
-                            {/* Outer glowing ring */}
-                            <div
-                              className="absolute inset-0 border border-white/10 rounded-full transition-all duration-500 group-hover:scale-110 group-hover:rotate-[180deg]"
-                              style={{
-                                borderColor: `${brandColor}33`,
-                                boxShadow: `0 0 15px ${brandColor}00`,
-                              }}
+                          {/* Large Brand SVG Logo */}
+                          <div className="relative flex h-32 w-60 items-center justify-center">
+                            <BrandLogoDisplay
+                              brand={brand}
+                              className="h-24 max-w-[250px] object-contain drop-shadow-[0_0_24px_rgba(255,255,255,0.75)] transition-all duration-300 group-hover:scale-115"
+                              textFallbackClass="text-3xl font-black font-mono tracking-widest text-white"
                             />
-                            {/* Inner dashed ring */}
-                            <div
-                              className="absolute inset-2 border border-dashed border-white/5 rounded-full transition-all duration-300 group-hover:scale-105"
-                              style={{
-                                borderColor: `${brandColor}55`,
-                              }}
-                            />
-                            {/* Monogram initials */}
-                            <span
-                              className="relative text-2xl font-black font-mono tracking-widest text-zinc-300 transition-all duration-300 group-hover:text-white"
-                              style={{
-                                textShadow: `0 0 10px ${brandColor}66`
-                              }}
-                            >
-                              {getDealerBrandInitials(brand)}
-                            </span>
                           </div>
-
-                          {/* Brand name */}
-                          <span
-                            className="text-xs font-black uppercase tracking-[0.25em] text-zinc-400 transition-all duration-300 group-hover:text-white"
-                            style={{
-                              textShadow: `0 0 10px ${brandColor}33`
-                            }}
-                          >
-                            {brand}
-                          </span>
                         </button>
                       );
                     })}
@@ -2676,16 +2752,16 @@ export default function Garage({
                 </div>
               )}
 
-              {/* Stock Brand Atmosphere Backdrop (Cross-dissolves straight to 3D Showroom) */}
-              {dealerPage === 'city' && dealerCityConfig && (selectedBrand !== 'All' || brandCrossFadeTarget !== null) && (() => {
-                const activeDisplayBrand = brandCrossFadeTarget || selectedBrand;
+              {/* Stock Brand Atmosphere Backdrop (Excludes bigger bottom footer area) */}
+              {dealerPage === 'city' && dealerCityConfig && (selectedBrand !== 'All' || brandCrossFadeTarget !== null || brandBackCrossFade !== null) && (() => {
+                const activeDisplayBrand = (brandCrossFadeTarget || (selectedBrand !== 'All' ? selectedBrand : brandBackCrossFade)) as string;
                 const brandColor = getBrandColor(activeDisplayBrand);
                 const stockImageUrl = BRAND_STOCK_IMAGES[activeDisplayBrand] || DEFAULT_BRAND_STOCK_IMAGE;
-                const isShowroom = dealerMarketMode !== null;
+                const isShowroom = dealerMarketMode !== null || marketCrossFadeTarget !== null;
 
                 return (
                   <div
-                    className={`absolute inset-0 z-0 pointer-events-none overflow-hidden bg-zinc-950 ${isShowroom ? 'opacity-0' : brandCrossFadeTarget ? 'animate-crossFadeIn' : 'opacity-100'
+                    className={`absolute inset-x-0 top-0 bottom-56 z-0 pointer-events-none overflow-hidden bg-zinc-950 ${marketCrossFadeTarget ? 'animate-crossFadeOut pointer-events-none' : marketBackCrossFade ? 'animate-crossFadeIn' : brandCrossFadeTarget ? 'animate-crossFadeIn' : brandBackCrossFade ? 'animate-crossFadeOut pointer-events-none' : isShowroom ? 'opacity-0' : 'opacity-100'
                       }`}
                   >
                     <img
@@ -2703,50 +2779,48 @@ export default function Garage({
                 );
               })()}
 
-              {/* Category Choice Step at bottom before entering 3D Showroom */}
-              {dealerPage === 'city' && dealerCityConfig && (selectedBrand !== 'All' || brandCrossFadeTarget !== null) && !dealerMarketMode && (() => {
-                const activeDisplayBrand = brandCrossFadeTarget || selectedBrand;
+              {/* Category Choice Step Footer Bar (Bigger height, centered stacked UI placement) */}
+              {dealerPage === 'city' && dealerCityConfig && (selectedBrand !== 'All' || brandCrossFadeTarget !== null || brandBackCrossFade !== null) && (!dealerMarketMode || marketBackCrossFade !== null) && (() => {
+                const activeDisplayBrand = (brandCrossFadeTarget || (selectedBrand !== 'All' ? selectedBrand : brandBackCrossFade)) as string;
 
                 return (
-                  <div className={`pointer-events-auto absolute left-1/2 bottom-10 z-20 w-[min(980px,calc(100%-64px))] -translate-x-1/2 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-8 py-6 backdrop-blur-sm ${brandCrossFadeTarget ? 'animate-crossFadeIn' : 'opacity-100'}`}>
-                    <div className="flex flex-col gap-5 items-center">
-                      <div className="text-center">
-                        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                          SELECT MARKET CATEGORY
-                        </span>
-                        <h3 className="text-2xl font-black uppercase tracking-wider text-white mt-1">
-                          {activeDisplayBrand}
-                        </h3>
-                      </div>
+                  <div className={`pointer-events-auto fixed bottom-0 inset-x-0 z-20 w-full h-56 border-t border-white/10 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-zinc-900/90 px-8 py-5 shadow-[0_-12px_40px_rgba(0,0,0,0.9)] backdrop-blur-2xl flex flex-col items-center justify-center gap-4 ${marketCrossFadeTarget ? 'animate-crossFadeOut pointer-events-none' : marketBackCrossFade ? 'animate-crossFadeIn' : brandCrossFadeTarget ? 'animate-crossFadeIn' : brandBackCrossFade ? 'animate-crossFadeOut pointer-events-none' : 'opacity-100'}`}>
+                    {/* Centered Brand Logo */}
+                    <div className="h-14 flex items-center justify-center text-center">
+                      <BrandLogoDisplay
+                        key={activeDisplayBrand}
+                        brand={activeDisplayBrand}
+                        className="h-14 sm:h-16 max-w-[320px] object-contain scale-125 drop-shadow-[0_0_20px_rgba(255,255,255,0.75)] transition-transform duration-300"
+                      />
+                    </div>
 
-                      {/* Category Choices (wide gap, sleek icon tokens, non-button feel) */}
-                      <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14 w-full mt-2">
-                        {[
-                          { id: 'new', label: 'NEW CAR', icon: '/icon/new_car.svg', accent: 'group-hover:border-rose-500 group-hover:shadow-[0_0_20px_rgba(244,63,94,0.4)]', textColor: 'group-hover:text-rose-400' },
-                          { id: 'used', label: 'USED CAR', icon: '/icon/used_car.svg', accent: 'group-hover:border-amber-500 group-hover:shadow-[0_0_20px_rgba(245,158,11,0.4)]', textColor: 'group-hover:text-amber-400' },
-                          { id: 'race', label: 'RACE CAR', icon: '/icon/race_car.svg', accent: 'group-hover:border-cyan-500 group-hover:shadow-[0_0_20px_rgba(6,182,212,0.4)]', textColor: 'group-hover:text-cyan-400' },
-                          { id: 'museum', label: 'HERITAGE', icon: '/icon/heritage.svg', accent: 'group-hover:border-purple-500 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]', textColor: 'group-hover:text-purple-400' }
-                        ].map((item) => (
-                          <button
-                            key={item.id}
-                            onClick={() => handleDealerMarketChoice(item.id as DealerMarketMode)}
-                            className="group relative flex flex-col items-center gap-3 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 active:scale-95"
-                          >
-                            {/* Circular icon token */}
-                            <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-950/80 border border-white/12 transition-all duration-300 ${item.accent}`}>
-                              <img
-                                src={item.icon}
-                                alt={item.label}
-                                className="h-8 w-8 filter invert opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
-                              />
-                            </div>
-                            {/* Label */}
-                            <span className={`text-xs font-black uppercase tracking-widest text-zinc-300 transition-colors duration-300 ${item.textColor}`}>
-                              {item.label}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
+                    {/* Original UI Placement: Circular icon tokens + vertical stack + wide gap */}
+                    <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14 w-full mt-1">
+                      {[
+                        { id: 'new', label: 'NEW CAR', icon: '/icon/new_car.svg', accent: 'group-hover:border-rose-500 group-hover:shadow-[0_0_20px_rgba(244,63,94,0.4)]', textColor: 'group-hover:text-rose-400' },
+                        { id: 'used', label: 'USED CAR', icon: '/icon/used_car.svg', accent: 'group-hover:border-amber-500 group-hover:shadow-[0_0_20px_rgba(245,158,11,0.4)]', textColor: 'group-hover:text-amber-400' },
+                        { id: 'race', label: 'RACE CAR', icon: '/icon/race_car.svg', accent: 'group-hover:border-cyan-500 group-hover:shadow-[0_0_20px_rgba(6,182,212,0.4)]', textColor: 'group-hover:text-cyan-400' },
+                        { id: 'museum', label: 'HERITAGE', icon: '/icon/heritage.svg', accent: 'group-hover:border-purple-500 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]', textColor: 'group-hover:text-purple-400' }
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => handleDealerMarketChoice(item.id as DealerMarketMode)}
+                          className={`group relative flex flex-col items-center gap-2.5 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 active:scale-95 ${!brandCrossFadeTarget && !marketCrossFadeTarget && !hasVisitedCategoryRef.current ? 'animate-brandPop' : ''}`}
+                        >
+                          {/* Circular icon token */}
+                          <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-950/80 border border-white/12 transition-all duration-300 ${item.accent}`}>
+                            <img
+                              src={item.icon}
+                              alt={item.label}
+                              className="h-8 w-8 filter invert opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
+                            />
+                          </div>
+                          {/* Label */}
+                          <span className={`text-xs font-black uppercase tracking-widest text-zinc-300 transition-colors duration-300 ${item.textColor}`}>
+                            {item.label}
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 );
@@ -2969,7 +3043,7 @@ export default function Garage({
                 );
               })()}
 
-              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode && dealerMarketMode !== 'museum' && dealerMarketCars.length > 0 && (() => {
+              {dealerPage === 'city' && dealerCityConfig && (dealerMarketMode || marketCrossFadeTarget || marketBackCrossFade) && (dealerMarketMode !== 'museum' && marketCrossFadeTarget !== 'museum') && dealerMarketCars.length > 0 && (() => {
                 const activeDealerCar = CARS_DATABASE.find((c) => c.id === dealerSelectedCarId) || dealerMarketCars[0];
                 const isCarUnlocked = purchasedCars.includes(activeDealerCar.id);
                 const isCarActive = activeCarId === activeDealerCar.id;
@@ -2977,14 +3051,16 @@ export default function Garage({
                 const isSuperLockedCar = activeDealerCar.requiresLicense && !hasLicense;
 
                 return (
-                  <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col animate-fadeIn">
+                  <div className={`pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col ${marketCrossFadeTarget ? 'animate-crossFadeIn' : marketBackCrossFade ? 'animate-crossFadeOut pointer-events-none' : 'animate-fadeIn'}`}>
                     {/* Bottom Specs & Action Bar */}
                     <div className="pointer-events-auto w-full border-t border-white/10 bg-gradient-to-r from-zinc-950/95 via-zinc-900/90 to-zinc-950/95 py-3.5 px-6 shadow-[0_-8px_32px_rgba(0,0,0,0.7)] backdrop-blur-2xl flex flex-col md:flex-row justify-between items-center gap-4 text-left">
                       {/* Left: Brand + Car Name + Price */}
                       <div className="flex items-center gap-3 text-left w-full md:w-auto">
-                        <span className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-[10px] font-black text-cyan-400 tracking-widest uppercase">
-                          {activeDealerCar.brand}
-                        </span>
+                        <BrandLogoDisplay
+                          brand={activeDealerCar.brand}
+                          className="h-6 max-w-[90px] object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]"
+                          textFallbackClass="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-[10px] font-black text-cyan-400 tracking-widest uppercase"
+                        />
                         <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-wider drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
                           {activeDealerCar.name}
                         </h2>

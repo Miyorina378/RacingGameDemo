@@ -29,6 +29,10 @@ interface MapEditorProps {
   setEditorHaveGrass: (b: boolean) => void;
   editorGrassWidth: number;
   setEditorGrassWidth: (w: number) => void;
+  editorHaveCurb: boolean;
+  setEditorHaveCurb: (b: boolean) => void;
+  editorHaveFence: boolean;
+  setEditorHaveFence: (b: boolean) => void;
   editorGridLimit: number;
   setEditorGridLimit: (l: number) => void;
   snapToGrid: number;
@@ -37,7 +41,7 @@ interface MapEditorProps {
   setLivePreview: (p: boolean) => void;
   
   // Handlers
-  saveCustomTrack: (nodes: any[], name: string, width: number, time: number, obstacles: boolean, gridLimit: number, grass?: boolean, grassWidth?: number, scenery?: any[]) => void;
+  saveCustomTrack: (nodes: any[], name: string, width: number, time: number, obstacles: boolean, gridLimit: number, grass?: boolean, grassWidth?: number, scenery?: any[], haveCurb?: boolean, haveFence?: boolean) => void;
   importTrack: (code: string) => void;
   handleClearAll: () => void;
   handleApplyTemplate: (type: 'oval' | 'scurve' | 'figure8') => void;
@@ -122,6 +126,55 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
   }
 };
 
+// Three-way per-side control: Auto (inherit the track-wide default), On, or Off.
+// value === undefined means Auto -- the underlying TrackNode field is left unset so
+// BaseMode falls back to the track default, exactly matching the tri-state here.
+function TriToggle({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: boolean | undefined;
+  onChange: (v: boolean | undefined) => void;
+}) {
+  const state = value === true ? 'on' : value === false ? 'off' : 'auto';
+  const stateClass = (s: 'auto' | 'on' | 'off') => {
+    if (state !== s) return 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300';
+    if (s === 'on') return 'bg-emerald-600 border-emerald-500 text-white';
+    if (s === 'off') return 'bg-red-950 border-red-700 text-red-200';
+    return 'bg-slate-700 border-slate-600 text-white';
+  };
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[10px] text-slate-400 font-semibold w-10 shrink-0">{label}</span>
+      <div className="flex gap-1 flex-1">
+        <button
+          type="button"
+          onClick={() => onChange(undefined)}
+          className={`flex-1 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wide transition-all cursor-pointer border ${stateClass('auto')}`}
+        >
+          Auto
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(true)}
+          className={`flex-1 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wide transition-all cursor-pointer border ${stateClass('on')}`}
+        >
+          On
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(false)}
+          className={`flex-1 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wide transition-all cursor-pointer border ${stateClass('off')}`}
+        >
+          Off
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function MapEditor({
   activeMode,
   editorNodes,
@@ -148,6 +201,10 @@ export default function MapEditor({
   setEditorHaveGrass,
   editorGrassWidth,
   setEditorGrassWidth,
+  editorHaveCurb,
+  setEditorHaveCurb,
+  editorHaveFence,
+  setEditorHaveFence,
   editorGridLimit,
   setEditorGridLimit,
   snapToGrid,
@@ -162,6 +219,16 @@ export default function MapEditor({
   exitToGarage,
 }: MapEditorProps) {
   if (activeMode !== 'editor') return null;
+
+  // Patches the selected node and persists it, mirroring the same save call every
+  // other editor control already makes after a change.
+  const updateSelectedNode = (patch: Record<string, unknown>) => {
+    if (selectedNodeIndex === null) return;
+    const newNodes = [...editorNodes];
+    newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], ...patch };
+    setEditorNodes(newNodes);
+    saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+  };
 
   return (
     <div className="absolute inset-0 pointer-events-none z-30 animate-fadeIn select-none">
@@ -199,13 +266,7 @@ export default function MapEditor({
                   max="35"
                   step="1"
                   value={editorNodes[selectedNodeIndex].y ?? 2}
-                  onChange={(e) => {
-                    const yVal = parseInt(e.target.value);
-                    const newNodes = [...editorNodes];
-                    newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], y: yVal };
-                    setEditorNodes(newNodes);
-                    saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                  }}
+                  onChange={(e) => updateSelectedNode({ y: parseInt(e.target.value) })}
                   className="w-full accent-purple-500 cursor-pointer"
                 />
 
@@ -219,15 +280,93 @@ export default function MapEditor({
                   max="45"
                   step="1"
                   value={editorNodes[selectedNodeIndex].banking ?? 0}
-                  onChange={(e) => {
-                    const bankVal = parseInt(e.target.value);
-                    const newNodes = [...editorNodes];
-                    newNodes[selectedNodeIndex] = { ...newNodes[selectedNodeIndex], banking: bankVal };
-                    setEditorNodes(newNodes);
-                    saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
-                  }}
+                  onChange={(e) => updateSelectedNode({ banking: parseInt(e.target.value) })}
                   className="w-full accent-purple-500 cursor-pointer"
                 />
+
+                <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase mt-3">
+                  <span>Node {selectedNodeIndex} Road Width</span>
+                  <span className="font-mono">{editorNodes[selectedNodeIndex].width ?? editorRoadWidth}m</span>
+                </div>
+                <input
+                  type="range"
+                  min="8"
+                  max="60"
+                  step="1"
+                  value={editorNodes[selectedNodeIndex].width ?? editorRoadWidth}
+                  onChange={(e) => updateSelectedNode({ width: parseInt(e.target.value) })}
+                  className="w-full accent-purple-500 cursor-pointer"
+                />
+                {editorNodes[selectedNodeIndex].width !== undefined && (
+                  <button
+                    onClick={() => updateSelectedNode({ width: undefined })}
+                    className="text-[9px] text-purple-400 hover:text-purple-300 cursor-pointer bg-transparent border-0 p-0"
+                  >
+                    Reset to track width ({editorRoadWidth}m)
+                  </button>
+                )}
+
+                <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
+                  <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Curb</div>
+                  <TriToggle
+                    label="Left"
+                    value={editorNodes[selectedNodeIndex].leftCurb}
+                    onChange={(v) => updateSelectedNode({ leftCurb: v })}
+                  />
+                  <TriToggle
+                    label="Right"
+                    value={editorNodes[selectedNodeIndex].rightCurb}
+                    onChange={(v) => updateSelectedNode({ rightCurb: v })}
+                  />
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
+                  <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Fence</div>
+                  <TriToggle
+                    label="Left"
+                    value={editorNodes[selectedNodeIndex].leftFence}
+                    onChange={(v) => updateSelectedNode({ leftFence: v })}
+                  />
+                  <TriToggle
+                    label="Right"
+                    value={editorNodes[selectedNodeIndex].rightFence}
+                    onChange={(v) => updateSelectedNode({ rightFence: v })}
+                  />
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-slate-900 space-y-2">
+                  <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Grass Width Override</div>
+                  {(['left', 'right'] as const).map((side) => {
+                    const key = side === 'left' ? 'leftGrassWidth' : 'rightGrassWidth';
+                    const node = editorNodes[selectedNodeIndex];
+                    const hasOverride = node[key] !== undefined;
+                    const value = hasOverride ? (node[key] as number) : editorGrassWidth;
+                    return (
+                      <div key={side} className="flex items-center gap-2">
+                        <label className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold w-20 shrink-0 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={hasOverride}
+                            onChange={(e) => updateSelectedNode({ [key]: e.target.checked ? editorGrassWidth : undefined })}
+                            className="w-3 h-3 accent-purple-500 cursor-pointer"
+                          />
+                          {side === 'left' ? 'Left' : 'Right'}
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="15"
+                          step="1"
+                          disabled={!hasOverride}
+                          value={value}
+                          onChange={(e) => updateSelectedNode({ [key]: parseInt(e.target.value) })}
+                          className="flex-1 accent-purple-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                        />
+                        <span className="text-[9px] font-mono text-purple-400 w-7 text-right shrink-0">{value}m</span>
+                      </div>
+                    );
+                  })}
+                </div>
 
                 <button
                   onClick={() => {
@@ -446,6 +585,38 @@ export default function MapEditor({
                 onChange={(e) => {
                   setEditorHasObstacles(e.target.checked);
                   saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, e.target.checked, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                }}
+                className="w-4 h-4 accent-purple-500 cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
+              <div className="flex flex-col">
+                <span className="text-[11px] font-bold text-slate-355">Default Curb</span>
+                <span className="text-[9px] text-slate-500">Applies unless a node overrides it</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={editorHaveCurb}
+                onChange={(e) => {
+                  setEditorHaveCurb(e.target.checked);
+                  saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery, e.target.checked);
+                }}
+                className="w-4 h-4 accent-purple-500 cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
+              <div className="flex flex-col">
+                <span className="text-[11px] font-bold text-slate-355">Default Fence</span>
+                <span className="text-[9px] text-slate-500">Applies unless a node overrides it</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={editorHaveFence}
+                onChange={(e) => {
+                  setEditorHaveFence(e.target.checked);
+                  saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery, editorHaveCurb, e.target.checked);
                 }}
                 className="w-4 h-4 accent-purple-500 cursor-pointer"
               />

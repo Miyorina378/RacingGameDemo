@@ -22,8 +22,8 @@
   --animate-fadeOut: fadeOut 0.7s ease-out forwards;
   --animate-dealerFadeIn: fadeIn 0.7s ease-out forwards;
   --animate-dealerBrandIn: fadeIn 1s linear forwards;
-  --animate-crossFadeIn: crossFadeIn 0.6s linear forwards;
-  --animate-crossFadeOut: crossFadeOut 0.6s linear forwards;
+  --animate-crossFadeIn: crossFadeIn 0.4s linear forwards;
+  --animate-crossFadeOut: crossFadeOut 0.4s linear forwards;
   --animate-dealerContentIn: dealerContentIn 0.7s ease-out forwards;
   --animate-dealerBlackIn: dealerBlackIn 0.7s ease-out forwards;
   --animate-dealerBlackOut: dealerBlackOut 0.7s ease-out forwards;

@@ -733,56 +733,46 @@ export class GameEngine {
       return;
     }
     if (this.activeMode === 'garage') {
-      if (this.tuningState !== 'closed' || (this as any).isQuickPlayCarSelect) {
-        this.camera.up.set(0, 1, 0);
+      this.camera.up.set(0, 1, 0);
 
-        // Calculate dynamic dimensions of the vehicle to position camera correctly
-        const box = new THREE.Box3().setFromObject(this.vehicle.mesh);
-        const size = box.getSize(new THREE.Vector3());
-        const carLength = size.z > 0.5 ? size.z : 4.8;
-        const carHeight = size.y > 0.5 ? size.y : 1.2;
+      // Calculate dynamic dimensions of the vehicle to position camera correctly
+      const box = new THREE.Box3().setFromObject(this.vehicle.mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const carLength = size.z > 0.5 ? size.z : 4.8;
+      const carHeight = size.y > 0.5 ? size.y : 1.2;
 
-        const aspect = this.camera.aspect;
-        let zoomFactor = 1.0;
-        if (aspect < 1) {
-          zoomFactor = Math.min(1.8, 1.0 / aspect);
-        }
-
-        // Initialize base tuning camera position / radius
-        if (!this.tuningRadiusInitialized || this.prevCarLength !== carLength) {
-          this.tuningRadius = (carLength * 0.75);
-          this.tuningTheta = 0; // Front view by default
-          this.tuningPhi = 0.15; // Slightly elevated front view
-          this.tuningRadiusInitialized = true;
-          this.prevCarLength = carLength;
-        }
-
-        const activeRadius = this.tuningRadius * zoomFactor;
-
-        if ((this as any).isQuickPlayCarSelect && !(this as any).isQuickPlayCarInteractable) {
-          this.tuningTheta = -Math.PI / 4;
-          this.tuningPhi = 1.25;
-        }
-
-        // Calculate position in spherical coordinates centered around (0, carHeight * 0.4, 0)
-        const targetX = Math.sin(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
-        const targetY = (carHeight * 0.4) + Math.sin(this.tuningPhi) * activeRadius;
-        const targetZ = Math.cos(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
-
-        this.camera.position.set(targetX, targetY, targetZ);
-        this.camera.lookAt(0, carHeight * 0.4, 0);
-      } else {
-        const orbitSpeed = 0.0003;
-        const orbitRadius = 9;
-        const time = Date.now() * orbitSpeed;
-
-        this.camera.position.set(
-          Math.sin(time) * orbitRadius,
-          4.0,
-          Math.cos(time) * orbitRadius
-        );
-        this.camera.lookAt(0, 0.9, 0);
+      const aspect = this.camera.aspect;
+      let zoomFactor = 1.0;
+      if (aspect < 1) {
+        zoomFactor = Math.min(1.8, 1.0 / aspect);
       }
+
+      // Initialize base tuning camera position / radius
+      if (!this.tuningRadiusInitialized || this.prevCarLength !== carLength) {
+        this.tuningRadius = (carLength * 1.4);
+        this.tuningTheta = 0; // Front view by default
+        this.tuningPhi = 0.2; // Slightly elevated front view
+        this.tuningRadiusInitialized = true;
+        this.prevCarLength = carLength;
+      }
+
+      const activeRadius = this.tuningRadius * zoomFactor;
+
+      if ((this as any).isQuickPlayCarSelect && !(this as any).isQuickPlayCarInteractable) {
+        this.tuningTheta = -Math.PI / 4;
+        this.tuningPhi = 1.25;
+      } else if (!this.isPointerDown && this.tuningState === 'closed') {
+        // Auto turntable spin when not dragging in main garage
+        this.tuningTheta += 0.25 * deltaTime;
+      }
+
+      // Calculate position in spherical coordinates centered around (0, carHeight * 0.4, 0)
+      const targetX = Math.sin(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
+      const targetY = (carHeight * 0.4) + Math.sin(this.tuningPhi) * activeRadius;
+      const targetZ = Math.cos(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
+
+      this.camera.position.set(targetX, targetY, targetZ);
+      this.camera.lookAt(0, carHeight * 0.4, 0);
     } else {
       if (this.cameraViewMode === 'driver') {
         this.vehicle.mesh.updateMatrixWorld(true);
@@ -845,7 +835,7 @@ export class GameEngine {
   }
 
   private handlePointerDown = (e: PointerEvent) => {
-    if (this.activeMode !== 'garage' || (this.tuningState === 'closed' && !(this as any).isQuickPlayCarInteractable)) return;
+    if (this.activeMode !== 'garage') return;
 
     // Only capture if the click target is the canvas itself, not UI elements on top
     if (e.target !== this.canvas) return;
@@ -865,7 +855,7 @@ export class GameEngine {
   };
 
   private handlePointerMove = (e: PointerEvent) => {
-    if (!this.isPointerDown || this.activeMode !== 'garage' || (this.tuningState === 'closed' && !(this as any).isQuickPlayCarInteractable)) return;
+    if (!this.isPointerDown || this.activeMode !== 'garage') return;
 
     const deltaX = e.clientX - this.prevPointerX;
     const deltaY = e.clientY - this.prevPointerY;
@@ -887,7 +877,7 @@ export class GameEngine {
   };
 
   private handleWheel = (e: WheelEvent) => {
-    if (this.activeMode !== 'garage' || (this.tuningState === 'closed' && !(this as any).isQuickPlayCarInteractable)) return;
+    if (this.activeMode !== 'garage') return;
 
     const rect = this.canvas.getBoundingClientRect();
     const x = e.clientX;

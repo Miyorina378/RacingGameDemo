@@ -322,7 +322,11 @@ export class SuspensionModel {
     const right = this.corners[rightCorner];
     const antiRollForce = (left.compression - right.compression) * antiRollRate;
 
-    left.normalLoad = Math.max(0, left.normalLoad - antiRollForce);
-    right.normalLoad = Math.max(0, right.normalLoad + antiRollForce);
+    // A roll bar twists between the two corners and pushes the more compressed
+    // (outside) wheel down while lifting the less compressed one, so it adds load
+    // to the compressed side. Stiffening one axle therefore raises that axle's
+    // lateral load transfer and pushes the balance toward the other end.
+    left.normalLoad = Math.max(0, left.normalLoad + antiRollForce);
+    right.normalLoad = Math.max(0, right.normalLoad - antiRollForce);
   }
 }

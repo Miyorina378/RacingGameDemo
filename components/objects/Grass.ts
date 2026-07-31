@@ -14,49 +14,52 @@ export function updateGrassInstability(vehicle: Vehicle, deltaTime: number): voi
   }
 }
 
+/**
+ * Uneven ground on grass unsettles the car sideways. This is a genuine
+ * acceleration applied to the velocity vector, so the tires resist it through the
+ * normal slip-angle path on the following step.
+ *
+ * The previous version multiplied its acceleration by `deltaTime * 60`, which made
+ * the peak roughly 9 m/s² — close to a full g of sideways shove — and described
+ * itself as "mild". 0.9 m/s² is the intended order of magnitude for a car crossing
+ * a rough verge.
+ */
 export function applyGrassLateralSlide(vehicle: Vehicle, deltaTime: number): void {
-  if (vehicle.grassInstability > 0 && Math.abs(vehicle.speed) > 4.2) {
-    // Apply a mild, oscillating lateral acceleration to simulate losing traction on bumpy grass
-    // Coefficient scaled up (0.55 vs 0.15) to compensate for m/s velocity being ~3.6× smaller than old km/h values
-    const lateralSlideAccel = Math.sin(performance.now() * 0.005) * 0.15 * vehicle.grassInstability;
+  if (vehicle.grassInstability <= 0 || Math.abs(vehicle.speed) <= 4.2) return;
 
-    // Apply as a lateral velocity impulse in the car's local right direction
-    const cosYaw = Math.cos(vehicle.yaw);
-    const sinYaw = Math.sin(vehicle.yaw);
+  // Driven from simulated time, not wall-clock, so the fixed physics step stays
+  // reproducible.
+  const lateralSlideAccel =
+    Math.sin(vehicle.physicsTime * 5.0) * 0.9 * vehicle.grassInstability;
 
-    // Right vector in world space: (cosYaw, 0, -sinYaw)
-    vehicle.velocityX += cosYaw * lateralSlideAccel * deltaTime * 60;
-    vehicle.velocityZ += -sinYaw * lateralSlideAccel * deltaTime * 60;
-  }
+  const cosYaw = Math.cos(vehicle.yaw);
+  const sinYaw = Math.sin(vehicle.yaw);
+
+  // Right vector in world space: (cosYaw, 0, -sinYaw)
+  vehicle.velocityX += cosYaw * lateralSlideAccel * deltaTime;
+  vehicle.velocityZ += -sinYaw * lateralSlideAccel * deltaTime;
 }
 
+/**
+ * Extra drag from thick grass, applied as a decay along the whole velocity vector.
+ *
+ * Two things were wrong before: the speed test read only the forward component, so
+ * a car sliding sideways across grass at 100 km/h with 20 km/h of forward speed was
+ * left completely alone; and the decay hard-floored at 60 km/h, meaning grass could
+ * not slow a car below that no matter how long it stayed off-line. Rolling
+ * resistance in Vehicle already scales with grassInstability, so this only needs to
+ * add the high-speed component.
+ */
 export function applyGrassSpeedReduction(vehicle: Vehicle, deltaTime: number): void {
-  if (vehicle.grassInstability > 0) {
-    const currentSpeed = Math.abs(vehicle.speed);
-    const speedLimit = 60 / 3.6; // 60 km/h in m/s (~16.67 m/s)
-    
-    if (currentSpeed > speedLimit) {
-      // Heavy speed reduction representing drag/resistance from thick grass
-      // Math.exp is frame-rate independent
-      const dampRate = 0.85; // Strong resistance, but not an instant stop like a brake
-      const decay = Math.exp(-dampRate * vehicle.grassInstability * deltaTime);
-      
-      // Calculate target speed after decay
-      let targetSpeed = currentSpeed * decay;
-      
-      // Do not decay below the 60 km/h limit
-      if (targetSpeed < speedLimit) {
-        targetSpeed = speedLimit;
-      }
-      
-      // Scale velocity vector to the target speed
-      const scale = targetSpeed / currentSpeed;
-      vehicle.velocityX *= scale;
-      vehicle.velocityZ *= scale;
-      
-      // Update the derived speed property so HUD and other physics systems see the reduced speed immediately
-      vehicle.speed = vehicle.velocityX * Math.sin(vehicle.yaw) + vehicle.velocityZ * Math.cos(vehicle.yaw);
-    }
-  }
-}
+  if (vehicle.grassInstability <= 0) return;
 
+  const groundSpeed = Math.hypot(vehicle.velocityX, vehicle.velocityZ);
+  const dragOnsetSpeed = 60 / 3.6; // ~16.67 m/s
+  if (groundSpeed <= dragOnsetSpeed) return;
+
+  const dampRate = 0.85;
+  const decay = Math.exp(-dampRate * vehicle.grassInstability * deltaTime);
+  const targetSpeed = Math.max(dragOnsetSpeed, groundSpeed * decay);
+
+  vehicle.scaleVelocity(targetSpeed / groundSpeed);
+}

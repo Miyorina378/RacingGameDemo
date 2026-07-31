@@ -10,9 +10,9 @@ This skill documents the pattern for achieving 100% smooth, simultaneous UI scre
 ## Core Design Principles
 
 1. **Simultaneous Parallel Cross-Fade**:
-   - Outgoing view fades out **opacity 1.0 → 0.0** over 0.6s (600ms) with linear easing.
-   - Incoming view fades in **opacity 0.0 → 1.0** over 0.6s (600ms) with linear easing at the exact same instant.
-   - Both views coexist in the DOM simultaneously during the 600ms transition.
+   - Outgoing view fades out **opacity 1.0 → 0.0** over 0.4s (400ms) with linear easing.
+   - Incoming view fades in **opacity 0.0 → 1.0** over 0.4s (400ms) with linear easing at the exact same instant.
+   - Both views coexist in the DOM simultaneously during the 400ms transition.
 
 2. **Zero Scale / Zero Zoom Motion**:
    - Avoid scale transforms (`scale-95`, `scale-105`, `scale-[2.0]`) during screen transitions to prevent disorienting zoom motions.
@@ -25,9 +25,9 @@ This skill documents the pattern for achieving 100% smooth, simultaneous UI scre
    - Avoid heavy radial vignette overlays (`rgba(9,9,11,0.85) 65%`) that obscure screen edges. Use light linear gradients instead.
 
 5. **Symmetrical Reverse Cross-Fade on Back Navigation**:
-   - When clicking the Back button, the active detail/dealer view runs `animate-crossFadeOut` (**opacity 1.0 → 0.0** over 0.6s).
-   - Simultaneously, the selection grid view mounts and runs `animate-crossFadeIn` (**opacity 0.0 → 1.0** over 0.6s).
-   - State (`setSelectedBrand('All')`) is finalized at 600ms when the reverse cross-fade finishes.
+   - When clicking the Back button, the active detail/dealer view runs `animate-crossFadeOut` (**opacity 1.0 → 0.0** over 0.4s).
+   - Simultaneously, the selection grid view mounts and runs `animate-crossFadeIn` (**opacity 0.0 → 1.0** over 0.4s).
+   - State (`setSelectedBrand('All')`) is finalized at 400ms when the reverse cross-fade finishes.
 
 ---
 
@@ -47,7 +47,7 @@ className={`... ${!brandCrossFadeTarget ? 'animate-brandPop' : ''}`}
 ## React State & Handler Implementation
 
 ```tsx
-// State to hold the target selection during the 600ms cross-fade
+// State to hold the target selection during the 400ms cross-fade
 const [brandCrossFadeTarget, setBrandCrossFadeTarget] = useState<string | null>(null);
 const dealerBrandTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -61,12 +61,12 @@ const handleBrandSelect = React.useCallback((brand: string) => {
     clearTimeout(dealerBrandTransitionTimeoutRef.current);
   }
 
-  // Finalize state update exactly when 600ms cross-fade completes
+  // Finalize state update exactly when 400ms cross-fade completes
   dealerBrandTransitionTimeoutRef.current = setTimeout(() => {
     setSelectedBrand(brand);
     setDealerMarketMode(null);
     setBrandCrossFadeTarget(null);
-  }, 600);
+  }, 400);
 }, [brandCrossFadeTarget, setSelectedBrand]);
 ```
 

@@ -60,6 +60,7 @@ export interface CarConfig {
   frontWeightDistribution?: number;
   dragCoefficient?: number;
   liftCoefficient?: number;
+  aeroBalanceFront?: number;  // fraction of total downforce on the front axle
   frontalArea?: number;
   tireGripFront?: number;
   tireGripRear?: number;

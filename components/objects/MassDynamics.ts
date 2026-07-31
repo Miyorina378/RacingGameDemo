@@ -96,8 +96,11 @@ export class MassDynamics {
         input.longitudinalAcceleration *
         properties.centerOfGravity.y) /
       wheelbase;
+    // Lateral load transfer opposes the lateral acceleration. Cornering toward the
+    // +right side unloads the right-hand (inside) tires and loads the left-hand
+    // (outside) tires, so the transfer carries the opposite sign to a_y.
     const lateralTransfer =
-      (properties.sprungMass *
+      -(properties.sprungMass *
         input.lateralAcceleration *
         properties.centerOfGravity.y) /
       trackWidth;

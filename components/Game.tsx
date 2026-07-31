@@ -64,6 +64,25 @@ import {
   loadLicenseProgress
 } from './config/LicenseDatabase';
 
+// Node shape used by the in-game track editor. Left/right curb, fence, and grass
+// width are per-node overrides: leave a field undefined to inherit the track-wide
+// default (editorHaveCurb/editorHaveFence/editorGrassWidth), or set it explicitly
+// to force that side on or off for just this node -- so a curb can sit on an
+// otherwise plain straight, independent of what the rest of the track does.
+type EditorTrackNode = {
+  x: number;
+  z: number;
+  y?: number;
+  width?: number;
+  banking?: number;
+  leftCurb?: boolean;
+  rightCurb?: boolean;
+  leftFence?: boolean;
+  rightFence?: boolean;
+  leftGrassWidth?: number;
+  rightGrassWidth?: number;
+};
+
 const RacingFlagsIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     {/* Flagpoles */}
@@ -996,7 +1015,7 @@ export default function Game() {
 
   // Custom Map Editor States
   const [livePreview, setLivePreview] = useState<boolean>(false);
-  const [editorNodes, setEditorNodes] = useState<{ x: number; z: number; y?: number; width?: number; banking?: number }[]>([]);
+  const [editorNodes, setEditorNodes] = useState<EditorTrackNode[]>([]);
   const [editorScenery, setEditorScenery] = useState<{ type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[]>([]);
   const [editorTool, setEditorTool] = useState<'node' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium'>('node');
   const [editorCornerHeight, setEditorCornerHeight] = useState<number>(2);
@@ -1008,6 +1027,11 @@ export default function Game() {
   const [editorHasObstacles, setEditorHasObstacles] = useState<boolean>(false);
   const [editorHaveGrass, setEditorHaveGrass] = useState<boolean>(true);
   const [editorGrassWidth, setEditorGrassWidth] = useState<number>(6);
+  // Track-wide defaults for curb/fence. Per-node leftCurb/rightCurb/leftFence/
+  // rightFence overrides win over these when set; nodes that don't set them
+  // inherit whichever of these is active.
+  const [editorHaveCurb, setEditorHaveCurb] = useState<boolean>(true);
+  const [editorHaveFence, setEditorHaveFence] = useState<boolean>(true);
   const [snapToGrid, setSnapToGrid] = useState<number>(10);
   const [draggedNodeIndex, setDraggedNodeIndex] = useState<number | null>(null);
   const [draggedSceneryIndex, setDraggedSceneryIndex] = useState<number | null>(null);
@@ -1066,6 +1090,8 @@ export default function Game() {
           if (parsed.hasObstacles !== undefined) setEditorHasObstacles(parsed.hasObstacles);
           if (parsed.HaveGrass !== undefined) setEditorHaveGrass(parsed.HaveGrass);
           if (parsed.GrassWidth !== undefined) setEditorGrassWidth(parsed.GrassWidth);
+          if (parsed.HaveCurb !== undefined) setEditorHaveCurb(parsed.HaveCurb);
+          if (parsed.HaveFence !== undefined) setEditorHaveFence(parsed.HaveFence);
           if (parsed.scenery) setEditorScenery(parsed.scenery);
         } catch (e) {
           console.error("Error loading custom track", e);
@@ -2141,7 +2167,7 @@ export default function Game() {
   };
 
   const saveCustomTrack = (
-    nodes: { x: number; z: number; y?: number; width?: number; banking?: number }[],
+    nodes: EditorTrackNode[],
     name: string,
     width: number,
     time: number,
@@ -2149,7 +2175,9 @@ export default function Game() {
     gridLimit: number,
     grass: boolean = editorHaveGrass,
     grassWidth: number = editorGrassWidth,
-    scenery: { type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium' | 'tree'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[] = editorScenery
+    scenery: { type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium' | 'tree'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[] = editorScenery,
+    haveCurb: boolean = editorHaveCurb,
+    haveFence: boolean = editorHaveFence
   ) => {
     if (typeof window !== 'undefined') {
       const trackData = {
@@ -2161,6 +2189,8 @@ export default function Game() {
         gridLimit,
         HaveGrass: grass,
         GrassWidth: grassWidth,
+        HaveCurb: haveCurb,
+        HaveFence: haveFence,
         scenery
       };
       localStorage.setItem('cyberdrive_custom_track', JSON.stringify(trackData));
@@ -2170,7 +2200,7 @@ export default function Game() {
   const importTrack = (text: string) => {
     try {
       const vectorRegex = /(?:THREE\.)?Vector3\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/gi;
-      const nodes: { x: number; z: number; y?: number; width?: number; banking?: number }[] = [];
+      const nodes: EditorTrackNode[] = [];
       let match;
       while ((match = vectorRegex.exec(text)) !== null) {
         nodes.push({
@@ -2245,7 +2275,9 @@ export default function Game() {
     obstacles = editorHasObstacles,
     grass = editorHaveGrass,
     grassW = editorGrassWidth,
-    scenery = editorScenery
+    scenery = editorScenery,
+    haveCurb = editorHaveCurb,
+    haveFence = editorHaveFence
   ) => {
     const customTrack: TrackConfig = {
       id: 'custom',
@@ -2256,7 +2288,20 @@ export default function Game() {
       hasObstacles: obstacles,
       requiresLicense: false,
       baseReward: 300,
-      path: nodes.map(n => ({ pos: new THREE.Vector3(n.x, n.y ?? 2, n.z), width: n.width ?? width, banking: n.banking ?? 0 })),
+      // Per-node curb/fence/grass fields are left undefined unless the editor set an
+      // explicit override, so they fall back to the track-wide HaveCurb/HaveFence/
+      // GrassWidth defaults below (see BaseMode.createRacetrackRoad).
+      path: nodes.map((n): TrackNode => ({
+        pos: new THREE.Vector3(n.x, n.y ?? 2, n.z),
+        width: n.width ?? width,
+        banking: n.banking ?? 0,
+        leftCurb: n.leftCurb,
+        rightCurb: n.rightCurb,
+        leftFence: n.leftFence,
+        rightFence: n.rightFence,
+        leftGrassWidth: n.leftGrassWidth,
+        rightGrassWidth: n.rightGrassWidth
+      })),
       scenery: scenery.map(s => ({
         type: s.type,
         position: new THREE.Vector3(s.x, 0, s.z),
@@ -2264,8 +2309,8 @@ export default function Game() {
         heightScale: s.heightScale,
         rotation: s.rotation
       })),
-      HaveCrub: true,
-      HaveFence: true,
+      HaveCrub: haveCurb,
+      HaveFence: haveFence,
       HaveGrass: grass,
       GrassWidth: grassW
     };
@@ -2361,7 +2406,7 @@ export default function Game() {
       syncCustomTrackToDatabase();
       engineRef.current.buildPreviewTrack('custom');
     }
-  }, [editorNodes, editorScenery, livePreview, activeMode, draggedNodeIndex, draggedSceneryIndex, editorRoadWidth, editorHaveGrass, editorGrassWidth, editorHasObstacles]);
+  }, [editorNodes, editorScenery, livePreview, activeMode, draggedNodeIndex, draggedSceneryIndex, editorRoadWidth, editorHaveGrass, editorGrassWidth, editorHasObstacles, editorHaveCurb, editorHaveFence]);
 
   // Escape key handler to toggle pause overlay
   useEffect(() => {
@@ -3101,6 +3146,10 @@ export default function Game() {
         setEditorHaveGrass={setEditorHaveGrass}
         editorGrassWidth={editorGrassWidth}
         setEditorGrassWidth={setEditorGrassWidth}
+        editorHaveCurb={editorHaveCurb}
+        setEditorHaveCurb={setEditorHaveCurb}
+        editorHaveFence={editorHaveFence}
+        setEditorHaveFence={setEditorHaveFence}
         editorGridLimit={editorGridLimit}
         setEditorGridLimit={setEditorGridLimit}
         snapToGrid={snapToGrid}

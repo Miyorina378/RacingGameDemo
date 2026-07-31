@@ -120,9 +120,19 @@ export function computeSlipAngle(lateralVel: number, forwardVel: number): number
   return Math.atan2(lateralVel, Math.abs(forwardVel));
 }
 
-export function computeSlipRatio(wheelSpeed: number, groundSpeed: number): number {
-  const maxSpeed = Math.max(Math.abs(wheelSpeed), Math.abs(groundSpeed), 0.5);
-  return (wheelSpeed - groundSpeed) / maxSpeed;
+/**
+ * Slip ratio normalized by ground speed, which is the standard definition. The
+ * reference floor keeps the value finite near standstill without capping it: a
+ * wheel spinning well past road speed must be able to report a slip ratio above
+ * 1.0 so the post-peak region of the curve is actually reachable during a burnout.
+ */
+export function computeSlipRatio(
+  wheelSpeed: number,
+  groundSpeed: number,
+  referenceSpeed: number = 2.0
+): number {
+  const denominator = Math.max(Math.abs(groundSpeed), referenceSpeed);
+  return (wheelSpeed - groundSpeed) / denominator;
 }
 
 /**
