@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GameEngine } from './gameEngine';
 import type { SuggestedGearAdvice } from './engine/SuggestedGearAdvisor';
+import type { EditorScenery, SceneryType, TimeOfDay } from './engine/types';
 import type { RaceDifficulty } from './modes/RaceMode';
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig, TrackNode, TrackScenery } from './config/TrackDatabase';
@@ -81,6 +82,8 @@ type EditorTrackNode = {
   rightFence?: boolean;
   leftGrassWidth?: number;
   rightGrassWidth?: number;
+  sharp?: boolean;
+  cornerRadius?: number;
 };
 
 const RacingFlagsIcon = ({ className }: { className?: string }) => (
@@ -1016,8 +1019,12 @@ export default function Game() {
   // Custom Map Editor States
   const [livePreview, setLivePreview] = useState<boolean>(false);
   const [editorNodes, setEditorNodes] = useState<EditorTrackNode[]>([]);
-  const [editorScenery, setEditorScenery] = useState<{ type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[]>([]);
-  const [editorTool, setEditorTool] = useState<'node' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium'>('node');
+  const [editorScenery, setEditorScenery] = useState<EditorScenery[]>([]);
+  const [editorTool, setEditorTool] = useState<'node' | SceneryType>('node');
+  const [editorTimeOfDay, setEditorTimeOfDay] = useState<TimeOfDay>('afternoon');
+  // Horizon distance for the track's fog: null follows the time-of-day default,
+  // 0 switches fog off, anything else is an explicit distance.
+  const [editorFogDistance, setEditorFogDistance] = useState<number | null>(null);
   const [editorCornerHeight, setEditorCornerHeight] = useState<number>(2);
   const [selectedNodeIndex, setSelectedNodeIndex] = useState<number | null>(null);
   const [selectedSceneryIndex, setSelectedSceneryIndex] = useState<number | null>(null);
@@ -1091,6 +1098,8 @@ export default function Game() {
           if (parsed.HaveGrass !== undefined) setEditorHaveGrass(parsed.HaveGrass);
           if (parsed.GrassWidth !== undefined) setEditorGrassWidth(parsed.GrassWidth);
           if (parsed.HaveCurb !== undefined) setEditorHaveCurb(parsed.HaveCurb);
+          if (parsed.time) setEditorTimeOfDay(parsed.time);
+          if (parsed.fogDistance !== undefined) setEditorFogDistance(parsed.fogDistance);
           if (parsed.HaveFence !== undefined) setEditorHaveFence(parsed.HaveFence);
           if (parsed.scenery) setEditorScenery(parsed.scenery);
         } catch (e) {
@@ -2175,7 +2184,7 @@ export default function Game() {
     gridLimit: number,
     grass: boolean = editorHaveGrass,
     grassWidth: number = editorGrassWidth,
-    scenery: { type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium' | 'tree'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[] = editorScenery,
+    scenery: EditorScenery[] = editorScenery,
     haveCurb: boolean = editorHaveCurb,
     haveFence: boolean = editorHaveFence
   ) => {
@@ -2191,7 +2200,9 @@ export default function Game() {
         GrassWidth: grassWidth,
         HaveCurb: haveCurb,
         HaveFence: haveFence,
-        scenery
+        scenery,
+        time: editorTimeOfDay,
+        fogDistance: editorFogDistance
       };
       localStorage.setItem('cyberdrive_custom_track', JSON.stringify(trackData));
     }
@@ -2300,7 +2311,9 @@ export default function Game() {
         leftFence: n.leftFence,
         rightFence: n.rightFence,
         leftGrassWidth: n.leftGrassWidth,
-        rightGrassWidth: n.rightGrassWidth
+        rightGrassWidth: n.rightGrassWidth,
+        sharp: n.sharp,
+        cornerRadius: n.cornerRadius
       })),
       scenery: scenery.map(s => ({
         type: s.type,
@@ -2312,7 +2325,10 @@ export default function Game() {
       HaveCrub: haveCurb,
       HaveFence: haveFence,
       HaveGrass: grass,
-      GrassWidth: grassW
+      GrassWidth: grassW,
+      time: editorTimeOfDay,
+      // null means "follow the time-of-day default", which is what omitting it does.
+      fogDistance: editorFogDistance ?? undefined
     };
 
     const existingIdx = TRACKS_DATABASE.findIndex(t => t.id === 'custom');
@@ -2322,6 +2338,46 @@ export default function Game() {
       TRACKS_DATABASE.push(customTrack);
     }
   };
+
+  // Persists whatever the 3D viewport changed. The editorState callbacks only push
+  // into React state, so before this nothing a user placed or dragged on the map
+  // survived a reload — only the side-panel controls ever called save. Time of day
+  // and fog also land here because they are not parameters of saveCustomTrack, so
+  // calling save straight from those controls would write the pre-flush value.
+  // Mid-drag updates are skipped so a drag writes once at the end, not per frame.
+  const editorHydrated = useRef(false);
+  useEffect(() => {
+    // Skip the very first run, or loading a saved track would immediately
+    // overwrite it with the defaults this component mounted with.
+    if (!editorHydrated.current) {
+      editorHydrated.current = true;
+      return;
+    }
+    if (activeMode !== 'editor') return;
+    if (draggedNodeIndex !== null || draggedSceneryIndex !== null) return;
+    saveCustomTrack(
+      editorNodes,
+      editorTrackName,
+      editorRoadWidth,
+      editorTimeLimit,
+      editorHasObstacles,
+      editorGridLimit,
+      editorHaveGrass,
+      editorGrassWidth,
+      editorScenery,
+      editorHaveCurb,
+      editorHaveFence
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    editorNodes,
+    editorScenery,
+    editorTimeOfDay,
+    editorFogDistance,
+    activeMode,
+    draggedNodeIndex,
+    draggedSceneryIndex
+  ]);
 
   const launchTestDrive = () => {
     if (editorNodes.length < 3) return;
@@ -2386,6 +2442,7 @@ export default function Game() {
     if (tool === 'mountain') return 1.0;
     if (tool === 'podium') return 1.0;
     if (tool === 'rock') return 2;
+    if (tool === 'building') return 2;
     return 1;
   };
 
@@ -2406,7 +2463,7 @@ export default function Game() {
       syncCustomTrackToDatabase();
       engineRef.current.buildPreviewTrack('custom');
     }
-  }, [editorNodes, editorScenery, livePreview, activeMode, draggedNodeIndex, draggedSceneryIndex, editorRoadWidth, editorHaveGrass, editorGrassWidth, editorHasObstacles, editorHaveCurb, editorHaveFence]);
+  }, [editorNodes, editorScenery, livePreview, activeMode, draggedNodeIndex, draggedSceneryIndex, editorRoadWidth, editorHaveGrass, editorGrassWidth, editorHasObstacles, editorHaveCurb, editorHaveFence, editorTimeOfDay, editorFogDistance]);
 
   // Escape key handler to toggle pause overlay
   useEffect(() => {
@@ -3150,6 +3207,10 @@ export default function Game() {
         setEditorHaveCurb={setEditorHaveCurb}
         editorHaveFence={editorHaveFence}
         setEditorHaveFence={setEditorHaveFence}
+        editorTimeOfDay={editorTimeOfDay}
+        setEditorTimeOfDay={setEditorTimeOfDay}
+        editorFogDistance={editorFogDistance}
+        setEditorFogDistance={setEditorFogDistance}
         editorGridLimit={editorGridLimit}
         setEditorGridLimit={setEditorGridLimit}
         snapToGrid={snapToGrid}

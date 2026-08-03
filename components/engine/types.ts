@@ -54,10 +54,37 @@ export interface EditorNode {
   y?: number;
   width?: number;
   banking?: number;
+  /** Break the smooth spline here so the two adjacent runs meet as a hard corner. */
+  sharp?: boolean;
+  /** How far back from the vertex the corner fillet starts. Only used when sharp. */
+  cornerRadius?: number;
 }
 
+/**
+ * Nodes closer together than this produce erratic spline tangents, which the road
+ * mesh can only compensate for by pinching its own width down (see the self-
+ * intersection scaling in BaseMode.createRacetrackRoad). Keeping a floor on the
+ * spacing is what stops that from happening in the first place.
+ */
+export const getMinNodeSpacing = (roadWidth: number) =>
+  Math.max(6, roadWidth * 0.75);
+
+/** Every placeable decoration. Declared once here; everything else imports it. */
+export type SceneryType =
+  | 'tree'
+  | 'tree1'
+  | 'tree2'
+  | 'tree3'
+  | 'rock'
+  | 'mountain'
+  | 'hill'
+  | 'podium'
+  | 'building';
+
+export type TimeOfDay = 'afternoon' | 'evening' | 'night';
+
 export interface EditorScenery {
-  type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium';
+  type: SceneryType;
   x: number;
   z: number;
   scale: number;

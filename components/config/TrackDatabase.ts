@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SceneryType, TimeOfDay } from '../engine/types';
 
 export interface TrackNode {
   pos: THREE.Vector3;
@@ -13,10 +14,12 @@ export interface TrackNode {
   fence?: boolean; // Override both fences at this node
   leftFence?: boolean;
   rightFence?: boolean;
+  sharp?: boolean; // Meet the neighbouring runs as a hard corner instead of a smooth spline
+  cornerRadius?: number; // Fillet setback from the vertex. Only used when sharp.
 }
 
 export interface TrackScenery {
-  type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium';
+  type: SceneryType;
   position: THREE.Vector3;
   scale?: number;
   heightScale?: number;
@@ -41,7 +44,12 @@ export interface TrackConfig {
   FenceType?: 'guardrail' | 'silverstone';
   HaveGrass?: boolean;
   GrassWidth?: number;
-  time?: 'afternoon' | 'evening' | 'night';
+  time?: TimeOfDay;
+  /**
+   * Distance at which the horizon fully fades into the sky colour. Omit for the
+   * per-time default; 0 switches fog off entirely.
+   */
+  fogDistance?: number;
 }
 
 export const TRACKS_DATABASE: TrackConfig[] = [

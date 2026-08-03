@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { TimeOfDay } from '../engine/types';
+import { DEFAULT_FOG_DISTANCE, SKY_COLOR } from '../modes/sceneryDecor';
 
 const SkyShader = {
   uniforms: {
@@ -227,9 +229,21 @@ export class Sky {
     this.scene.add(this.skyMesh);
   }
 
-  public updateTimeOfDay(time: 'afternoon' | 'evening' | 'night') {
-    // Disable standard scene fog completely
-    this.scene.fog = null;
+  /**
+   * @param fogDistance Horizon distance in world units. Omit for the per-time
+   *   default, or pass 0 to switch fog off.
+   */
+  public updateTimeOfDay(time: TimeOfDay, fogDistance?: number) {
+    const far = fogDistance ?? DEFAULT_FOG_DISTANCE[time] ?? DEFAULT_FOG_DISTANCE.afternoon;
+    if (far > 0) {
+      // Matching the sky colour is what makes the horizon dissolve instead of
+      // ending at a visible edge. The sky dome itself sets fog:false so it stays
+      // exempt and keeps its gradient.
+      const color = SKY_COLOR[time] ?? SKY_COLOR.afternoon;
+      this.scene.fog = new THREE.Fog(color, far * 0.25, far);
+    } else {
+      this.scene.fog = null;
+    }
 
     switch (time) {
       case 'afternoon':

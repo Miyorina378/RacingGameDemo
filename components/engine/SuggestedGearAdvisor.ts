@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { TrackConfig, TrackNode } from '../config/TrackDatabase';
+import { TrackConfig } from '../config/TrackDatabase';
 import { Vehicle } from '../objects/Vehicle';
+import { buildCenterline } from '../modes/centerline';
+import { resolveTrackNodes } from '../modes/trackNodes';
 
 export interface SuggestedGearAdvice {
   suggestedGear: number;
@@ -9,9 +11,6 @@ export interface SuggestedGearAdvice {
   severity: number;
   tooFast: boolean;
 }
-
-const isTrackVector = (point: THREE.Vector3 | TrackNode): point is THREE.Vector3 =>
-  point instanceof THREE.Vector3 || 'isVector3' in point;
 
 const flattenPoint = (point: THREE.Vector3) => new THREE.Vector3(point.x, 0, point.z);
 
@@ -26,16 +25,15 @@ export class SuggestedGearAdvisor {
 
     if (!config || config.path.length < 3) return;
 
-    const roadPoints = config.path.map((point) => {
-      const pos = isTrackVector(point) ? point : point.pos;
-      return new THREE.Vector3(pos.x, pos.y, pos.z);
+    // Must go through buildCenterline so the advice follows the same line the
+    // road mesh was built from, sharp corners included.
+    const resolvedNodes = resolveTrackNodes(config);
+    const { curve } = buildCenterline(resolvedNodes.map((n) => n.pos), resolvedNodes, {
+      curveType: config.curveType,
+      tension: config.tension,
+      roadWidth: config.roadWidth,
+      closed
     });
-    const curve = new THREE.CatmullRomCurve3(
-      roadPoints,
-      closed,
-      config.curveType || 'centripetal',
-      config.tension ?? 0.5
-    );
     const trackLength = Math.max(curve.getLength(), 1);
     const sampleCount = Math.max(80, Math.round(trackLength / 4));
     const samples = curve.getSpacedPoints(sampleCount);

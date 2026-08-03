@@ -7,6 +7,8 @@ import { TRACKS_DATABASE, TrackNode } from '../config/TrackDatabase';
 import { HUDConfig } from '../option';
 import { TIRE_COMPOUNDS, TireCompoundType } from '../objects/TireCompound';
 import type { SuggestedGearAdvice } from '../engine/SuggestedGearAdvisor';
+import { buildCenterline } from '../modes/centerline';
+import { resolveTrackNodes } from '../modes/trackNodes';
 
 const getTempColorClass = (temp: number, compoundId: string) => {
   const config = TIRE_COMPOUNDS[compoundId as TireCompoundType] || TIRE_COMPOUNDS.normal;
@@ -176,13 +178,17 @@ export default function HUD({
           drawRoad = true;
           const getPos = (pt: THREE.Vector3 | TrackNode) => 'isVector3' in pt ? pt : pt.pos;
           const pathPositions = activeTrack.path.map(pt => getPos(pt));
+          const resolvedNodes = resolveTrackNodes(activeTrack);
           const minimapCurve = pathPositions.length > 2
-            ? new THREE.CatmullRomCurve3(
-                pathPositions.map(pt => new THREE.Vector3(pt.x, 0, pt.z)),
-                true,
-                activeTrack.curveType || 'centripetal',
-                activeTrack.tension || 0.5
-              )
+            ? buildCenterline(
+                resolvedNodes.map(n => new THREE.Vector3(n.pos.x, 0, n.pos.z)),
+                resolvedNodes,
+                {
+                  curveType: activeTrack.curveType,
+                  tension: activeTrack.tension,
+                  roadWidth: activeTrack.roadWidth
+                }
+              ).curve
             : null;
           minimapPoints = minimapCurve
             ? minimapCurve.getSpacedPoints(Math.max(96, pathPositions.length * 16))

@@ -14,7 +14,7 @@ import { Sky } from './objects/Sky';
 import { PostProcessing } from './PostProcessing';
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
 import { KeyBindings, DEFAULT_KEY_BINDINGS } from './option';
-import { GameModeName, GameStatus } from './engine/types';
+import { EditorScenery, GameModeName, GameStatus } from './engine/types';
 import { InputController } from './engine/InputController';
 import { createThreeWorld } from './engine/threeWorld';
 import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
@@ -102,7 +102,7 @@ export class GameEngine {
   // Editor State
   public editorState = {
     nodes: [] as { x: number; z: number; y?: number; width?: number }[],
-    scenery: [] as { type: 'tree' | 'tree1' | 'tree2' | 'tree3' | 'rock' | 'mountain' | 'hill' | 'podium' | 'tree'; x: number; z: number; scale: number; heightScale?: number; rotation?: number }[],
+    scenery: [] as EditorScenery[],
     tool: 'node' as string,
     snapToGrid: 10,
     cornerHeight: 2,
@@ -311,8 +311,7 @@ export class GameEngine {
     if (!isLicenseTestUnlocked(testConfig, this.licenseProgress)) return;
 
     this.activeLicenseTestId = testConfig.id;
-    this.sky.updateTimeOfDay('afternoon');
-    if (testConfig.time) this.sky.updateTimeOfDay(testConfig.time);
+    this.sky.updateTimeOfDay(testConfig.time ?? 'afternoon', testConfig.fogDistance);
     this.suggestedGearAdvisor.setTrack(testConfig, true);
     this.changeMode('license', new LicenseMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, testConfig.id));
   }
@@ -320,11 +319,7 @@ export class GameEngine {
   public buildRaceTrack(trackId: string = 'sprint_circuit', options: RaceOptions = {}) {
     this.activeTrackId = trackId;
     const trackConfig = TRACKS_DATABASE.find(t => t.id === trackId);
-    if (trackConfig && trackConfig.time) {
-      this.sky.updateTimeOfDay(trackConfig.time);
-    } else {
-      this.sky.updateTimeOfDay('night');
-    }
+    this.sky.updateTimeOfDay(trackConfig?.time ?? 'night', trackConfig?.fogDistance);
     this.suggestedGearAdvisor.setTrack(trackConfig || null, true);
     // Set player vehicle driving mode
     this.vehicle.drivingMode = options.drivingMode ?? 'simulation';
@@ -341,11 +336,7 @@ export class GameEngine {
   public buildPreviewTrack(trackId: string = 'custom') {
     this.activeTrackId = trackId;
     const trackConfig = TRACKS_DATABASE.find(t => t.id === trackId);
-    if (trackConfig && trackConfig.time) {
-      this.sky.updateTimeOfDay(trackConfig.time);
-    } else {
-      this.sky.updateTimeOfDay('afternoon');
-    }
+    this.sky.updateTimeOfDay(trackConfig?.time ?? 'afternoon', trackConfig?.fogDistance);
     if (this.currentModeInstance instanceof PreviewMode) {
       PreviewMode.isRebuilding = true;
     }

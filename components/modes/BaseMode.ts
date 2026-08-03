@@ -1,5 +1,17 @@
 import * as THREE from 'three';
-import { TrackConfig, TrackNode, TrackScenery } from '../config/TrackDatabase';
+import { TrackConfig, TrackScenery } from '../config/TrackDatabase';
+import { buildCenterline } from './centerline';
+import { CURB_WIDTH, resolveTrackNodes } from './trackNodes';
+import {
+  InstanceVariation,
+  emissiveStrengthFor,
+  gradeColor,
+  getWindowTexture,
+  makeBuildingGeometry,
+  positionNoise,
+  variationAt
+} from './sceneryDecor';
+import { TimeOfDay } from '../engine/types';
 import { GameEngine } from '../gameEngine';
 import { Vehicle } from '../objects/Vehicle';
 import { ParticleSystem } from '../objects/ParticleSystem';
@@ -11,9 +23,6 @@ export interface GameMode {
   reset(): void;
   handleFuelTow(): void;
 }
-
-const isTrackVector = (point: THREE.Vector3 | TrackNode): point is THREE.Vector3 =>
-  point instanceof THREE.Vector3 || 'isVector3' in point;
 
 export abstract class BaseMode implements GameMode {
   protected engine: GameEngine;
@@ -41,7 +50,7 @@ export abstract class BaseMode implements GameMode {
   protected roadSampleLeftScale: number[] = [];
   protected roadSampleRightScale: number[] = [];
   protected roadWidth: number = 14;
-  protected curbWidth: number = 1.5;
+  protected curbWidth: number = CURB_WIDTH;
   protected curbHeight: number = 0.15;
   protected grassWidth: number = 5.0;
   protected haveGrass: boolean = false;
@@ -171,52 +180,11 @@ export abstract class BaseMode implements GameMode {
     this.grassWidth = config.GrassWidth ?? 5.0;
     this.haveCurb = config.HaveCrub ?? false;
 
-    const pathNodes = pathPointsRaw.map(p => {
-      if (isTrackVector(p)) {
-        const grassWidth = this.haveGrass ? this.grassWidth : 0;
-        return {
-          pos: p,
-          width: config.roadWidth,
-          banking: 0,
-          leftCurb: this.haveCurb,
-          rightCurb: this.haveCurb,
-          leftGrassWidth: grassWidth,
-          rightGrassWidth: grassWidth,
-          leftFence: this.haveFence,
-          rightFence: this.haveFence
-        };
-      }
-
-      const tn = p as TrackNode;
-      const bothCurb = tn.curb ?? this.haveCurb;
-      const bothGrassWidth =
-        tn.grassWidth ?? (this.haveGrass ? this.grassWidth : 0);
-      const bothFence = tn.fence ?? this.haveFence;
-
-      return {
-        pos: tn.pos,
-        width: tn.width ?? config.roadWidth,
-        banking: tn.banking ?? 0,
-        leftCurb: tn.leftCurb ?? bothCurb,
-        rightCurb: tn.rightCurb ?? bothCurb,
-        leftGrassWidth: Math.max(0, tn.leftGrassWidth ?? bothGrassWidth),
-        rightGrassWidth: Math.max(0, tn.rightGrassWidth ?? bothGrassWidth),
-        leftFence: tn.leftFence ?? bothFence,
-        rightFence: tn.rightFence ?? bothFence
-      };
-    });
+    const pathNodes = resolveTrackNodes(config);
 
     let maxTrackBoundary = config.roadWidth / 2;
     pathNodes.forEach((node) => {
-      maxTrackBoundary = Math.max(
-        maxTrackBoundary,
-        node.width / 2 +
-          (node.leftCurb ? this.curbWidth : 0) +
-          node.leftGrassWidth,
-        node.width / 2 +
-          (node.rightCurb ? this.curbWidth : 0) +
-          node.rightGrassWidth
-      );
+      maxTrackBoundary = Math.max(maxTrackBoundary, node.reach);
     });
     this.haveCurb = pathNodes.some((node) => node.leftCurb || node.rightCurb);
     this.haveGrass = pathNodes.some(
@@ -244,8 +212,15 @@ export abstract class BaseMode implements GameMode {
     // 1. Use actual node y height
     const roadPoints = pathNodes.map(p => new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z));
 
-    // 2. Create smooth closed loop curve
-    const curve = new THREE.CatmullRomCurve3(roadPoints, true, config.curveType || 'centripetal', config.tension || 0.5);
+    // 2. Create the closed loop centreline. Nodes flagged sharp break the spline
+    //    into straight runs joined by a fillet; without any, this is the same
+    //    Catmull-Rom curve it has always been.
+    const centerline = buildCenterline(roadPoints, pathNodes, {
+      curveType: config.curveType,
+      tension: config.tension,
+      roadWidth: config.roadWidth
+    });
+    const curve = centerline.curve;
 
     // 3. Generate sample points along the curve based on track length to keep segment size uniform
     const trackLength = curve.getLength();
@@ -266,8 +241,7 @@ export abstract class BaseMode implements GameMode {
     for (let i = 0; i < samplePoints.length; i++) {
         // Handle closed curve last point duplicating the first
         const u = i === samplePoints.length - 1 ? 1 : i / (samplePoints.length - 1);
-        const t = curve.getUtoTmapping(u, 0); // Need distance to t map
-        const exactIdx = t * roadPoints.length;
+        const exactIdx = centerline.nodeIndexAt(u); // Arc-length position in node-index space
         const idx0 = Math.floor(exactIdx) % roadPoints.length;
         const idx1 = (idx0 + 1) % roadPoints.length;
         const frac = exactIdx - Math.floor(exactIdx);
@@ -1835,19 +1809,44 @@ export abstract class BaseMode implements GameMode {
     };
   }
 
-  protected createScenery(scenery: TrackScenery[] | undefined) {
+  protected createScenery(scenery: TrackScenery[] | undefined, time: TimeOfDay = 'afternoon') {
     if (!scenery || scenery.length === 0) return;
 
+    // Base colours are authored for daylight; gradeColor pulls them toward the
+    // ambient light of the active time of day so night tracks stop rendering
+    // bright daytime foliage.
+    const tint = (hex: number) => gradeColor(hex, time);
+
     // Define materials
-    const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4d3319, roughness: 1.0 });
-    const coniferLeavesMat = new THREE.MeshStandardMaterial({ color: 0x2e8b57, roughness: 0.9, flatShading: true }); // tree1
-    const oakLeavesMat = new THREE.MeshStandardMaterial({ color: 0x1f663b, roughness: 0.9, flatShading: true }); // tree2
-    const palmLeavesMat = new THREE.MeshStandardMaterial({ color: 0x32cd32, roughness: 0.8, flatShading: true }); // tree3
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x7a7a7a, roughness: 0.9, flatShading: true });
-    const mountainMat = new THREE.MeshStandardMaterial({ color: 0x5a5a5a, roughness: 0.9, flatShading: true });
-    const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true });
-    const hillMat = new THREE.MeshStandardMaterial({ color: 0x3b7d3b, roughness: 0.9, flatShading: true });
-    
+    const treeTrunkMat = new THREE.MeshStandardMaterial({ color: tint(0x4d3319), roughness: 1.0 });
+    const coniferLeavesMat = new THREE.MeshStandardMaterial({ color: tint(0x2e8b57), roughness: 0.9, flatShading: true }); // tree1
+    const oakLeavesMat = new THREE.MeshStandardMaterial({ color: tint(0x1f663b), roughness: 0.9, flatShading: true }); // tree2
+    const palmLeavesMat = new THREE.MeshStandardMaterial({ color: tint(0x32cd32), roughness: 0.8, flatShading: true }); // tree3
+    const rockMat = new THREE.MeshStandardMaterial({ color: tint(0x7a7a7a), roughness: 0.9, flatShading: true });
+    const mountainMat = new THREE.MeshStandardMaterial({ color: tint(0x5a5a5a), roughness: 0.9, flatShading: true });
+    const snowMat = new THREE.MeshStandardMaterial({ color: tint(0xffffff), roughness: 0.9, flatShading: true });
+    const hillMat = new THREE.MeshStandardMaterial({ color: tint(0x3b7d3b), roughness: 0.9, flatShading: true });
+
+    // City block: one facade material shared by every tower, with a procedural
+    // window grid that carries its own glow so blocks read as lit at night.
+    const buildingFacadeMat = new THREE.MeshStandardMaterial({
+      color: tint(0x8a8f9c),
+      roughness: 0.75,
+      metalness: 0.15,
+      map: getWindowTexture(),
+      emissive: 0xffd08a,
+      emissiveMap: getWindowTexture(),
+      emissiveIntensity: emissiveStrengthFor(time)
+    });
+    const buildingRoofMat = new THREE.MeshStandardMaterial({ color: tint(0x3a3f4a), roughness: 0.9 });
+    const buildingTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x06b6d4,
+      emissive: 0x06b6d4,
+      emissiveIntensity: emissiveStrengthFor(time) * 1.6,
+      roughness: 0.4,
+      metalness: 0.6
+    });
+
     // Grandstand materials
     const standConcreteMat = new THREE.MeshStandardMaterial({ color: 0x2e3033, roughness: 0.8 });
     const standRoofMat = new THREE.MeshStandardMaterial({ color: 0xd946ef, metalness: 0.8, roughness: 0.2 });
@@ -1886,9 +1885,42 @@ export abstract class BaseMode implements GameMode {
     const postGeom = new THREE.CylinderGeometry(0.08, 0.08, 3.2);
     const seatOverlay1Geom = new THREE.BoxGeometry(7.8, 0.1, 0.5);
 
+    // Foliage colour is jittered per instance, but bucketed so a forest needs a
+    // handful of materials rather than one per tree.
+    const leafMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
+    const leafMaterialFor = (baseHex: number, variation: InstanceVariation) => {
+      const bucket = Math.floor(((variation.hueShift + 0.035) / 0.07) * 5);
+      const key = `${baseHex}:${bucket}`;
+      const cached = leafMaterialCache.get(key);
+      if (cached) return cached;
+      const mat = new THREE.MeshStandardMaterial({
+        color: gradeColor(baseHex, time, variation),
+        roughness: 0.9,
+        flatShading: true
+      });
+      leafMaterialCache.set(key, mat);
+      return mat;
+    };
+
     scenery.forEach((item, idx) => {
       const scale = item.scale || 1.0;
-      
+      // Deterministic jitter, so props vary but never shuffle between rebuilds.
+      const variation = variationAt(item.position.x, item.position.z);
+
+      /** Drops a prop in place with its lean, spin and size noise applied. */
+      const placeProp = (group: THREE.Object3D, strength = 1) => {
+        const xz = 1 + (variation.scaleXZ - 1) * strength;
+        const y = 1 + (variation.scaleY - 1) * strength;
+        group.position.copy(item.position);
+        group.scale.set(scale * xz, scale * y, scale * xz);
+        // An authored rotation always wins; otherwise spin it deterministically.
+        group.rotation.y = item.rotation ?? variation.rotation;
+        group.rotation.x = variation.tiltX * strength;
+        group.rotation.z = variation.tiltZ * strength;
+        group.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(group);
+      };
+
       if (item.type === 'tree' || item.type === 'tree1') {
         const treeGroup = new THREE.Group();
         
@@ -1897,18 +1929,11 @@ export abstract class BaseMode implements GameMode {
         trunk.castShadow = true;
         treeGroup.add(trunk);
         
-        const leaves = new THREE.Mesh(leavesGeom1, coniferLeavesMat);
+        const leaves = new THREE.Mesh(leavesGeom1, leafMaterialFor(0x2e8b57, variation));
         leaves.castShadow = true;
         treeGroup.add(leaves);
-        
-        treeGroup.position.copy(item.position);
-        treeGroup.scale.set(scale, scale, scale);
-        if (item.rotation) {
-          treeGroup.rotation.y = item.rotation;
-        }
-        
-        treeGroup.userData = { isScenery: true, sceneryIndex: idx };
-        this.environmentGroup.add(treeGroup);
+
+        placeProp(treeGroup);
       } else if (item.type === 'tree2') {
         const treeGroup = new THREE.Group();
         
@@ -1917,18 +1942,11 @@ export abstract class BaseMode implements GameMode {
         trunk.castShadow = true;
         treeGroup.add(trunk);
         
-        const leaves = new THREE.Mesh(leavesGeom2, oakLeavesMat);
+        const leaves = new THREE.Mesh(leavesGeom2, leafMaterialFor(0x1f663b, variation));
         leaves.castShadow = true;
         treeGroup.add(leaves);
-        
-        treeGroup.position.copy(item.position);
-        treeGroup.scale.set(scale, scale, scale);
-        if (item.rotation) {
-          treeGroup.rotation.y = item.rotation;
-        }
-        
-        treeGroup.userData = { isScenery: true, sceneryIndex: idx };
-        this.environmentGroup.add(treeGroup);
+
+        placeProp(treeGroup);
       } else if (item.type === 'tree3') {
         const palmGroup = new THREE.Group();
         
@@ -1938,38 +1956,27 @@ export abstract class BaseMode implements GameMode {
         palmGroup.add(trunk);
         
         // 6 palm leaves in a star pattern, slightly tilted
+        const palmLeafMat = leafMaterialFor(0x32cd32, variation);
         for (let i = 0; i < 6; i++) {
-          const leaf = new THREE.Mesh(palmLeafGeom, palmLeavesMat);
+          const leaf = new THREE.Mesh(palmLeafGeom, palmLeafMat);
           leaf.position.set(0, 6, 0);
           leaf.rotation.y = (i * Math.PI * 2) / 6;
-          leaf.rotation.x = 0.25; // Tilt downward
+          // Droop varies per frond so the crown is not perfectly symmetrical.
+          leaf.rotation.x = 0.25 + positionNoise(item.position.x, item.position.z + i, 8) * 0.22;
           leaf.castShadow = true;
           palmGroup.add(leaf);
         }
-        
-        palmGroup.position.copy(item.position);
-        palmGroup.scale.set(scale, scale, scale);
-        if (item.rotation) {
-          palmGroup.rotation.y = item.rotation;
-        }
-        
-        palmGroup.userData = { isScenery: true, sceneryIndex: idx };
-        this.environmentGroup.add(palmGroup);
+
+        placeProp(palmGroup);
       } else if (item.type === 'rock') {
         const rock = new THREE.Mesh(rockGeom, rockMat);
-        rock.position.copy(item.position);
-        // Slightly irregular scaling for organic feel
-        rock.scale.set(scale * 1.2, scale * 0.8, scale * 1.0);
-        // Deterministic rotation based on position
-        rock.rotation.y = (item.position.x * 0.05 + item.position.z * 0.03) % (Math.PI * 2);
-        rock.rotation.x = 0.1;
         rock.castShadow = true;
         rock.receiveShadow = true;
-        if (item.rotation) {
-          rock.rotation.y = item.rotation;
-        }
-        rock.userData = { isScenery: true, sceneryIndex: idx };
-        this.environmentGroup.add(rock);
+        // Squashed on Y so it reads as a boulder rather than a ball, then given
+        // the usual per-instance lean and spin on top.
+        placeProp(rock);
+        rock.scale.multiply(new THREE.Vector3(1.2, 0.8, 1.0));
+        rock.rotation.x += 0.1;
       } else if (item.type === 'mountain') {
         const mountainGroup = new THREE.Group();
         
@@ -2002,6 +2009,49 @@ export abstract class BaseMode implements GameMode {
         }
         hill.userData = { isScenery: true, sceneryIndex: idx };
         this.environmentGroup.add(hill);
+      } else if (item.type === 'building') {
+        const blockGroup = new THREE.Group();
+
+        // Footprint from scale, height from heightScale, both jittered a little
+        // so a row of blocks reads as a skyline rather than a fence.
+        const width = scale * 5 * (0.8 + positionNoise(item.position.x, item.position.z, 21) * 0.5);
+        const depth = scale * 5 * (0.8 + positionNoise(item.position.x, item.position.z, 22) * 0.5);
+        const height = (item.heightScale ?? scale * 2.5) * 5;
+
+        const towerGeom = makeBuildingGeometry(
+          width,
+          height,
+          depth,
+          positionNoise(item.position.x, item.position.z, 23)
+        );
+        // Face order is +X, -X, +Y, -Y, +Z, -Z: the four walls get the window
+        // facade, the top and bottom get plain roof.
+        const tower = new THREE.Mesh(towerGeom, [
+          buildingFacadeMat,
+          buildingFacadeMat,
+          buildingRoofMat,
+          buildingRoofMat,
+          buildingFacadeMat,
+          buildingFacadeMat
+        ]);
+        tower.position.y = height / 2;
+        tower.castShadow = true;
+        tower.receiveShadow = true;
+        blockGroup.add(tower);
+
+        // Neon crown, so blocks still read against a night sky.
+        const trimGeom = new THREE.BoxGeometry(width * 1.04, 0.4, depth * 1.04);
+        const trim = new THREE.Mesh(trimGeom, buildingTrimMat);
+        trim.position.y = height + 0.2;
+        blockGroup.add(trim);
+
+        blockGroup.position.copy(item.position);
+        // Buildings are man-made, so no lean and no size noise: only the yaw,
+        // snapped to 15 degrees so blocks still line up like a city grid.
+        blockGroup.rotation.y =
+          item.rotation ?? Math.round((variation.rotation / Math.PI) * 12) * (Math.PI / 12);
+        blockGroup.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(blockGroup);
       } else if (item.type === 'podium') {
         const standGroup = new THREE.Group();
         

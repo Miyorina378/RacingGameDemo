@@ -4,6 +4,7 @@ import { TRACKS_DATABASE, TrackScenery } from '../config/TrackDatabase';
 import { GameEngine } from '../gameEngine';
 import { Vehicle } from '../objects/Vehicle';
 import { ParticleSystem } from '../objects/ParticleSystem';
+import { getMinNodeSpacing } from '../engine/types';
 
 export class PreviewMode extends BaseMode {
   // Static state to preserve camera between track geometry rebuilds
@@ -77,12 +78,68 @@ export class PreviewMode extends BaseMode {
     return null;
   }
 
+  /**
+   * Distance from node `idx` to whichever loop neighbour is closest, or null when
+   * both are comfortably far. Only the neighbours in sequence order are measured:
+   * a track that legitimately crosses over itself (figure-8) has spatially close
+   * nodes that are far apart in the loop, and those are fine.
+   */
+  private neighbourGap(nodes: any[], idx: number, minSpacing: number): number | null {
+    const n = nodes.length;
+    let worst: number | null = null;
+    for (const offset of [-1, 1]) {
+      const other = nodes[(((idx + offset) % n) + n) % n];
+      if (!other || other === nodes[idx]) continue;
+      const dist = Math.hypot(nodes[idx].x - other.x, nodes[idx].z - other.z);
+      if (dist < minSpacing && (worst === null || dist < worst)) worst = dist;
+    }
+    return worst;
+  }
+
+  /**
+   * Pushes a dragged position back out to the minimum spacing from its loop
+   * neighbours. Clamping keeps the drag smooth, where rejecting it outright would
+   * make the node stick.
+   */
+  private clampToNeighbourSpacing(
+    nodes: any[],
+    idx: number,
+    x: number,
+    z: number,
+    minSpacing: number
+  ): { x: number; z: number } {
+    const n = nodes.length;
+    let outX = x;
+    let outZ = z;
+    // Two passes, so satisfying one neighbour cannot quietly violate the other.
+    for (let pass = 0; pass < 2; pass++) {
+      for (const offset of [-1, 1]) {
+        const other = nodes[(((idx + offset) % n) + n) % n];
+        if (!other || other === nodes[idx]) continue;
+        let dx = outX - other.x;
+        let dz = outZ - other.z;
+        let dist = Math.hypot(dx, dz);
+        if (dist >= minSpacing) continue;
+        if (dist < 1e-4) {
+          // Exactly on top of the neighbour, so any push-out direction will do.
+          dx = 1;
+          dz = 0;
+          dist = 1;
+        }
+        outX = other.x + (dx / dist) * minSpacing;
+        outZ = other.z + (dz / dist) * minSpacing;
+      }
+    }
+    return { x: outX, z: outZ };
+  }
+
   private getDefaultScale(tool: string): number {
     if (tool.startsWith('tree')) return 2;
     if (tool === 'hill') return 8;
     if (tool === 'mountain') return 1.0;
     if (tool === 'podium') return 1.0;
     if (tool === 'rock') return 2;
+    if (tool === 'building') return 2;
     return 1;
   }
 
@@ -201,7 +258,19 @@ export class PreviewMode extends BaseMode {
           const newNodes = [...state.nodes];
           const newNode = { x: finalX, z: finalZ, y: state.cornerHeight, width: state.roadWidth };
           newNodes.splice(insertIdx, 0, newNode);
-          
+
+          const minSpacing = getMinNodeSpacing(state.roadWidth);
+          const gap = this.neighbourGap(newNodes, insertIdx, minSpacing);
+          if (gap !== null) {
+            alert(
+              `Too close to the neighbouring node: ${gap.toFixed(1)}m apart, minimum is ${minSpacing.toFixed(1)}m.\n\n` +
+              `Nodes packed this tightly warp the road mesh. Place it further away, ` +
+              `or reduce the road width first.\n\n` +
+              `For a tight corner, use one node with Sharp Corner enabled instead of several close ones.`
+            );
+            return;
+          }
+
           state.onUpdateNodes?.(newNodes);
           state.onSelectNode?.(insertIdx);
         } else {
@@ -292,7 +361,14 @@ export class PreviewMode extends BaseMode {
     if (this.draggedNodeIdx !== null) {
       const newNodes = [...state.nodes];
       if (newNodes[this.draggedNodeIdx]) {
-        newNodes[this.draggedNodeIdx] = { ...newNodes[this.draggedNodeIdx], x: finalX, z: finalZ };
+        const clamped = this.clampToNeighbourSpacing(
+          newNodes,
+          this.draggedNodeIdx,
+          finalX,
+          finalZ,
+          getMinNodeSpacing(state.roadWidth)
+        );
+        newNodes[this.draggedNodeIdx] = { ...newNodes[this.draggedNodeIdx], x: clamped.x, z: clamped.z };
         state.onUpdateNodes?.(newNodes);
       }
     } else if (this.draggedSceneryIdx !== null) {
@@ -407,7 +483,7 @@ export class PreviewMode extends BaseMode {
     
     // Create visual road mesh with curbs and fences
     this.createRacetrackRoad(trackConfig);
-    this.createScenery(trackConfig.scenery);
+    this.createScenery(trackConfig.scenery, trackConfig.time);
 
     // Calculate center point of the track
     const path = trackConfig.path;

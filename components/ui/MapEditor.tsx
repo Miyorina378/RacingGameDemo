@@ -2,6 +2,9 @@
 
 import React from 'react';
 import { Copy, Play } from 'lucide-react';
+import { CURB_WIDTH } from '../modes/trackNodes';
+import { DEFAULT_FOG_DISTANCE } from '../modes/sceneryDecor';
+import type { TimeOfDay } from '../engine/types';
 
 interface MapEditorProps {
   activeMode: string;
@@ -33,6 +36,11 @@ interface MapEditorProps {
   setEditorHaveCurb: (b: boolean) => void;
   editorHaveFence: boolean;
   setEditorHaveFence: (b: boolean) => void;
+  editorTimeOfDay: TimeOfDay;
+  setEditorTimeOfDay: (t: TimeOfDay) => void;
+  /** null follows the time-of-day default, 0 is off, anything else is explicit. */
+  editorFogDistance: number | null;
+  setEditorFogDistance: (d: number | null) => void;
   editorGridLimit: number;
   setEditorGridLimit: (l: number) => void;
   snapToGrid: number;
@@ -101,6 +109,26 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
           <path d="M 24,8 L 6,38 L 42,38 Z" fill={isActive ? "#71717a" : "#3f3f46"} />
           <path d="M 24,8 L 18,18 L 24,16 L 30,18 Z" fill="#ffffff" />
           <path d="M 24,8 L 24,38" stroke="#18181b" strokeWidth="1.5" />
+        </svg>
+      );
+    case 'building':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="8" y="14" width="14" height="28" fill={isActive ? "#64748b" : "#475569"} />
+          <rect x="24" y="6" width="16" height="36" fill={isActive ? "#94a3b8" : "#64748b"} />
+          <rect x="24" y="4" width="16" height="2" fill="#06b6d4" />
+          {[18, 24, 30, 36].map((y) => (
+            <rect key={`l${y}`} x="11" y={y} width="3" height="4" fill="#ffd08a" />
+          ))}
+          {[18, 24, 30, 36].map((y) => (
+            <rect key={`r${y}`} x="16" y={y} width="3" height="4" fill="#3f4655" />
+          ))}
+          {[10, 16, 22, 28, 34].map((y) => (
+            <rect key={`a${y}`} x="27" y={y} width="4" height="4" fill="#ffd08a" />
+          ))}
+          {[10, 16, 22, 28, 34].map((y) => (
+            <rect key={`b${y}`} x="33" y={y} width="4" height="4" fill="#3f4655" />
+          ))}
         </svg>
       );
     case 'hill':
@@ -205,6 +233,10 @@ export default function MapEditor({
   setEditorHaveCurb,
   editorHaveFence,
   setEditorHaveFence,
+  editorTimeOfDay,
+  setEditorTimeOfDay,
+  editorFogDistance,
+  setEditorFogDistance,
   editorGridLimit,
   setEditorGridLimit,
   snapToGrid,
@@ -229,6 +261,22 @@ export default function MapEditor({
     setEditorNodes(newNodes);
     saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
   };
+
+  // Ballpark of what the engine's Auto radius works out to for this node, shown so
+  // a hand-set radius can be sanity checked. The engine sizes each corner from its
+  // real angle; this assumes a 90 degree bend, where the setback is
+  // CLEARANCE_MARGIN * reach * cos(45) / sin^2(45) == 1.7 * reach.
+  const selectedNode = selectedNodeIndex !== null ? editorNodes[selectedNodeIndex] : null;
+  const autoCornerRadiusEstimate = (() => {
+    if (!selectedNode) return 0;
+    const halfWidth = (selectedNode.width ?? editorRoadWidth) / 2;
+    const trackGrass = editorHaveGrass ? editorGrassWidth : 0;
+    const reach = Math.max(
+      halfWidth + ((selectedNode.leftCurb ?? editorHaveCurb) ? CURB_WIDTH : 0) + (selectedNode.leftGrassWidth ?? trackGrass),
+      halfWidth + ((selectedNode.rightCurb ?? editorHaveCurb) ? CURB_WIDTH : 0) + (selectedNode.rightGrassWidth ?? trackGrass)
+    );
+    return Math.round(reach * 1.7);
+  })();
 
   return (
     <div className="absolute inset-0 pointer-events-none z-30 animate-fadeIn select-none">
@@ -305,6 +353,65 @@ export default function MapEditor({
                     Reset to track width ({editorRoadWidth}m)
                   </button>
                 )}
+
+                <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-purple-400 tracking-wider uppercase cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!editorNodes[selectedNodeIndex].sharp}
+                      onChange={(e) =>
+                        updateSelectedNode({
+                          sharp: e.target.checked || undefined,
+                          cornerRadius: e.target.checked ? editorNodes[selectedNodeIndex].cornerRadius : undefined,
+                        })
+                      }
+                      className="w-3 h-3 accent-purple-500 cursor-pointer"
+                    />
+                    Sharp Corner
+                  </label>
+                  <p className="text-[9px] text-slate-500 leading-snug">
+                    Straightens the road either side of this node so they meet as a hard corner (L bends, chicanes) instead of one smooth curve.
+                  </p>
+
+                  {editorNodes[selectedNodeIndex].sharp && (
+                    <>
+                      <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase mt-2">
+                        <span>Corner Radius</span>
+                        <span className="font-mono">
+                          {editorNodes[selectedNodeIndex].cornerRadius !== undefined
+                            ? `${editorNodes[selectedNodeIndex].cornerRadius}m`
+                            : 'Auto'}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="200"
+                        step="1"
+                        value={editorNodes[selectedNodeIndex].cornerRadius ?? autoCornerRadiusEstimate}
+                        onChange={(e) => updateSelectedNode({ cornerRadius: parseInt(e.target.value) })}
+                        className="w-full accent-purple-500 cursor-pointer"
+                      />
+                      {editorNodes[selectedNodeIndex].cornerRadius === undefined ? (
+                        <p className="text-[9px] text-slate-500 leading-snug">
+                          Auto sizes each corner from its angle plus the road, curb and grass width, so turning grass or fences on opens the corner up instead of making the sides collide.
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-[9px] text-amber-500/80 leading-snug">
+                            Fixed radius. Anything under about {autoCornerRadiusEstimate}m here will pinch the inside edge once curb, grass and fence are added.
+                          </p>
+                          <button
+                            onClick={() => updateSelectedNode({ cornerRadius: undefined })}
+                            className="text-[9px] text-purple-400 hover:text-purple-300 cursor-pointer bg-transparent border-0 p-0"
+                          >
+                            Reset to auto
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
 
                 <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
                   <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Curb</div>
@@ -405,7 +512,9 @@ export default function MapEditor({
                   className="w-full accent-green-500 cursor-pointer mb-2"
                 />
 
-                {(editorScenery[selectedSceneryIndex].type === 'hill' || editorScenery[selectedSceneryIndex].type === 'mountain') && (
+                {(editorScenery[selectedSceneryIndex].type === 'hill' ||
+                  editorScenery[selectedSceneryIndex].type === 'mountain' ||
+                  editorScenery[selectedSceneryIndex].type === 'building') && (
                   <div className="mt-4 pt-2 border-t border-green-900/30">
                     <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
                       <span>Height Scale</span>
@@ -588,6 +697,61 @@ export default function MapEditor({
                 }}
                 className="w-4 h-4 accent-purple-500 cursor-pointer"
               />
+            </div>
+
+            <div className="mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl space-y-2.5">
+              <div className="flex flex-col">
+                <span className="text-[11px] font-bold text-slate-355">Time of Day</span>
+                <span className="text-[9px] text-slate-500">Drives the sky, the lighting and how scenery is tinted</span>
+              </div>
+              <div className="flex gap-1.5">
+                {(['afternoon', 'evening', 'night'] as const).map((option) => (
+                  <button
+                    key={option}
+                    onClick={() => setEditorTimeOfDay(option)}
+                    className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase border transition-all cursor-pointer ${
+                      editorTimeOfDay === option
+                        ? 'bg-purple-950/50 border-purple-500/80 text-purple-200'
+                        : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-2 border-t border-slate-900 space-y-1.5">
+                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                  <span>Fog Distance</span>
+                  <span className="text-purple-400 font-mono">
+                    {editorFogDistance === null
+                      ? `Auto (${DEFAULT_FOG_DISTANCE[editorTimeOfDay]}m)`
+                      : editorFogDistance === 0
+                        ? 'Off'
+                        : `${editorFogDistance}m`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1200"
+                  step="20"
+                  value={editorFogDistance ?? DEFAULT_FOG_DISTANCE[editorTimeOfDay]}
+                  onChange={(e) => setEditorFogDistance(parseInt(e.target.value))}
+                  className="w-full accent-purple-500 cursor-pointer"
+                />
+                <p className="text-[9px] text-slate-500 leading-snug">
+                  How far you can see before the world fades into the sky. Lower feels closer and hides the map edge; 0 turns fog off.
+                </p>
+                {editorFogDistance !== null && (
+                  <button
+                    onClick={() => setEditorFogDistance(null)}
+                    className="text-[9px] text-purple-400 hover:text-purple-300 cursor-pointer bg-transparent border-0 p-0"
+                  >
+                    Reset to auto
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center justify-between mt-4 bg-slate-950/40 border border-slate-800 p-2.5 rounded-xl">
@@ -806,6 +970,7 @@ export default function MapEditor({
               { id: 'mountain', name: 'Mountain' },
               { id: 'hill', name: 'Hill' },
               { id: 'podium', name: 'Grandstand' },
+              { id: 'building', name: 'City Block' },
             ].map((item) => {
               const isActive = editorTool === item.id;
               return (

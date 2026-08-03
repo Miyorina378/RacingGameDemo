@@ -8,6 +8,8 @@ import { RacingAI } from '../objects/RacingAI';
 import { CARS_DATABASE } from '../config/CarDatabase';
 import { GameEngine } from '../gameEngine';
 import { ParticleSystem } from '../objects/ParticleSystem';
+import { buildCenterline } from './centerline';
+import { resolveTrackNodes } from './trackNodes';
 import type { DrivingMode } from '../option';
 
 const isTrackVector = (point: THREE.Vector3 | TrackNode): point is THREE.Vector3 =>
@@ -153,9 +155,15 @@ export class RaceMode extends BaseMode {
     const forwardVec = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.startYaw).normalize();
     const rightVec = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.startYaw - Math.PI / 2).normalize();
 
-    // Generate smooth dense path for AI tracking
-    const roadPoints = pathVectors.map(p => new THREE.Vector3(p.x, 0.5, p.z));
-    const aiCurve = new THREE.CatmullRomCurve3(roadPoints, true);
+    // Generate dense path for AI tracking. This has to use the same centreline
+    // builder as the road mesh, or the AI drives off the outside of any sharp
+    // corner the road actually takes.
+    const resolvedNodes = resolveTrackNodes(trackConfig);
+    const aiCurve = buildCenterline(
+      resolvedNodes.map(n => new THREE.Vector3(n.pos.x, 0.5, n.pos.z)),
+      resolvedNodes,
+      { curveType: trackConfig.curveType, tension: trackConfig.tension, roadWidth: trackConfig.roadWidth }
+    ).curve;
     this.densePath = aiCurve.getSpacedPoints(250);
 
     const difficultyMultiplier = DIFFICULTY_SPEED_MULTIPLIER[this.difficulty] ?? DIFFICULTY_SPEED_MULTIPLIER.normal;
@@ -253,7 +261,7 @@ export class RaceMode extends BaseMode {
 
     // Create visual road mesh with curbs and fences
     this.createRacetrackRoad(trackConfig);
-    this.createScenery(trackConfig.scenery);
+    this.createScenery(trackConfig.scenery, trackConfig.time);
 
     // Sync guardrail, track info, and grass callbacks for all AI vehicles and their AI controllers
     const grassCallback = (x: number, z: number) => {

@@ -86,7 +86,7 @@ export class LicenseMode extends BaseMode {
 
     // Create visual road mesh with curbs and fences
     this.createRacetrackRoad(trackConfig);
-    this.createScenery(trackConfig.scenery);
+    this.createScenery(trackConfig.scenery, trackConfig.time);
 
     this.activeCheckpointIndex = 0;
     this.engine.callbacks.onCheckpointChange(0, this.checkpoints.length);
