@@ -62,7 +62,7 @@ export interface EngineCallbacks {
     tireWearEnabled?: boolean
   ) => void;
   onSuggestedGearChange?: (advice: SuggestedGearAdvice | null) => void;
-  onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
+  onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number, isWrongWay?: boolean, isCheat?: boolean) => void;
 }
 
 export class GameEngine {
@@ -105,6 +105,7 @@ export class GameEngine {
     scenery: [] as EditorScenery[],
     tool: 'node' as string,
     snapToGrid: 10,
+    sceneryFreeMove: true,
     cornerHeight: 2,
     selectedNodeIndex: null as number | null,
     selectedSceneryIndex: null as number | null,
@@ -639,7 +640,13 @@ export class GameEngine {
     if (this.activeMode === 'race' && this.currentModeInstance instanceof RaceMode) {
       const raceMode = this.currentModeInstance as RaceMode;
       if (this.callbacks.onRaceTimeUpdate) {
-        this.callbacks.onRaceTimeUpdate(raceMode.raceTime, raceMode.bestLapTime, raceMode.getCurrentLapTime());
+        this.callbacks.onRaceTimeUpdate(
+          raceMode.raceTime,
+          raceMode.bestLapTime,
+          raceMode.getCurrentLapTime(),
+          raceMode.isWrongWay,
+          raceMode.isCheat
+        );
       }
     }
 

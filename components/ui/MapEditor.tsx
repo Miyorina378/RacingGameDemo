@@ -45,6 +45,8 @@ interface MapEditorProps {
   setEditorGridLimit: (l: number) => void;
   snapToGrid: number;
   setSnapToGrid: (g: number) => void;
+  sceneryFreeMove: boolean;
+  setSceneryFreeMove: (b: boolean) => void;
   livePreview: boolean;
   setLivePreview: (p: boolean) => void;
   
@@ -56,6 +58,23 @@ interface MapEditorProps {
   launchTestDrive: () => void;
   exitToGarage: () => void;
 }
+
+/** Silhouette choices per decoration type. Undefined means pick one from position. */
+const STYLE_OPTIONS: Partial<Record<string, { v: number | undefined; label: string }[]>> = {
+  building: [
+    { v: undefined, label: 'Auto' },
+    { v: 0, label: 'Tower' },
+    { v: 1, label: 'Setback' },
+    { v: 2, label: 'Podium' },
+    { v: 3, label: 'Slab' }
+  ],
+  house: [
+    { v: undefined, label: 'Auto' },
+    { v: 0, label: 'Gable' },
+    { v: 1, label: 'Hip' },
+    { v: 2, label: 'Flat Roof' }
+  ]
+};
 
 const renderToolIcon = (tool: string, isActive: boolean) => {
   switch (tool) {
@@ -109,6 +128,34 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
           <path d="M 24,8 L 6,38 L 42,38 Z" fill={isActive ? "#71717a" : "#3f3f46"} />
           <path d="M 24,8 L 18,18 L 24,16 L 30,18 Z" fill="#ffffff" />
           <path d="M 24,8 L 24,38" stroke="#18181b" strokeWidth="1.5" />
+        </svg>
+      );
+    case 'house':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="12" y="24" width="24" height="18" fill={isActive ? "#e0d5c4" : "#b8ab98"} />
+          <path d="M 8,25 L 24,11 L 40,25 Z" fill={isActive ? "#b0553f" : "#8c4a3a"} />
+          <rect x="30" y="12" width="4" height="8" fill="#6b5b4a" />
+          <rect x="21" y="32" width="6" height="10" fill="#6b5b4a" />
+          <rect x="15" y="28" width="4" height="4" fill="#ffc978" />
+          <rect x="29" y="28" width="4" height="4" fill="#ffc978" />
+        </svg>
+      );
+    case 'construction':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="10" y="34" width="20" height="3" fill={isActive ? "#b5b2aa" : "#8d8a83"} />
+          <rect x="10" y="26" width="20" height="3" fill={isActive ? "#b5b2aa" : "#8d8a83"} />
+          <rect x="10" y="18" width="20" height="3" fill={isActive ? "#b5b2aa" : "#8d8a83"} />
+          <rect x="11" y="18" width="2.5" height="24" fill="#9a978f" />
+          <rect x="26.5" y="18" width="2.5" height="24" fill="#9a978f" />
+          <rect x="18" y="18" width="2.5" height="24" fill="#9a978f" />
+          <rect x="34" y="8" width="3" height="34" fill="#e0a021" />
+          <rect x="22" y="8" width="18" height="2.5" fill="#e0a021" />
+          <rect x="20" y="8" width="3" height="4" fill="#9a978f" />
+          {[15, 19, 23].map((x) => (
+            <rect key={x} x={x} y="14" width="1.5" height="4" fill="#6e6257" />
+          ))}
         </svg>
       );
     case 'building':
@@ -241,6 +288,8 @@ export default function MapEditor({
   setEditorGridLimit,
   snapToGrid,
   setSnapToGrid,
+  sceneryFreeMove,
+  setSceneryFreeMove,
   livePreview,
   setLivePreview,
   saveCustomTrack,
@@ -277,6 +326,15 @@ export default function MapEditor({
     );
     return Math.round(reach * 1.7);
   })();
+
+  // Patches the selected decoration and persists it, mirroring updateSelectedNode.
+  const updateSelectedScenery = (patch: Record<string, unknown>) => {
+    if (selectedSceneryIndex === null) return;
+    const newScenery = [...editorScenery];
+    newScenery[selectedSceneryIndex] = { ...newScenery[selectedSceneryIndex], ...patch };
+    setEditorScenery(newScenery);
+    saveCustomTrack(editorNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, newScenery);
+  };
 
   return (
     <div className="absolute inset-0 pointer-events-none z-30 animate-fadeIn select-none">
@@ -492,7 +550,33 @@ export default function MapEditor({
             {/* Selected Scenery Properties */}
             {selectedSceneryIndex !== null && editorScenery[selectedSceneryIndex] && (
               <div className="space-y-1.5 p-3 bg-slate-950/50 border border-green-500/30 rounded-xl mb-4">
-                <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
+                <div className="text-[10px] font-bold text-green-400 tracking-wider uppercase">Position</div>
+                <div className="flex gap-1.5">
+                  {(['x', 'z', 'y'] as const).map((axis) => (
+                    <label key={axis} className="flex-1 flex flex-col gap-0.5">
+                      <span className="text-[9px] text-slate-500 font-semibold uppercase">
+                        {axis === 'y' ? 'elev' : axis}
+                      </span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={Number(
+                          (editorScenery[selectedSceneryIndex][axis] ?? 0).toFixed(2)
+                        )}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          updateSelectedScenery({ [axis]: Number.isFinite(v) ? v : 0 });
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-1 text-[10px] font-mono text-green-300 focus:border-green-600 outline-none"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[9px] text-slate-500 leading-snug">
+                  Drag in the 3D view for rough placement, then nudge here. Elevation lifts it off the ground.
+                </p>
+
+                <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase mt-3 pt-3 border-t border-green-900/30">
                   <span>{editorScenery[selectedSceneryIndex].type} Scale</span>
                   <span className="font-mono">{editorScenery[selectedSceneryIndex].scale}x</span>
                 </div>
@@ -512,9 +596,9 @@ export default function MapEditor({
                   className="w-full accent-green-500 cursor-pointer mb-2"
                 />
 
-                {(editorScenery[selectedSceneryIndex].type === 'hill' ||
-                  editorScenery[selectedSceneryIndex].type === 'mountain' ||
-                  editorScenery[selectedSceneryIndex].type === 'building') && (
+                {(['hill', 'mountain', 'building', 'house', 'construction'] as const).includes(
+                  editorScenery[selectedSceneryIndex].type
+                ) && (
                   <div className="mt-4 pt-2 border-t border-green-900/30">
                     <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
                       <span>Height Scale</span>
@@ -535,6 +619,56 @@ export default function MapEditor({
                       }}
                       className="w-full accent-green-500 cursor-pointer"
                     />
+                  </div>
+                )}
+
+                {STYLE_OPTIONS[editorScenery[selectedSceneryIndex].type] && (
+                  <div className="mt-4 pt-2 border-t border-green-900/30 space-y-1.5">
+                    <div className="text-[10px] font-bold text-green-400 tracking-wider uppercase">
+                      {editorScenery[selectedSceneryIndex].type === 'house' ? 'Roof Style' : 'Block Style'}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {STYLE_OPTIONS[editorScenery[selectedSceneryIndex].type]!.map((option) => (
+                        <button
+                          key={option.label}
+                          onClick={() => updateSelectedScenery({ variant: option.v })}
+                          className={`py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase border transition-all cursor-pointer ${
+                            editorScenery[selectedSceneryIndex].variant === option.v
+                              ? 'bg-emerald-950/50 border-emerald-500/80 text-emerald-200'
+                              : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(['building', 'house', 'construction'] as const).includes(
+                  editorScenery[selectedSceneryIndex].type
+                ) && (
+                  <div className="mt-4 pt-2 border-t border-green-900/30 space-y-1.5">
+                    <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
+                      <span>Footprint Depth</span>
+                      <span className="font-mono">
+                        {editorScenery[selectedSceneryIndex].depthScale !== undefined
+                          ? `${editorScenery[selectedSceneryIndex].depthScale}x`
+                          : 'Auto'}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.3"
+                      max="3"
+                      step="0.1"
+                      value={editorScenery[selectedSceneryIndex].depthScale ?? 1}
+                      onChange={(e) => updateSelectedScenery({ depthScale: parseFloat(e.target.value) })}
+                      className="w-full accent-green-500 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-slate-500 leading-snug">
+                      Depth relative to width. Low values make a thin street-front block.
+                    </p>
                   </div>
                 )}
 
@@ -606,6 +740,18 @@ export default function MapEditor({
                 <option value={10}>10m Grid</option>
                 <option value={20}>20m Grid</option>
               </select>
+              <label className="flex items-center gap-2 text-[10px] text-slate-400 font-semibold cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={sceneryFreeMove}
+                  onChange={(e) => setSceneryFreeMove(e.target.checked)}
+                  className="w-3 h-3 accent-emerald-500 cursor-pointer"
+                />
+                Decoration ignores the grid
+              </label>
+              <p className="text-[9px] text-slate-500 leading-snug">
+                Lets scenery sit anywhere while track nodes keep snapping, since the road geometry needs tidy spacing.
+              </p>
             </div>
 
             <div className="space-y-1.5 mt-4">
@@ -971,6 +1117,8 @@ export default function MapEditor({
               { id: 'hill', name: 'Hill' },
               { id: 'podium', name: 'Grandstand' },
               { id: 'building', name: 'City Block' },
+              { id: 'house', name: 'House' },
+              { id: 'construction', name: 'Construction' },
             ].map((item) => {
               const isActive = editorTool === item.id;
               return (

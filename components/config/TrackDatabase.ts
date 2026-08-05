@@ -23,7 +23,9 @@ export interface TrackScenery {
   position: THREE.Vector3;
   scale?: number;
   heightScale?: number;
+  depthScale?: number;
   rotation?: number;
+  variant?: number;
 }
 
 export interface TrackConfig {

@@ -576,6 +576,8 @@ export default function Game() {
   const [totalRaceTime, setTotalRaceTime] = useState<number>(0);
   const [bestLapTime, setBestLapTime] = useState<number>(Infinity);
   const [currentLapTime, setCurrentLapTime] = useState<number>(0);
+  const [isWrongWay, setIsWrongWay] = useState<boolean>(false);
+  const [isCheat, setIsCheat] = useState<boolean>(false);
   const [checkpointIndex, setCheckpointIndex] = useState<number>(0);
   const [totalCheckpoints, setTotalCheckpoints] = useState<number>(0);
   const [placement, setPlacement] = useState<number>(1);
@@ -1040,6 +1042,8 @@ export default function Game() {
   const [editorHaveCurb, setEditorHaveCurb] = useState<boolean>(true);
   const [editorHaveFence, setEditorHaveFence] = useState<boolean>(true);
   const [snapToGrid, setSnapToGrid] = useState<number>(10);
+  // Decoration is placed by eye, so it defaults to ignoring the track grid.
+  const [sceneryFreeMove, setSceneryFreeMove] = useState<boolean>(true);
   const [draggedNodeIndex, setDraggedNodeIndex] = useState<number | null>(null);
   const [draggedSceneryIndex, setDraggedSceneryIndex] = useState<number | null>(null);
   const [editorGridLimit, setEditorGridLimit] = useState<number>(250);
@@ -1366,10 +1370,12 @@ export default function Game() {
         localStorage.setItem('cyberdrive_credits', credits.toString());
       },
       onTimerChange: (secs: number) => setTimeRemaining(secs),
-      onRaceTimeUpdate: (totalTime: number, bestLap: number, currentLap: number) => {
+      onRaceTimeUpdate: (totalTime: number, bestLap: number, currentLap: number, wrongWay?: boolean, cheat?: boolean) => {
         setTotalRaceTime(totalTime);
         setBestLapTime(bestLap);
         setCurrentLapTime(currentLap);
+        setIsWrongWay(!!wrongWay);
+        setIsCheat(!!cheat);
       },
       onCheckpointChange: (current: number, total: number) => {
         setCheckpointIndex(current);
@@ -2317,10 +2323,12 @@ export default function Game() {
       })),
       scenery: scenery.map(s => ({
         type: s.type,
-        position: new THREE.Vector3(s.x, 0, s.z),
+        position: new THREE.Vector3(s.x, s.y ?? 0, s.z),
         scale: s.scale,
         heightScale: s.heightScale,
-        rotation: s.rotation
+        depthScale: s.depthScale,
+        rotation: s.rotation,
+        variant: s.variant
       })),
       HaveCrub: haveCurb,
       HaveFence: haveFence,
@@ -2443,6 +2451,8 @@ export default function Game() {
     if (tool === 'podium') return 1.0;
     if (tool === 'rock') return 2;
     if (tool === 'building') return 2;
+    if (tool === 'house') return 1.5;
+    if (tool === 'construction') return 2;
     return 1;
   };
 
@@ -2545,13 +2555,14 @@ export default function Game() {
       engineRef.current.editorState.scenery = editorScenery;
       engineRef.current.editorState.tool = editorTool;
       engineRef.current.editorState.snapToGrid = snapToGrid;
+      engineRef.current.editorState.sceneryFreeMove = sceneryFreeMove;
       engineRef.current.editorState.cornerHeight = editorCornerHeight;
       engineRef.current.editorState.selectedNodeIndex = selectedNodeIndex;
       engineRef.current.editorState.selectedSceneryIndex = selectedSceneryIndex;
       engineRef.current.editorState.roadWidth = editorRoadWidth;
       engineRef.current.editorState.activeMode = activeMode;
     }
-  }, [editorNodes, editorScenery, editorTool, snapToGrid, editorCornerHeight, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, activeMode]);
+  }, [editorNodes, editorScenery, editorTool, snapToGrid, sceneryFreeMove, editorCornerHeight, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, activeMode]);
 
   // Automatically start 3D preview mode when entering editor
   useEffect(() => {
@@ -2727,6 +2738,8 @@ export default function Game() {
         placementShift={placementShift}
         totalRaceTime={totalRaceTime}
         bestLapTime={bestLapTime}
+        isWrongWay={isWrongWay}
+        isCheat={isCheat}
         tutorialStep={tutorialStep}
         driftScore={driftScore}
         driftMultiplier={driftMultiplier}
@@ -3214,6 +3227,8 @@ export default function Game() {
         editorGridLimit={editorGridLimit}
         setEditorGridLimit={setEditorGridLimit}
         snapToGrid={snapToGrid}
+        sceneryFreeMove={sceneryFreeMove}
+        setSceneryFreeMove={setSceneryFreeMove}
         setSnapToGrid={setSnapToGrid}
         livePreview={livePreview}
         setLivePreview={setLivePreview}

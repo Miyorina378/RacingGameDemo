@@ -34,6 +34,8 @@ interface HUDProps {
   placementShift: 'up' | 'down' | null;
   totalRaceTime: number;
   bestLapTime: number;
+  isWrongWay?: boolean;
+  isCheat?: boolean;
   tutorialStep: number;
   driftScore: number;
   driftMultiplier: number;
@@ -112,6 +114,8 @@ export default function HUD({
   placementShift,
   totalRaceTime,
   bestLapTime,
+  isWrongWay = false,
+  isCheat = false,
   tutorialStep,
   driftScore,
   driftMultiplier,
@@ -326,8 +330,8 @@ export default function HUD({
 
         {/* Current Lap Timer (for Race mode) */}
         {activeMode === 'race' && (gameStatus === 'playing' || gameStatus === 'success') && hudConfig.showLapTimer && (
-          <div className="bg-slate-950/80 border border-slate-800 backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[120px]">
-            <span className="text-slate-400 text-[9px] font-extrabold uppercase tracking-widest text-slate-500 mb-0.5">
+          <div className="bg-slate-950/80 border border-slate-800 backdrop-blur-md px-6 py-2.5 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center min-w-[140px]">
+            <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 mb-0.5">
               LAP TIMER
             </span>
             <span className="text-3xl font-black font-mono tracking-wider text-white">
@@ -336,6 +340,15 @@ export default function HUD({
           </div>
         )}
       </div>
+
+      {/* WRONG WAY Warning Overlay */}
+      {activeMode === 'race' && gameStatus === 'playing' && isWrongWay && (
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 pointer-events-none z-30 animate-bounce">
+          <div className="bg-rose-600/90 border-2 border-white/80 text-white font-black text-2xl px-8 py-3 rounded-2xl shadow-[0_0_40px_rgba(225,29,72,0.8)] tracking-widest uppercase flex items-center gap-3">
+            <span>⚠️ WRONG WAY! ⚠️</span>
+          </div>
+        </div>
+      )}
 
       {/* TOP HEADER: Credits & HUD values */}
       <div className="absolute top-6 inset-x-6 flex items-start justify-between pointer-events-none z-10">
@@ -611,17 +624,28 @@ export default function HUD({
                   <span className="text-zinc-500 text-[8px] font-extrabold uppercase tracking-widest leading-none">
                     VEHICLE SYSTEMS
                   </span>
-                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider leading-none ${
-                    tireCompound === 'soft' || tireCompound === 'super_soft'
-                      ? 'bg-red-950/50 border border-red-800/40 text-red-400'
-                      : tireCompound === 'hard' || tireCompound === 'super_hard'
-                        ? 'bg-blue-950/50 border border-blue-800/40 text-blue-400'
-                        : tireCompound.startsWith('sport_')
-                          ? 'bg-emerald-950/50 border border-emerald-800/40 text-emerald-400'
-                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400'
-                  }`}>
-                    {tireCompound ? tireCompound.replaceAll('_', ' ') : 'ECONOMY'}
-                  </span>
+                  {(() => {
+                    const compConfig = TIRE_COMPOUNDS[tireCompound as TireCompoundType] || TIRE_COMPOUNDS.economy;
+                    const badgeClass =
+                      tireCompound === 'super_soft'
+                        ? 'bg-purple-950/60 border border-purple-700/50 text-purple-300'
+                        : tireCompound === 'soft'
+                          ? 'bg-rose-950/60 border border-rose-700/50 text-rose-300'
+                          : tireCompound === 'normal'
+                            ? 'bg-amber-950/60 border border-amber-700/50 text-amber-300'
+                            : tireCompound === 'hard'
+                              ? 'bg-blue-950/60 border border-blue-700/50 text-blue-300'
+                              : tireCompound === 'super_hard'
+                                ? 'bg-slate-900 border border-slate-700 text-slate-200'
+                                : tireCompound.startsWith('sport_')
+                                  ? 'bg-emerald-950/60 border border-emerald-700/50 text-emerald-300'
+                                  : 'bg-zinc-900 border border-zinc-800 text-zinc-400';
+                    return (
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider leading-none ${badgeClass}`}>
+                        {compConfig.name.toUpperCase()}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 <div className="flex items-center gap-4 py-0.5">

@@ -1839,6 +1839,35 @@ export abstract class BaseMode implements GameMode {
       emissiveIntensity: emissiveStrengthFor(time)
     });
     const buildingRoofMat = new THREE.MeshStandardMaterial({ color: tint(0x3a3f4a), roughness: 0.9 });
+
+    // Houses: painted render walls, tiled roofs, and windows that light up after dark.
+    const houseWallHues = [0xd8cfc0, 0xc9b9a4, 0xb9c4cc, 0xd6c2b2, 0xa9b39c];
+    const houseWallMats = houseWallHues.map(
+      (hex) => new THREE.MeshStandardMaterial({ color: tint(hex), roughness: 0.85 })
+    );
+    const houseRoofMats = [0x8c4a3a, 0x4a5560, 0x6b5040].map(
+      (hex) => new THREE.MeshStandardMaterial({ color: tint(hex), roughness: 0.8, flatShading: true })
+    );
+    const houseTrimMat = new THREE.MeshStandardMaterial({ color: tint(0x6b5b4a), roughness: 0.9 });
+    const houseWindowMat = new THREE.MeshStandardMaterial({
+      color: tint(0x2a3038),
+      emissive: 0xffc978,
+      emissiveIntensity: emissiveStrengthFor(time) * 1.3,
+      roughness: 0.35
+    });
+
+    // Construction site: bare structure, scaffolding, crane and work lights.
+    const concreteMat = new THREE.MeshStandardMaterial({ color: tint(0x9a978f), roughness: 0.95 });
+    const rebarMat = new THREE.MeshStandardMaterial({ color: tint(0x6e6257), roughness: 0.85 });
+    const scaffoldMat = new THREE.MeshStandardMaterial({ color: tint(0x9aa3ad), roughness: 0.6, metalness: 0.5 });
+    const craneMat = new THREE.MeshStandardMaterial({ color: tint(0xe0a021), roughness: 0.55, metalness: 0.3 });
+    const hoardingMat = new THREE.MeshStandardMaterial({ color: tint(0x2f6f52), roughness: 0.9 });
+    const workLightMat = new THREE.MeshStandardMaterial({
+      color: 0xfff0c0,
+      emissive: 0xfff0c0,
+      emissiveIntensity: emissiveStrengthFor(time) * 2.2,
+      roughness: 0.3
+    });
     const buildingTrimMat = new THREE.MeshStandardMaterial({
       color: 0x06b6d4,
       emissive: 0x06b6d4,
@@ -1899,6 +1928,19 @@ export abstract class BaseMode implements GameMode {
         flatShading: true
       });
       leafMaterialCache.set(key, mat);
+      return mat;
+    };
+
+    // Facade brightness varies per block so a skyline is not one flat grey, but
+    // is bucketed the same way as foliage to keep the material count down.
+    const facadeCache = new Map<number, THREE.MeshStandardMaterial>();
+    const buildingFacadeVariant = (variation: InstanceVariation) => {
+      const bucket = Math.floor(((variation.lightnessShift + 0.09) / 0.18) * 4);
+      const cached = facadeCache.get(bucket);
+      if (cached) return cached;
+      const mat = buildingFacadeMat.clone();
+      mat.color = gradeColor(0x8a8f9c, time, variation);
+      facadeCache.set(bucket, mat);
       return mat;
     };
 
@@ -2010,40 +2052,115 @@ export abstract class BaseMode implements GameMode {
         hill.userData = { isScenery: true, sceneryIndex: idx };
         this.environmentGroup.add(hill);
       } else if (item.type === 'building') {
+        const { x: px, z: pz } = item.position;
         const blockGroup = new THREE.Group();
 
-        // Footprint from scale, height from heightScale, both jittered a little
-        // so a row of blocks reads as a skyline rather than a fence.
-        const width = scale * 5 * (0.8 + positionNoise(item.position.x, item.position.z, 21) * 0.5);
-        const depth = scale * 5 * (0.8 + positionNoise(item.position.x, item.position.z, 22) * 0.5);
+        const width = scale * 5 * (0.8 + positionNoise(px, pz, 21) * 0.5);
+        const depth = width * (item.depthScale ?? 0.8 + positionNoise(px, pz, 22) * 0.5);
         const height = (item.heightScale ?? scale * 2.5) * 5;
+        const uvOffset = positionNoise(px, pz, 23);
 
-        const towerGeom = makeBuildingGeometry(
-          width,
-          height,
-          depth,
-          positionNoise(item.position.x, item.position.z, 23)
+        // Facade brightness varies per block, so a skyline is not one flat grey.
+        const facadeMat = buildingFacadeVariant(variation);
+
+        /** One box section of the block, walls textured and roof plain. */
+        const addSection = (w: number, h: number, d: number, baseY: number, offset: number) => {
+          const section = new THREE.Mesh(
+            makeBuildingGeometry(w, h, d, uvOffset + offset),
+            // Face order is +X, -X, +Y, -Y, +Z, -Z.
+            [facadeMat, facadeMat, buildingRoofMat, buildingRoofMat, facadeMat, facadeMat]
+          );
+          section.position.y = baseY + h / 2;
+          section.castShadow = true;
+          section.receiveShadow = true;
+          blockGroup.add(section);
+          return baseY + h;
+        };
+
+        // Four silhouettes so a row of blocks reads as a real skyline. Picked
+        // deterministically from the position unless the author chose one.
+        const style = item.variant ?? Math.floor(positionNoise(px, pz, 24) * 4);
+        let crownY: number;
+        let crownW: number;
+        let crownD: number;
+        // Where the topmost section sits, so the crown and roof clutter follow it.
+        let crownOffset = { x: 0, z: 0 };
+
+        if (style === 1) {
+          // Setback tower: three stacked boxes stepping inward.
+          let y = addSection(width, height * 0.5, depth, 0, 0);
+          y = addSection(width * 0.78, height * 0.32, depth * 0.78, y, 0.11);
+          crownY = addSection(width * 0.56, height * 0.18, depth * 0.56, y, 0.23);
+          crownW = width * 0.56;
+          crownD = depth * 0.56;
+        } else if (style === 2) {
+          // Podium base with a slimmer tower rising off-centre.
+          const baseH = height * 0.22;
+          addSection(width, baseH, depth, 0, 0);
+          const towerW = width * 0.62;
+          const towerD = depth * 0.62;
+          const tower = new THREE.Mesh(
+            makeBuildingGeometry(towerW, height - baseH, towerD, uvOffset + 0.17),
+            [facadeMat, facadeMat, buildingRoofMat, buildingRoofMat, facadeMat, facadeMat]
+          );
+          tower.position.set(width * 0.12, baseH + (height - baseH) / 2, -depth * 0.1);
+          tower.castShadow = true;
+          tower.receiveShadow = true;
+          blockGroup.add(tower);
+          crownY = height;
+          crownW = towerW;
+          crownD = towerD;
+          crownOffset = { x: width * 0.12, z: -depth * 0.1 };
+        } else if (style === 3) {
+          // Wide low slab, the filler between the tall stuff.
+          const slabH = height * 0.45;
+          crownY = addSection(width * 1.35, slabH, depth * 0.7, 0, 0);
+          crownW = width * 1.35;
+          crownD = depth * 0.7;
+        } else {
+          // Plain tower.
+          crownY = addSection(width, height, depth, 0, 0);
+          crownW = width;
+          crownD = depth;
+        }
+
+        // Neon crown, so blocks still read as a silhouette against a night sky.
+        const crown = new THREE.Mesh(
+          new THREE.BoxGeometry(crownW * 1.04, 0.4, crownD * 1.04),
+          buildingTrimMat
         );
-        // Face order is +X, -X, +Y, -Y, +Z, -Z: the four walls get the window
-        // facade, the top and bottom get plain roof.
-        const tower = new THREE.Mesh(towerGeom, [
-          buildingFacadeMat,
-          buildingFacadeMat,
-          buildingRoofMat,
-          buildingRoofMat,
-          buildingFacadeMat,
-          buildingFacadeMat
-        ]);
-        tower.position.y = height / 2;
-        tower.castShadow = true;
-        tower.receiveShadow = true;
-        blockGroup.add(tower);
+        crown.position.set(crownOffset.x, crownY + 0.2, crownOffset.z);
+        blockGroup.add(crown);
 
-        // Neon crown, so blocks still read against a night sky.
-        const trimGeom = new THREE.BoxGeometry(width * 1.04, 0.4, depth * 1.04);
-        const trim = new THREE.Mesh(trimGeom, buildingTrimMat);
-        trim.position.y = height + 0.2;
-        blockGroup.add(trim);
+        // Rooftop clutter: a mast and a tank, each on its own coin flip, so the
+        // tops of the skyline are not all identical flat lids.
+        if (positionNoise(px, pz, 25) > 0.45) {
+          const mast = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.18, 0.28, height * 0.22, 5),
+            buildingRoofMat
+          );
+          mast.position.set(
+            crownOffset.x + crownW * 0.22,
+            crownY + height * 0.11,
+            crownOffset.z - crownD * 0.18
+          );
+          mast.castShadow = true;
+          blockGroup.add(mast);
+        }
+        if (positionNoise(px, pz, 26) > 0.55) {
+          const tankH = Math.max(1.5, height * 0.06);
+          const tank = new THREE.Mesh(
+            new THREE.BoxGeometry(crownW * 0.3, tankH, crownD * 0.3),
+            buildingRoofMat
+          );
+          tank.position.set(
+            crownOffset.x - crownW * 0.24,
+            crownY + tankH / 2,
+            crownOffset.z + crownD * 0.2
+          );
+          tank.castShadow = true;
+          blockGroup.add(tank);
+        }
 
         blockGroup.position.copy(item.position);
         // Buildings are man-made, so no lean and no size noise: only the yaw,
@@ -2052,6 +2169,213 @@ export abstract class BaseMode implements GameMode {
           item.rotation ?? Math.round((variation.rotation / Math.PI) * 12) * (Math.PI / 12);
         blockGroup.userData = { isScenery: true, sceneryIndex: idx };
         this.environmentGroup.add(blockGroup);
+      } else if (item.type === 'house') {
+        const { x: px, z: pz } = item.position;
+        const houseGroup = new THREE.Group();
+
+        const style = item.variant ?? Math.floor(positionNoise(px, pz, 31) * 3);
+        const storeys = style === 2 ? 2 : positionNoise(px, pz, 32) > 0.7 ? 2 : 1;
+        const width = scale * 3.2 * (0.85 + positionNoise(px, pz, 33) * 0.35);
+        const depth = width * (item.depthScale ?? 0.7 + positionNoise(px, pz, 34) * 0.3);
+        const wallHeight = (item.heightScale ?? 1) * 2.6 * storeys;
+
+        const wallMat = houseWallMats[Math.floor(positionNoise(px, pz, 35) * houseWallMats.length)];
+        const roofMat = houseRoofMats[Math.floor(positionNoise(px, pz, 36) * houseRoofMats.length)];
+
+        const walls = new THREE.Mesh(new THREE.BoxGeometry(width, wallHeight, depth), wallMat);
+        walls.position.y = wallHeight / 2;
+        walls.castShadow = true;
+        walls.receiveShadow = true;
+        houseGroup.add(walls);
+
+        const roofHeight = width * (style === 2 ? 0.12 : 0.42);
+        if (style === 2) {
+          // Flat roof with a parapet lip.
+          const parapet = new THREE.Mesh(
+            new THREE.BoxGeometry(width * 1.04, roofHeight, depth * 1.04),
+            roofMat
+          );
+          parapet.position.y = wallHeight + roofHeight / 2;
+          parapet.castShadow = true;
+          houseGroup.add(parapet);
+        } else if (style === 1) {
+          // Hip roof: a four-sided pyramid turned to line up with the walls.
+          const hip = new THREE.Mesh(
+            new THREE.ConeGeometry(Math.max(width, depth) * 0.78, roofHeight, 4),
+            roofMat
+          );
+          hip.position.y = wallHeight + roofHeight / 2;
+          hip.rotation.y = Math.PI / 4;
+          hip.scale.set(1, 1, depth / width);
+          hip.castShadow = true;
+          houseGroup.add(hip);
+        } else {
+          // Gable roof: two slabs leaning together along the ridge. Built from
+          // boxes rather than a prism so the orientation is unambiguous.
+          const pitch = Math.atan2(roofHeight, depth / 2);
+          const slabLength = Math.hypot(depth / 2, roofHeight) * 1.06;
+          for (const side of [-1, 1]) {
+            const slab = new THREE.Mesh(
+              new THREE.BoxGeometry(width * 1.08, 0.18, slabLength),
+              roofMat
+            );
+            slab.position.set(0, wallHeight + roofHeight / 2, (side * depth) / 4);
+            slab.rotation.x = -side * pitch;
+            slab.castShadow = true;
+            houseGroup.add(slab);
+          }
+        }
+
+        // Door on the front face, plus a lit window per storey either side of it.
+        const door = new THREE.Mesh(
+          new THREE.BoxGeometry(width * 0.18, wallHeight / storeys * 0.62, 0.12),
+          houseTrimMat
+        );
+        door.position.set(0, (wallHeight / storeys) * 0.31, depth / 2 + 0.06);
+        houseGroup.add(door);
+
+        const windowGeom = new THREE.BoxGeometry(width * 0.16, width * 0.14, 0.1);
+        for (let storey = 0; storey < storeys; storey++) {
+          for (const side of [-1, 1]) {
+            const win = new THREE.Mesh(windowGeom, houseWindowMat);
+            win.position.set(
+              side * width * 0.28,
+              (wallHeight / storeys) * (storey + 0.62),
+              depth / 2 + 0.05
+            );
+            houseGroup.add(win);
+          }
+        }
+
+        if (positionNoise(px, pz, 37) > 0.5) {
+          const chimney = new THREE.Mesh(
+            new THREE.BoxGeometry(width * 0.14, roofHeight * 1.4, width * 0.14),
+            houseTrimMat
+          );
+          chimney.position.set(width * 0.28, wallHeight + roofHeight * 0.7, -depth * 0.18);
+          chimney.castShadow = true;
+          houseGroup.add(chimney);
+        }
+
+        houseGroup.position.copy(item.position);
+        houseGroup.rotation.y = item.rotation ?? variation.rotation;
+        houseGroup.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(houseGroup);
+      } else if (item.type === 'construction') {
+        const { x: px, z: pz } = item.position;
+        const siteGroup = new THREE.Group();
+
+        const width = scale * 5 * (0.85 + positionNoise(px, pz, 41) * 0.3);
+        const depth = width * (item.depthScale ?? 0.8 + positionNoise(px, pz, 42) * 0.4);
+        const storeyHeight = 3.4;
+        const storeys = Math.max(1, Math.round((item.heightScale ?? scale * 1.4) * 2));
+        const topY = storeys * storeyHeight;
+
+        // Bare floor slabs held up on corner and mid columns: the frame goes up
+        // before the walls do, which is what makes a site read as unfinished.
+        const columnGeom = new THREE.BoxGeometry(0.45, storeyHeight, 0.45);
+        for (let level = 0; level < storeys; level++) {
+          const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.35, depth), concreteMat);
+          slab.position.y = (level + 1) * storeyHeight;
+          slab.castShadow = true;
+          slab.receiveShadow = true;
+          siteGroup.add(slab);
+
+          for (const sx of [-1, 0, 1]) {
+            for (const sz of [-1, 1]) {
+              if (sx === 0 && positionNoise(px + level, pz + sz, 43) < 0.5) continue;
+              const column = new THREE.Mesh(columnGeom, concreteMat);
+              column.position.set(
+                sx * (width / 2 - 0.5),
+                level * storeyHeight + storeyHeight / 2,
+                sz * (depth / 2 - 0.5)
+              );
+              column.castShadow = true;
+              siteGroup.add(column);
+            }
+          }
+        }
+
+        // Rebar stubs poking out of the top slab, waiting for the next pour.
+        const rebarGeom = new THREE.CylinderGeometry(0.07, 0.07, 1.6, 4);
+        for (let i = 0; i < 8; i++) {
+          const rebar = new THREE.Mesh(rebarGeom, rebarMat);
+          rebar.position.set(
+            (positionNoise(px + i, pz, 44) - 0.5) * width * 0.85,
+            topY + 0.8,
+            (positionNoise(px, pz + i, 45) - 0.5) * depth * 0.85
+          );
+          siteGroup.add(rebar);
+        }
+
+        // Scaffolding up one face.
+        const poleGeom = new THREE.CylinderGeometry(0.09, 0.09, topY, 5);
+        const scaffoldZ = depth / 2 + 0.6;
+        for (let i = 0; i <= 3; i++) {
+          const pole = new THREE.Mesh(poleGeom, scaffoldMat);
+          pole.position.set(-width / 2 + (i * width) / 3, topY / 2, scaffoldZ);
+          siteGroup.add(pole);
+        }
+        for (let level = 1; level <= storeys; level++) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(width, 0.1, 0.1), scaffoldMat);
+          rail.position.set(0, level * storeyHeight, scaffoldZ);
+          siteGroup.add(rail);
+        }
+
+        // Site hoarding around the base.
+        for (const [sx, sz, w, d] of [
+          [0, 1, width + 2, 0.2],
+          [0, -1, width + 2, 0.2],
+          [1, 0, 0.2, depth + 2],
+          [-1, 0, 0.2, depth + 2]
+        ] as const) {
+          const panel = new THREE.Mesh(new THREE.BoxGeometry(w, 2.2, d), hoardingMat);
+          panel.position.set(sx * (width / 2 + 1), 1.1, sz * (depth / 2 + 1));
+          panel.receiveShadow = true;
+          siteGroup.add(panel);
+        }
+
+        // Tower crane on taller sites, so a skyline has something in progress.
+        if (storeys >= 3) {
+          const mastHeight = topY + storeyHeight * 2.5;
+          const mast = new THREE.Mesh(
+            new THREE.BoxGeometry(1.1, mastHeight, 1.1),
+            craneMat
+          );
+          mast.position.set(width / 2 + 3, mastHeight / 2, -depth / 2 - 3);
+          mast.castShadow = true;
+          siteGroup.add(mast);
+
+          const jib = new THREE.Mesh(new THREE.BoxGeometry(width * 2.2, 0.7, 0.7), craneMat);
+          jib.position.set(width / 2 + 3 + width * 0.5, mastHeight, -depth / 2 - 3);
+          jib.castShadow = true;
+          siteGroup.add(jib);
+
+          const counterweight = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.2, 1.2), concreteMat);
+          counterweight.position.set(width / 2 + 3 - width * 0.55, mastHeight, -depth / 2 - 3);
+          siteGroup.add(counterweight);
+
+          // Crane group turns as a unit so the jib sweeps a believable direction.
+          const craneYaw = positionNoise(px, pz, 46) * Math.PI * 2;
+          for (const part of [mast, jib, counterweight]) {
+            part.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), craneYaw);
+            part.rotation.y = craneYaw;
+          }
+        }
+
+        // Work lights, the thing that actually sells a site at night.
+        const lampGeom = new THREE.BoxGeometry(0.6, 0.4, 0.3);
+        for (const side of [-1, 1]) {
+          const lamp = new THREE.Mesh(lampGeom, workLightMat);
+          lamp.position.set(side * (width / 2 - 0.6), topY + 0.6, depth / 2 - 0.6);
+          siteGroup.add(lamp);
+        }
+
+        siteGroup.position.copy(item.position);
+        siteGroup.rotation.y =
+          item.rotation ?? Math.round((variation.rotation / Math.PI) * 12) * (Math.PI / 12);
+        siteGroup.userData = { isScenery: true, sceneryIndex: idx };
+        this.environmentGroup.add(siteGroup);
       } else if (item.type === 'podium') {
         const standGroup = new THREE.Group();
         

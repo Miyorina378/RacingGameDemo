@@ -36,7 +36,7 @@ export interface EngineCallbacks {
     tireWearEnabled?: boolean
   ) => void;
   onSuggestedGearChange?: (advice: SuggestedGearAdvice | null) => void;
-  onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number) => void;
+  onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number, isWrongWay?: boolean, isCheat?: boolean) => void;
   onCarLoading?: (loading: boolean, progress: number) => void;
 }
 
@@ -79,7 +79,9 @@ export type SceneryType =
   | 'mountain'
   | 'hill'
   | 'podium'
-  | 'building';
+  | 'building'
+  | 'house'
+  | 'construction';
 
 export type TimeOfDay = 'afternoon' | 'evening' | 'night';
 
@@ -87,9 +89,15 @@ export interface EditorScenery {
   type: SceneryType;
   x: number;
   z: number;
+  /** Elevation above the ground plane. Omit to sit on the ground. */
+  y?: number;
   scale: number;
   heightScale?: number;
+  /** Footprint depth relative to width. Buildings only; 1 is square. */
+  depthScale?: number;
   rotation?: number;
+  /** Silhouette index. Omit to pick one deterministically from the position. */
+  variant?: number;
 }
 
 export const DEFAULT_ENGINE_KEY_BINDINGS: KeyBindings = {
@@ -105,6 +113,11 @@ export interface EditorState {
   scenery: EditorScenery[];
   tool: string;
   snapToGrid: number;
+  /**
+   * When true, decoration ignores the track grid snap so it can be positioned
+   * anywhere. Track nodes always keep snapping.
+   */
+  sceneryFreeMove: boolean;
   cornerHeight: number;
   selectedNodeIndex: number | null;
   selectedSceneryIndex: number | null;
@@ -126,6 +139,7 @@ export function createDefaultEditorState(): EditorState {
     scenery: [],
     tool: 'node',
     snapToGrid: 10,
+    sceneryFreeMove: true,
     cornerHeight: 2,
     selectedNodeIndex: null,
     selectedSceneryIndex: null,

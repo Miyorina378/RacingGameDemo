@@ -44,8 +44,10 @@ export class RaceMode extends BaseMode {
   private visitedIndices: Set<number> = new Set();
   private currentLap = 1;
   private totalLaps = 3;
-  private playerPathIndex = 1;
-  private playerCheckpointsPassed = 0;
+  private hasQualifiedForLap = false;
+  public isWrongWay = false;
+  public isCheat = false;
+  private wrongWayTimer = 0;
   public raceTime = 0;
   public lapStartTimes: number[] = [0, 0];
   public bestLapTime = Infinity;
@@ -313,8 +315,10 @@ export class RaceMode extends BaseMode {
 
     this.activeCheckpointIndex = 0;
     this.currentLap = 1;
-    this.playerPathIndex = 1;
-    this.playerCheckpointsPassed = 0;
+    this.hasQualifiedForLap = false;
+    this.isWrongWay = false;
+    this.isCheat = false;
+    this.wrongWayTimer = 0;
     this.engine.callbacks.onCheckpointChange(this.currentLap, this.totalLaps);
 
     // Start countdown
@@ -458,14 +462,79 @@ export class RaceMode extends BaseMode {
     }
     this.particles.update(deltaTime);
 
-    // Track player progress along track nodes and collide checkpoints
+    // Track player progress along track and check lap completion
     if (isPlaying) {
       const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
       const path = trackConfig.path.map(p => ('isVector3' in p ? p : p.pos) as THREE.Vector3);
 
-      // Collide with finish checkpoint when player is targeting it (path[0])
+      // Find player's closest node index on sparse path (for lap qualification & placement)
+      let playerClosestNodeIndex = 0;
+      let minNodeDistSq = Infinity;
+      for (let i = 0; i < path.length; i++) {
+        const dSq = this.vehicle.pos.distanceToSquared(path[i]);
+        if (dSq < minNodeDistSq) {
+          minNodeDistSq = dSq;
+          playerClosestNodeIndex = i;
+        }
+      }
+
+      // Find player's closest point on densePath for exact curve tangent direction
+      let closestDenseIdx = 0;
+      let minDenseDistSq = Infinity;
+      if (this.densePath.length > 0) {
+        for (let i = 0; i < this.densePath.length; i++) {
+          const dSq = this.vehicle.pos.distanceToSquared(this.densePath[i]);
+          if (dSq < minDenseDistSq) {
+            minDenseDistSq = dSq;
+            closestDenseIdx = i;
+          }
+        }
+      }
+
+      // Calculate smooth curve forward direction vector at closest dense point
+      let trackForward = new THREE.Vector3(0, 0, 1);
+      if (this.densePath.length > 1) {
+        const nextDenseIdx = (closestDenseIdx + 1) % this.densePath.length;
+        trackForward.subVectors(this.densePath[nextDenseIdx], this.densePath[closestDenseIdx]).normalize();
+      }
+
+      // Calculate car direction vector
+      const carHeading = new THREE.Vector3(Math.sin(this.vehicle.yaw), 0, Math.cos(this.vehicle.yaw)).normalize();
+
+      // Check if car is going the Wrong Way (driving backward against smooth curve flow)
+      const directionDot = carHeading.dot(trackForward);
+      if (directionDot < -0.5 && Math.abs(this.vehicle.speed) > 2.0) {
+        this.wrongWayTimer += deltaTime;
+        if (this.wrongWayTimer > 0.6) {
+          this.isWrongWay = true;
+          this.isCheat = true; // Set cheat = 1 flag!
+        }
+      } else {
+        this.wrongWayTimer = Math.max(0, this.wrongWayTimer - deltaTime * 2);
+        if (this.wrongWayTimer === 0) {
+          this.isWrongWay = false;
+        }
+      }
+
+      // Check if player has reached the opposite side of the loop
+      const oppositeIndex = Math.floor(path.length / 2);
+      const oppositePt = path[oppositeIndex];
+      const distToOpposite = this.vehicle.pos.distanceTo(oppositePt);
+      const detectionRadius = Math.max(25, trackConfig.roadWidth * 1.5);
+
+      if (!this.isWrongWay && (Math.abs(playerClosestNodeIndex - oppositeIndex) <= 1 || distToOpposite < detectionRadius)) {
+        if (!this.hasQualifiedForLap) {
+          this.hasQualifiedForLap = true;
+          const finishCheckpoint = this.checkpoints[0];
+          if (finishCheckpoint) {
+            finishCheckpoint.activate();
+          }
+        }
+      }
+
+      // Collide with finish checkpoint when qualified
       const finishCheckpoint = this.checkpoints[0];
-      if (finishCheckpoint && this.playerPathIndex === 0) {
+      if (finishCheckpoint && this.hasQualifiedForLap) {
         const finishRadius = Math.max(22, trackConfig.roadWidth * 1.25);
         const distToFinish = this.vehicle.pos.distanceTo(finishCheckpoint.pos);
         if (distToFinish < finishRadius) {
@@ -478,10 +547,10 @@ export class RaceMode extends BaseMode {
           if (currentLapTime < this.bestLapTime) {
             this.bestLapTime = currentLapTime;
           }
-          this.lapStartTimes[this.currentLap + 1] = this.raceTime;
 
+          this.lapStartTimes[this.currentLap + 1] = this.raceTime;
           this.currentLap++;
-          this.playerCheckpointsPassed++;
+          this.hasQualifiedForLap = false;
           
           if (this.currentLap > this.totalLaps) {
             const finishedAICount = this.aiCars.filter(ai => ai.checkpointsPassed >= path.length * this.totalLaps).length;
@@ -531,38 +600,15 @@ export class RaceMode extends BaseMode {
 
             this.engine.handleSuccess(placement, allResults);
           } else {
-            this.playerPathIndex = 1;
             finishCheckpoint.deactivate();
             this.engine.callbacks.onCheckpointChange(this.currentLap, this.totalLaps);
           }
         }
       }
 
-      const nextTargetPt = path[this.playerPathIndex];
-      const distToNext = this.vehicle.pos.distanceTo(nextTargetPt);
-      
-      // If player is close to their next target node, advance the target index (only if they aren't targeting the finish line)
-      const detectionRadius = Math.max(22, trackConfig.roadWidth * 1.25);
-      if (this.playerPathIndex !== 0) {
-        if (distToNext < detectionRadius) {
-          this.playerPathIndex = (this.playerPathIndex + 1) % path.length;
-          this.playerCheckpointsPassed++;
-          
-          // If the player is now targeting path[0] (which is the finish line),
-          // we activate the start/finish checkpoint to show it is active (neon green).
-          if (this.playerPathIndex === 0) {
-            const finishCheckpoint = this.checkpoints[0];
-            if (finishCheckpoint) {
-              finishCheckpoint.activate();
-            }
-          }
-        }
-      }
-
       // Calculate real-time placement (Player + AI opponents)
-      const playerNextPt = path[this.playerPathIndex];
-      const playerDistToNext = this.vehicle.pos.distanceTo(playerNextPt);
-      const playerProgress = this.playerCheckpointsPassed - (playerDistToNext / 10000);
+      const distToClosestNode = Math.sqrt(minNodeDistSq);
+      const playerProgress = (this.currentLap - 1) * path.length + playerClosestNodeIndex + (1 - distToClosestNode / 10000);
 
       const aiProgresses = this.aiCars.map(ai => {
         const aiNextPt = path[ai.currentPathIndex];

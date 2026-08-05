@@ -133,6 +133,28 @@ export class PreviewMode extends BaseMode {
     return { x: outX, z: outZ };
   }
 
+  /**
+   * Snaps a ground-plane hit to the grid and clamps it to the map bounds.
+   * `free` skips the snap but keeps the clamp, so nothing can be placed off-map.
+   */
+  private applyGridSnap(
+    state: { snapToGrid: number },
+    target: THREE.Vector3,
+    free: boolean
+  ): { x: number; z: number } {
+    let x = target.x;
+    let z = target.z;
+    if (!free && state.snapToGrid > 0) {
+      x = Math.round(target.x / state.snapToGrid) * state.snapToGrid;
+      z = Math.round(target.z / state.snapToGrid) * state.snapToGrid;
+    }
+    const limit = state.snapToGrid * 250;
+    return {
+      x: Math.max(-limit, Math.min(limit, x)),
+      z: Math.max(-limit, Math.min(limit, z))
+    };
+  }
+
   private getDefaultScale(tool: string): number {
     if (tool.startsWith('tree')) return 2;
     if (tool === 'hill') return 8;
@@ -140,6 +162,8 @@ export class PreviewMode extends BaseMode {
     if (tool === 'podium') return 1.0;
     if (tool === 'rock') return 2;
     if (tool === 'building') return 2;
+    if (tool === 'house') return 1.5;
+    if (tool === 'construction') return 2;
     return 1;
   }
 
@@ -217,16 +241,12 @@ export class PreviewMode extends BaseMode {
         state.onSelectScenery?.(clickedSceneryIdx);
         state.onDragSceneryStart?.(clickedSceneryIdx);
       } else if (target) {
-        // Empty space click - place new element according to the active tool
-        let finalX = target.x;
-        let finalZ = target.z;
-        if (state.snapToGrid > 0) {
-          finalX = Math.round(target.x / state.snapToGrid) * state.snapToGrid;
-          finalZ = Math.round(target.z / state.snapToGrid) * state.snapToGrid;
-        }
-        const gridL = state.snapToGrid * 250;
-        finalX = Math.max(-gridL, Math.min(gridL, finalX));
-        finalZ = Math.max(-gridL, Math.min(gridL, finalZ));
+        // Empty space click - place new element according to the active tool.
+        // Decoration can opt out of the grid so it can sit anywhere; track nodes
+        // always snap, since the road geometry relies on tidy spacing.
+        const snapped = this.applyGridSnap(state, target, state.tool !== 'node' && state.sceneryFreeMove);
+        const finalX = snapped.x;
+        const finalZ = snapped.z;
 
         if (state.tool === 'node') {
           // Place new node
@@ -341,16 +361,11 @@ export class PreviewMode extends BaseMode {
       return;
     }
 
-    // Snapping
-    let finalX = target.x;
-    let finalZ = target.z;
-    if (state.snapToGrid > 0) {
-      finalX = Math.round(target.x / state.snapToGrid) * state.snapToGrid;
-      finalZ = Math.round(target.z / state.snapToGrid) * state.snapToGrid;
-    }
-    const gridL = state.snapToGrid * 250;
-    finalX = Math.max(-gridL, Math.min(gridL, finalX));
-    finalZ = Math.max(-gridL, Math.min(gridL, finalZ));
+    // Snapping. Decoration can move freely; nodes always stay on the grid.
+    const movingScenery = this.draggedSceneryIdx !== null || (this.draggedNodeIdx === null && state.tool !== 'node');
+    const snapped = this.applyGridSnap(state, target, movingScenery && state.sceneryFreeMove);
+    const finalX = snapped.x;
+    const finalZ = snapped.z;
 
     // Update hover cursor positioning
     if (this.hoverCursor) {
