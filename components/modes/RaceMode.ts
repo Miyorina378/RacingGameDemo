@@ -157,12 +157,24 @@ export class RaceMode extends BaseMode {
     const forwardVec = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.startYaw).normalize();
     const rightVec = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.startYaw - Math.PI / 2).normalize();
 
+    // Terrain and road are built before anything is placed, because the grid slots
+    // below ask the road how high it is. They used to be built afterwards and every
+    // car was dropped at a hardcoded y = 0.5, which on any track whose surface is
+    // not at that exact height spawned the whole field inside or above the tarmac.
+    this.createGridFloor();
+    this.createTerrain(trackConfig, trackConfig.time);
+    this.createRacetrackRoad(trackConfig);
+    this.createScenery(trackConfig.scenery, trackConfig.time);
+
     // Generate dense path for AI tracking. This has to use the same centreline
     // builder as the road mesh, or the AI drives off the outside of any sharp
     // corner the road actually takes.
     const resolvedNodes = resolveTrackNodes(trackConfig);
     const aiCurve = buildCenterline(
-      resolvedNodes.map(n => new THREE.Vector3(n.pos.x, 0.5, n.pos.z)),
+      // Real node height, not a flat 0.5. centripetal and chordal knots are spaced
+      // by 3D distance, so a flattened copy is a slightly different curve than the
+      // one the road was built from, and the AI aims a little off the tarmac.
+      resolvedNodes.map(n => new THREE.Vector3(n.pos.x, n.pos.y, n.pos.z)),
       resolvedNodes,
       { curveType: trackConfig.curveType, tension: trackConfig.tension, roadWidth: trackConfig.roadWidth }
     ).curve;
@@ -211,10 +223,13 @@ export class RaceMode extends BaseMode {
       };
     });
 
-    // Assign ground height callbacks for AI vehicles
+    // Assign ground and slope callbacks for AI vehicles. Slope matters as much as
+    // height: without it an AI car takes a climb at full speed and never rolls back
+    // on a descent, so it drives through hills the player has to work up.
     this.aiCars.forEach(ai => {
       ai.vehicle.getGroundHeight = (x: number, z: number, yHint?: number) =>
         this.getGroundHeight(x, z, yHint);
+      ai.vehicle.getSlopeHeight = (x: number, z: number) => this.getSlopeHeight(x, z);
     });
 
     // Position AI opponents on grid spots 0, 1, 2, 3, 4 (staggered pole position)
@@ -222,12 +237,12 @@ export class RaceMode extends BaseMode {
       const gridIdx = i; // 0 to 4
       const sideOffset = (gridIdx % 2 === 0) ? -2.2 : 2.2;
       const forwardOffset = gridIdx * -8;
-      
+
       const aiPos = new THREE.Vector3().copy(startPt)
         .addScaledVector(rightVec, sideOffset)
         .addScaledVector(forwardVec, forwardOffset);
-      aiPos.y = 0.5;
-      
+      aiPos.y = this.getGroundHeight(aiPos.x, aiPos.z, startPt.y);
+
       this.aiCars[i].vehicle.reset(aiPos, this.startYaw);
       this.scene.add(this.aiCars[i].vehicle.mesh);
     }
@@ -239,11 +254,11 @@ export class RaceMode extends BaseMode {
     this.startPos.copy(startPt)
       .addScaledVector(rightVec, playerSideOffset)
       .addScaledVector(forwardVec, playerForwardOffset);
-    this.startPos.y = 0.5; // car height on ground
+    // Sit on the road surface. The start line can be at any elevation, and the
+    // start node's own y is the hint that keeps an overpass from claiming the slot.
+    this.startPos.y = this.getGroundHeight(this.startPos.x, this.startPos.z, startPt.y);
 
     this.vehicle.reset(this.startPos, this.startYaw);
-
-    this.createGridFloor();
 
     // Build checkpoint rings (only the start/finish checkpoint is created)
     this.checkpoints = [];
@@ -260,10 +275,6 @@ export class RaceMode extends BaseMode {
     // Keep the start/finish checkpoint visible from the beginning as a physical race gate
     this.environmentGroup.add(finishCheckpoint.mesh);
     this.checkpoints.push(finishCheckpoint);
-
-    // Create visual road mesh with curbs and fences
-    this.createRacetrackRoad(trackConfig);
-    this.createScenery(trackConfig.scenery, trackConfig.time);
 
     // Sync guardrail, track info, and grass callbacks for all AI vehicles and their AI controllers
     const grassCallback = (x: number, z: number) => {

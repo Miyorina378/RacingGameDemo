@@ -1943,8 +1943,9 @@ interface GarageProps {
   handleExitDealerClick: () => void;
   placeholderRef: React.RefObject<HTMLDivElement | null>;
   setActiveMode: (mode: any) => void;
-  previewCar?: (carId: string) => void;
+  previewCar?: (carId: string, colorOverride?: string) => void;
   onQuickPlayCarSelectChange?: (isCarSelect: boolean, isActiveCarSelectStep: boolean, isInteractable: boolean) => void;
+  onDealerShowroomChange?: (mode: DealerMarketMode | null, brandColor: string) => void;
 }
 
 export default function Garage({
@@ -1987,6 +1988,7 @@ export default function Garage({
   setActiveMode,
   previewCar,
   onQuickPlayCarSelectChange,
+  onDealerShowroomChange,
 }: GarageProps) {
 
   // Local states for Drive Sub-modes
@@ -2102,17 +2104,11 @@ export default function Garage({
   }, [quickPlayCarId, driveSubMode, quickPlayStep, previewCar]);
 
   React.useEffect(() => {
-    if (activeGarageTab === 'dealer' && dealerSelectedCarId) {
-      previewCar?.(dealerSelectedCarId);
-    }
-  }, [dealerSelectedCarId, activeGarageTab, previewCar]);
-
-  React.useEffect(() => {
     const isCarSelectStep = driveSubMode === 'quickplay' && quickPlayStep === 'car';
     if (!isCarSelectStep && activeGarageTab !== 'dealer') {
-      previewCar?.(activeCarId);
+      previewCar?.(activeCarId, selectedColor);
     }
-  }, [driveSubMode, quickPlayStep, activeGarageTab, activeCarId, previewCar]);
+  }, [driveSubMode, quickPlayStep, activeGarageTab, activeCarId, previewCar, selectedColor]);
 
   React.useEffect(() => {
     const tracks = getRaceableQuickPlayTracks().filter(
@@ -2353,6 +2349,7 @@ export default function Garage({
   };
 
   const activeCarConfig = CARS_DATABASE.find((car) => car.id === activeCarId) || CARS_DATABASE[0];
+  const activeBrandMockupUrl = BRAND_STOCK_IMAGES[activeCarConfig.brand] || DEFAULT_BRAND_STOCK_IMAGE;
   const dealerCityConfig = DEALER_CITIES.find((city) => city.id === dealerCity);
   const dealerCars = getDealerCityCars(dealerCity);
   const dealerHoverConfig = DEALER_CITIES.find((city) => city.id === hoveredCity);
@@ -2385,6 +2382,36 @@ export default function Garage({
   const showroomBrandName = activeGarageTab === 'dealer'
     ? (selectedBrand !== 'All' ? selectedBrand : (dealerSelectedCarConfig?.brand || activeCarConfig.brand))
     : ((quickPlaySelectedBrand && quickPlaySelectedBrand !== 'All') ? quickPlaySelectedBrand : activeCarConfig.brand);
+  const resolvedDealerCarId = dealerMarketCars.some((car) => car.id === dealerSelectedCarId)
+    ? dealerSelectedCarId
+    : (dealerMarketCars[0]?.id || null);
+  const dealerPreviewCarId = activeMarketMode === 'museum'
+    ? (BRAND_LORE[selectedBrand]?.signatureCarId || null)
+    : resolvedDealerCarId;
+
+  React.useEffect(() => {
+    if (
+      activeGarageTab !== 'dealer' ||
+      activeMarketMode === null ||
+      dealerPreviewCarId === null
+    ) {
+      return;
+    }
+
+    previewCar?.(dealerPreviewCarId);
+  }, [activeGarageTab, activeMarketMode, dealerPreviewCarId, previewCar]);
+
+  React.useEffect(() => {
+    const activeDealerMode = activeGarageTab === 'dealer'
+      ? (marketCrossFadeTarget || dealerMarketMode)
+      : null;
+
+    onDealerShowroomChange?.(activeDealerMode, getBrandColor(showroomBrandName));
+  }, [activeGarageTab, dealerMarketMode, marketCrossFadeTarget, onDealerShowroomChange, showroomBrandName]);
+
+  React.useEffect(() => () => {
+    onDealerShowroomChange?.(null, '#06b6d4');
+  }, [onDealerShowroomChange]);
 
   const selectQuickPlayTrackByOffset = (offset: number) => {
     if (!quickPlayTracks.length) return;
@@ -2805,7 +2832,7 @@ export default function Garage({
                         <button
                           key={item.id}
                           onClick={() => handleDealerMarketChoice(item.id as DealerMarketMode)}
-                          className={`group relative flex flex-col items-center gap-2.5 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 active:scale-95 ${!brandCrossFadeTarget && !marketCrossFadeTarget && !hasVisitedCategoryRef.current ? 'animate-brandPop' : ''}`}
+                          className={`group relative flex flex-col items-center gap-2.5 bg-transparent border-none outline-none cursor-pointer transition-all duration-300 transform hover:scale-110 active:scale-95 ${!brandCrossFadeTarget && !brandBackCrossFade && !marketCrossFadeTarget && !marketBackCrossFade && !hasVisitedCategoryRef.current ? 'animate-brandPop' : ''}`}
                         >
                           {/* Circular icon token */}
                           <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-950/80 border border-white/12 transition-all duration-300 ${item.accent}`}>
@@ -2896,14 +2923,14 @@ export default function Garage({
                 </div>
               )}
 
-              {dealerPage === 'city' && dealerCityConfig && dealerMarketMode === 'museum' && (() => {
+              {dealerPage === 'city' && dealerCityConfig && activeMarketMode === 'museum' && (() => {
                 const lore = BRAND_LORE[selectedBrand];
                 if (!lore) return null;
                 const brandColor = getBrandColor(selectedBrand);
                 const signatureCar = CARS_DATABASE.find((c) => c.id === lore.signatureCarId);
 
                 return (
-                  <div className="pointer-events-auto flex flex-col gap-6 overflow-y-auto pb-6 pr-2 min-h-0 flex-1 animate-fadeIn">
+                  <div className={`pointer-events-auto flex flex-col gap-6 overflow-y-auto pb-6 pr-2 min-h-0 flex-1 ${marketCrossFadeTarget === 'museum' ? 'animate-crossFadeIn' : marketBackCrossFade === 'museum' ? 'animate-crossFadeOut pointer-events-none' : 'opacity-100'}`}>
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
                       {/* Left Block: Brand Overview & Info */}
@@ -3044,7 +3071,7 @@ export default function Garage({
               })()}
 
               {dealerPage === 'city' && dealerCityConfig && (dealerMarketMode || marketCrossFadeTarget || marketBackCrossFade) && (dealerMarketMode !== 'museum' && marketCrossFadeTarget !== 'museum') && dealerMarketCars.length > 0 && (() => {
-                const activeDealerCar = CARS_DATABASE.find((c) => c.id === dealerSelectedCarId) || dealerMarketCars[0];
+                const activeDealerCar = dealerMarketCars.find((car) => car.id === dealerSelectedCarId) || dealerMarketCars[0];
                 const isCarUnlocked = purchasedCars.includes(activeDealerCar.id);
                 const isCarActive = activeCarId === activeDealerCar.id;
                 const canAffordCar = playerCredits >= activeDealerCar.price;
@@ -3120,7 +3147,7 @@ export default function Garage({
                       {/* Right: Action Buttons */}
                       <div className="flex gap-3 items-center w-full md:w-auto justify-end">
                         <button
-                          onClick={() => setDealerMarketMode(null)}
+                          onClick={handleDealerBackClick}
                           className="px-4 py-2.5 border border-cyan-500/30 hover:border-cyan-400 bg-zinc-900/80 hover:bg-cyan-950/40 text-[10px] font-black uppercase tracking-widest text-cyan-300 rounded-xl transition-all cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.15)] hover:shadow-[0_0_16px_rgba(6,182,212,0.35)]"
                         >
                           CATEGORIES
@@ -3143,9 +3170,6 @@ export default function Garage({
                             disabled={!canAffordCar || isSuperLockedCar}
                             onClick={() => {
                               buyCar(activeDealerCar);
-                              if (typeof window !== 'undefined') {
-                                (window as any).gameEngine?.triggerPurchaseCelebration?.();
-                              }
                             }}
                             className={`group relative flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${isSuperLockedCar
                               ? 'bg-zinc-900 border border-zinc-800 text-zinc-500 cursor-not-allowed'
@@ -3431,33 +3455,59 @@ export default function Garage({
         <div
           className={`absolute inset-0 z-10 flex items-center justify-center pointer-events-auto transition-all duration-700 ${isQuickPlayMapSelect
             ? (hideGarageBackground ? 'bg-black p-0' : 'bg-transparent p-0')
-            : 'bg-zinc-950/40 backdrop-blur-md p-8'
+            : driveSubMode === null
+              ? 'bg-transparent p-0'
+              : 'bg-zinc-950/40 backdrop-blur-md p-8'
             } ${isTransitioningDrive ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}
         >
-          <div className={`w-full flex flex-col text-left h-full justify-center ${isQuickPlayMapSelect ? 'max-w-none max-h-none gap-0' : 'max-w-4xl max-h-[620px] gap-6'}`}>
-            {/* 1. Mode Selection Screen */}
+          <div className={`w-full flex flex-col text-left h-full justify-center ${isQuickPlayMapSelect || driveSubMode === null ? 'max-w-none max-h-none gap-0' : 'max-w-4xl max-h-[620px] gap-6'}`}>
+            {/* 1. Reference-inspired Mode Selection Screen */}
             {driveSubMode === null && (
-              <>
-                <div className="flex justify-between items-center pb-4 border-b border-zinc-900 shrink-0">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-extrabold tracking-[0.4em] text-rose-500 uppercase italic">
-                      VELOCITY
-                    </span>
-                    <h2 className="text-2xl font-black text-white tracking-wider uppercase">
-                      SELECT MODE
-                    </h2>
+              <section className="relative isolate flex h-full min-h-0 w-full overflow-hidden bg-[#fbfbf8] text-left">
+                {/* White mock-image field. The local vehicle render sits here instead of a remote photo. */}
+                <div className="absolute inset-x-0 top-0 h-[calc(100%-296px)] sm:h-[85%] overflow-hidden bg-[#fbfbf8]">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_36%,rgba(255,255,255,1),rgba(248,249,247,0.92)_62%,rgba(232,236,235,0.8)_100%)]" />
+                  <div className="absolute left-[12%] top-[18%] h-40 w-40 rounded-full bg-cyan-300/10 blur-3xl" />
+                  <div className="pointer-events-none absolute inset-x-[10%] top-[12%] bottom-[10%] border border-zinc-900/[0.08]" />
+                  <div className="pointer-events-none absolute right-[7%] top-[18%] hidden select-none text-right text-[clamp(5rem,14vw,13rem)] font-black uppercase leading-[0.72] tracking-[-0.08em] text-zinc-950/[0.045] lg:block">DRIVE</div>
+                  <div className="absolute right-[8%] top-[31%] z-20 hidden text-right lg:block">
+                    <p className="text-[9px] font-black uppercase tracking-[0.32em] text-zinc-500">01 / VEHICLE PREVIEW</p>
+                    <p className="mt-3 text-3xl font-black uppercase leading-[0.85] tracking-[-0.04em] text-zinc-900/75">READY<br />TO DRIVE</p>
                   </div>
-                  <button
-                    onClick={handleBackToGarage}
-                    className="px-5 py-2.5 border border-zinc-800 hover:border-zinc-700 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-zinc-300 rounded-xl transition-all cursor-pointer"
-                  >
-                    BACK TO GARAGE
-                  </button>
+                  <img
+                    src={activeBrandMockupUrl}
+                    alt={`${activeCarConfig.brand} vehicle mockup`}
+                    className="absolute inset-0 z-10 h-full w-full object-cover object-center opacity-90 mix-blend-multiply"
+                    draggable={false}
+                    onError={(event) => {
+                      event.currentTarget.hidden = true;
+                    }}
+                  />
+                  <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-r from-white/35 via-transparent to-white/25" />
+                  <div className="absolute bottom-5 left-6 z-20 border-l-2 border-cyan-400 bg-white/75 px-4 py-2 backdrop-blur-sm sm:left-9">
+                    <p className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500">CURRENT VEHICLE / MOCKUP</p>
+                    <p className="mt-1 text-sm font-black uppercase tracking-wider text-zinc-900">{activeCarConfig.name}</p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 my-auto py-4">
-                  {/* Quick Play Card */}
+                {/* Minimal reference-style controls on the white field. */}
+                <div className="absolute left-6 top-6 z-30 sm:left-9 sm:top-8">
+                  <span className="text-[9px] font-black uppercase italic tracking-[0.36em] text-zinc-500">VELOCITY / DRIVE SYSTEM</span>
+                  <h2 className="mt-2 text-xl font-black uppercase tracking-[0.08em] text-zinc-950 sm:text-2xl">SELECT MODE</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleBackToGarage}
+                  className="absolute right-5 top-5 z-30 border border-zinc-300 bg-white/75 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-700 backdrop-blur-md transition-colors duration-300 hover:border-zinc-950 hover:text-zinc-950 sm:right-8 sm:top-8"
+                >
+                  BACK TO GARAGE
+                </button>
+
+                {/* The reference's bright lower split becomes the two mode actions. */}
+                <div className="absolute inset-x-0 bottom-0 z-auto grid h-auto min-h-[296px] grid-cols-1 overflow-visible rounded-[28px] shadow-[0_18px_50px_rgba(0,0,0,0.22)] sm:h-[15vh] sm:min-h-[104px] sm:max-h-[160px] sm:grid-cols-2">
+                  {/* Quick Play: cyan left block, with a diagonal upper-right edge on larger screens. */}
                   <button
+                    type="button"
                     onClick={() => {
                       setDriveSubMode('quickplay');
                       setQuickPlayStep('map');
@@ -3465,62 +3515,58 @@ export default function Garage({
                       setQuickPlayLapCount(3);
                       setQuickPlayDifficulty('normal');
                     }}
-                    className="group relative border border-zinc-855 bg-zinc-900/40 hover:bg-zinc-900/70 p-8 rounded-3xl flex flex-col justify-between text-left transition-all duration-300 transform hover:-translate-y-1.5 hover:animate-glowPulseCyan h-80 cursor-pointer overflow-hidden"
+                    className="group relative z-40 flex min-h-[148px] flex-1 flex-col justify-between overflow-visible bg-transparent p-4 text-left text-zinc-950 transition-[filter] duration-300 hover:brightness-105 sm:min-h-0 sm:flex-row sm:items-center sm:gap-4 sm:py-3 sm:pl-8 sm:pr-12 lg:pl-12 lg:pr-16"
                   >
-                    <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/0 via-cyan-500/0 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-
-                    <div className="flex flex-col gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-cyan-950/40 border border-cyan-900/50 flex items-center justify-center group-hover:scale-110 group-hover:border-cyan-500/40 group-hover:bg-cyan-950/65 transition-all duration-300">
-                        <Play className="w-6 h-6 text-cyan-400 fill-cyan-400/20 group-hover:text-cyan-300 group-hover:fill-cyan-300/40 transition-colors" />
-                      </div>
-                      <div>
-                        <h3 className="text-2xl font-black text-white tracking-wide uppercase group-hover:text-cyan-300 transition-colors">
-                          Quick Play
-                        </h3>
-                        <p className="text-[10px] font-extrabold tracking-[0.2em] text-cyan-400 uppercase mt-1">
-                          No Restrictions
-                        </p>
-                      </div>
-                      <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mt-1">
-                        Drive any car in the game immediately on any circuit. Cars use stock configuration. Races do not award credits.
-                      </p>
+                    <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-0 overflow-hidden bg-[#27d3e3] sm:-left-[40%] sm:right-auto sm:w-[140%] sm:[clip-path:polygon(0_0,100%_95%_100%,0_100%)]">
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/25 via-transparent to-cyan-900/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
                     </div>
-
-                    <div className="flex items-center gap-1.5 text-xs font-black tracking-widest text-cyan-400 group-hover:translate-x-1.5 transition-transform duration-300">
-                      CHOOSE MAP &rarr;
+                    <div className="pointer-events-none absolute -right-4 top-1/2 z-10 -translate-y-1/2 select-none text-[clamp(6rem,12vw,10rem)] font-black leading-none tracking-[-0.12em] text-cyan-950/[0.08]">01</div>
+                    <div className="relative">
+                      <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-950/65">OPEN GRID / 01</p>
+                      <div className="mt-2 flex items-center gap-3">
+                        <Play className="h-5 w-5 shrink-0" fill="currentColor" fillOpacity={0.14} />
+                        <h3 className="text-2xl font-black uppercase tracking-wide sm:text-3xl lg:text-4xl">Quick Play</h3>
+                      </div>
+                    </div>
+                    <div className="relative mt-2 max-w-sm sm:mt-0 sm:max-w-[250px] sm:text-right">
+                      <p className="text-[10px] font-semibold leading-tight text-cyan-950/80 sm:text-[11px]">Any car. Any circuit. No restrictions. Choose a map and race immediately.</p>
+                      <span className="mt-2 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] sm:justify-end text-cyan-950 transition-transform duration-300 group-hover:translate-x-1">CHOOSE MAP <span aria-hidden="true">→</span></span>
                     </div>
                   </button>
 
-                  {/* Career Mode Card */}
+                  {/* Career: rose right block, meeting cyan at the angled divider. */}
                   <button
+                    type="button"
                     onClick={() => setDriveSubMode('career')}
-                    className="group relative border border-zinc-855 bg-zinc-900/40 hover:bg-zinc-900/70 p-8 rounded-3xl flex flex-col justify-between text-left transition-all duration-300 transform hover:-translate-y-1.5 hover:animate-glowPulseRose h-80 cursor-pointer overflow-hidden"
+                    className={[
+                      // Base layout and stacking.
+                      'group relative z-10 flex min-h-[148px] flex-1 flex-col justify-between',
+                      // Rose panel appearance and interaction.
+                      'overflow-hidden rounded-[26px] bg-[#e50055] p-4 text-left text-white',
+                      'transition-[filter] duration-300 hover:brightness-110',
+                      // Compact horizontal layout on larger screens.
+                      'sm:min-h-0 sm:flex-row sm:items-center sm:gap-4 sm:py-3',
+                      // Slanted left edge and responsive horizontal padding.
+                      'sm:[clip-path:polygon(0_0,100%_0,100%_100%,-10%_100%)]',
+                      'sm:pl-12 sm:pr-8 lg:pl-16 lg:pr-12',
+                    ].join(' ')}
                   >
-                    <div className="absolute inset-0 bg-gradient-to-br from-rose-500/0 via-rose-500/0 to-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-
-                    <div className="flex flex-col gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-rose-950/40 border border-rose-900/50 flex items-center justify-center group-hover:scale-110 group-hover:border-rose-500/40 group-hover:bg-rose-950/65 transition-all duration-300">
-                        <Trophy className="w-6 h-6 text-rose-550 group-hover:text-rose-400 transition-colors" />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-rose-950/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                    <div className="relative">
+                      <div className="mt-2 flex items-center gap-3">
+                        <Trophy className="h-5 w-5 shrink-0 text-rose-100" />
+                        <h3 className="text-2xl font-black uppercase tracking-wide sm:text-3xl lg:text-4xl">Career Mode</h3>
                       </div>
-                      <div>
-                        <h3 className="text-2xl font-black text-white tracking-wide uppercase group-hover:text-rose-400 transition-colors">
-                          Career Mode
-                        </h3>
-                        <p className="text-[10px] font-extrabold tracking-[0.2em] text-rose-500 uppercase mt-1">
-                          Championships & School
-                        </p>
-                      </div>
-                      <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mt-1">
-                        Complete Driving School, earn Licenses, and race in Circuits using your owned cars. Earn credits to buy and tune cars.
-                      </p>
                     </div>
-
-                    <div className="flex items-center gap-1.5 text-xs font-black tracking-widest text-rose-500 group-hover:translate-x-1.5 transition-transform duration-300">
-                      ENTER CAREER &rarr;
+                    <div className="relative mt-2 max-w-sm sm:mt-0 sm:max-w-[250px] sm:text-right">
+                      <p className="text-[10px] font-semibold leading-tight text-rose-50/90 sm:text-[11px]">Earn licenses, build your garage, and climb every circuit with your owned cars.</p>
+                      <span className="mt-2 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] sm:justify-end text-white transition-transform duration-300 group-hover:translate-x-1">ENTER CAREER <span aria-hidden="true">→</span></span>
                     </div>
                   </button>
                 </div>
-              </>
+                <div className="pointer-events-none absolute inset-0 z-30 hidden bg-gradient-to-b from-rose-600 via-violet-500 to-cyan-400 shadow-[0_0_8px_rgba(59,130,246,0.32)] [clip-path:polygon(66.7%_0,67.9%_0,44.6%_100%,43.4%_100%)] sm:block" />
+
+              </section>
             )}
 
             {/* 2. Quick Play Mode */}

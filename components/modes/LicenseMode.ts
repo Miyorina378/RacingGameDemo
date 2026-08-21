@@ -46,13 +46,20 @@ export class LicenseMode extends BaseMode {
     const startPt = this.pathVectors[0];
     const nextPt = this.pathVectors[1] || this.pathVectors[0];
     this.startPos.copy(startPt);
-    this.startPos.y = 0.5; // car height on ground
     const diff = new THREE.Vector3().subVectors(nextPt, startPt);
     this.startYaw = Math.atan2(diff.x, diff.z);
 
-    this.vehicle.reset(this.startPos, this.startYaw);
-
     this.createGridFloor();
+
+    // The road has to exist before the car is placed on it: the start height comes
+    // from the surface, not from a hardcoded 0.5 that only matched a track sitting
+    // at that exact elevation.
+    this.createTerrain(trackConfig, trackConfig.time);
+    this.createRacetrackRoad(trackConfig);
+    this.createScenery(trackConfig.scenery, trackConfig.time);
+
+    this.startPos.y = this.getGroundHeight(this.startPos.x, this.startPos.z, startPt.y);
+    this.vehicle.reset(this.startPos, this.startYaw);
 
     // Create sequentially linked checkpoint entities
     this.checkpoints = [];
@@ -83,10 +90,6 @@ export class LicenseMode extends BaseMode {
     finishCheckpoint.mesh.visible = false; // Hide initially
     this.environmentGroup.add(finishCheckpoint.mesh);
     this.checkpoints.push(finishCheckpoint);
-
-    // Create visual road mesh with curbs and fences
-    this.createRacetrackRoad(trackConfig);
-    this.createScenery(trackConfig.scenery, trackConfig.time);
 
     this.activeCheckpointIndex = 0;
     this.engine.callbacks.onCheckpointChange(0, this.checkpoints.length);

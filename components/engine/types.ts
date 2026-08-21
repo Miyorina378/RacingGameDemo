@@ -1,3 +1,5 @@
+import { DEFAULT_TERRAIN_BRUSH_RADIUS } from '../modes/terrain';
+
 export type GameModeName = 'garage' | 'free_roam' | 'license' | 'race' | 'tutorial' | 'editor';
 
 export type GameStatus = 'idle' | 'countdown' | 'playing' | 'success' | 'failed';
@@ -58,6 +60,13 @@ export interface EditorNode {
   sharp?: boolean;
   /** How far back from the vertex the corner fillet starts. Only used when sharp. */
   cornerRadius?: number;
+  // Per-side overrides. Unset means inherit the track-wide default.
+  leftCurb?: boolean;
+  rightCurb?: boolean;
+  leftFence?: boolean;
+  rightFence?: boolean;
+  leftGrassWidth?: number;
+  rightGrassWidth?: number;
 }
 
 /**
@@ -114,10 +123,23 @@ export interface EditorState {
   tool: string;
   snapToGrid: number;
   /**
+   * Half-extent of the placeable map in world units. Kept separate from
+   * snapToGrid: the bound used to be derived from the snap size, so turning
+   * snapping off collapsed the bound to zero and pinned everything to the origin.
+   */
+  gridLimit: number;
+  /**
    * When true, decoration ignores the track grid snap so it can be positioned
    * anywhere. Track nodes always keep snapping.
    */
   sceneryFreeMove: boolean;
+  /** Which editor surface is being edited: track nodes, decoration, or terrain. */
+  editLayer: 'track' | 'decorate' | 'terrain';
+  terrainBrush: 'raise' | 'lower' | 'smooth' | 'flatten';
+  terrainBrushRadius: number;
+  terrainBrushStrength: number;
+  /** Fires after a sculpt stroke so React can persist the new heightmap. */
+  onTerrainChange: (() => void) | null;
   cornerHeight: number;
   selectedNodeIndex: number | null;
   selectedSceneryIndex: number | null;
@@ -139,7 +161,13 @@ export function createDefaultEditorState(): EditorState {
     scenery: [],
     tool: 'node',
     snapToGrid: 10,
+    gridLimit: 250,
     sceneryFreeMove: true,
+    editLayer: 'track',
+    terrainBrush: 'raise',
+    terrainBrushRadius: DEFAULT_TERRAIN_BRUSH_RADIUS,
+    terrainBrushStrength: 1.5,
+    onTerrainChange: null,
     cornerHeight: 2,
     selectedNodeIndex: null,
     selectedSceneryIndex: null,

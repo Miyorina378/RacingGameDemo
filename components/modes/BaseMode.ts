@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TrackConfig, TrackScenery } from '../config/TrackDatabase';
+import { TrackConfig, TrackNode, TrackScenery } from '../config/TrackDatabase';
 import { buildCenterline } from './centerline';
 import { CURB_WIDTH, resolveTrackNodes } from './trackNodes';
 import {
@@ -12,6 +12,14 @@ import {
   variationAt
 } from './sceneryDecor';
 import { TimeOfDay } from '../engine/types';
+import {
+  CellRect,
+  Heightmap,
+  TERRAIN_CELL_SIZE,
+  cellToWorld,
+  conformToRoad,
+  worldToCell
+} from './terrain';
 import { GameEngine } from '../gameEngine';
 import { Vehicle } from '../objects/Vehicle';
 import { ParticleSystem } from '../objects/ParticleSystem';
@@ -49,8 +57,21 @@ export abstract class BaseMode implements GameMode {
   protected roadSampleRightPoints: THREE.Vector3[] = [];
   protected roadSampleLeftScale: number[] = [];
   protected roadSampleRightScale: number[] = [];
+  /**
+   * Fractional position in node-index space at each road sample, so a point on the
+   * ribbon can be traced back to the pair of nodes it lies between. The editor uses
+   * it to drop a new node into the right place in the lap.
+   */
+  protected roadSampleNodeIndex: number[] = [];
   protected roadWidth: number = 14;
   protected curbWidth: number = CURB_WIDTH;
+  /** Sculpted ground under the whole map. Empty means a flat world at y = 0. */
+  public terrain = new Heightmap();
+  protected terrainMesh: THREE.Mesh | null = null;
+  private terrainCols = 0;
+  private terrainRows = 0;
+  private terrainMinCol = 0;
+  private terrainMinRow = 0;
   protected curbHeight: number = 0.15;
   protected grassWidth: number = 5.0;
   protected haveGrass: boolean = false;
@@ -83,6 +104,7 @@ export abstract class BaseMode implements GameMode {
     // Assign ground height and boundary callbacks to the player vehicle
     this.vehicle.getGroundHeight = (x: number, z: number, yHint?: number) =>
       this.getGroundHeight(x, z, yHint);
+    this.vehicle.getSlopeHeight = (x: number, z: number) => this.getSlopeHeight(x, z);
     this.vehicle.getTrackInfo = (x: number, z: number, yHint?: number) =>
       this.getTrackInfo(x, z, yHint);
     this.vehicle.onFenceCollision = (contactPt: THREE.Vector3) => {
@@ -171,9 +193,156 @@ export abstract class BaseMode implements GameMode {
     }
   }
 
+  /**
+   * Builds the sculpted ground under the track. Must run before the road, since
+   * the road's verges and getGroundHeight both read from it.
+   */
+  protected createTerrain(config: TrackConfig, time: TimeOfDay = 'afternoon') {
+    this.terrain = Heightmap.deserialize(config.terrain);
+
+    // Size the grid to the track plus a margin, so a small course does not pay
+    // for a huge mesh and a big one still has ground out to the horizon.
+    let extent = 400;
+    for (const point of config.path) {
+      const pos = 'isVector3' in point ? (point as THREE.Vector3) : (point as TrackNode).pos;
+      extent = Math.max(extent, Math.abs(pos.x), Math.abs(pos.z));
+    }
+    const halfSpan = THREE.MathUtils.clamp(extent + 300, 800, 1280);
+
+    this.terrainMinCol = worldToCell(-halfSpan);
+    this.terrainMinRow = worldToCell(-halfSpan);
+    this.terrainCols = worldToCell(halfSpan) - this.terrainMinCol;
+    this.terrainRows = worldToCell(halfSpan) - this.terrainMinRow;
+
+    const cols = this.terrainCols + 1;
+    const rows = this.terrainRows + 1;
+    const positions = new Float32Array(cols * rows * 3);
+    const normals = new Float32Array(cols * rows * 3);
+    const indices: number[] = [];
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const i = (row * cols + col) * 3;
+        positions[i] = cellToWorld(this.terrainMinCol + col);
+        positions[i + 1] = this.terrain.get(this.terrainMinCol + col, this.terrainMinRow + row);
+        positions[i + 2] = cellToWorld(this.terrainMinRow + row);
+      }
+    }
+    for (let row = 0; row < rows - 1; row++) {
+      for (let col = 0; col < cols - 1; col++) {
+        const a = row * cols + col;
+        indices.push(a, a + cols, a + 1, a + 1, a + cols, a + cols + 1);
+      }
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geom.setIndex(indices);
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: gradeColor(0x5c7a4a, time),
+      roughness: 0.95,
+      metalness: 0
+    });
+    this.terrainMesh = new THREE.Mesh(geom, mat);
+    this.terrainMesh.receiveShadow = true;
+    this.terrainMesh.name = 'terrain';
+    this.environmentGroup.add(this.terrainMesh);
+
+    this.refreshTerrainRegion();
+  }
+
+  /**
+   * Rewrites vertex heights and normals for one patch of terrain. Brush strokes
+   * pass the rect they touched so a stroke costs the brush area, not the map.
+   */
+  public refreshTerrainRegion(rect?: CellRect) {
+    if (!this.terrainMesh) return;
+    const geom = this.terrainMesh.geometry;
+    const position = geom.getAttribute('position') as THREE.BufferAttribute;
+    const normal = geom.getAttribute('normal') as THREE.BufferAttribute;
+    const cols = this.terrainCols + 1;
+    const rows = this.terrainRows + 1;
+
+    // One vertex of padding, because a moved cell also tilts its neighbours.
+    const minCol = Math.max(0, (rect ? rect.minCol - this.terrainMinCol : 0) - 1);
+    const maxCol = Math.min(cols - 1, (rect ? rect.maxCol - this.terrainMinCol : cols - 1) + 1);
+    const minRow = Math.max(0, (rect ? rect.minRow - this.terrainMinRow : 0) - 1);
+    const maxRow = Math.min(rows - 1, (rect ? rect.maxRow - this.terrainMinRow : rows - 1) + 1);
+    if (minCol > maxCol || minRow > maxRow) return;
+
+    for (let row = minRow; row <= maxRow; row++) {
+      for (let col = minCol; col <= maxCol; col++) {
+        position.setY(
+          row * cols + col,
+          this.terrain.get(this.terrainMinCol + col, this.terrainMinRow + row)
+        );
+      }
+    }
+
+    // A heightfield's normal is exact from the slope, so central differences beat
+    // a full computeVertexNormals pass over the whole mesh.
+    const heightAt = (col: number, row: number) =>
+      this.terrain.get(this.terrainMinCol + col, this.terrainMinRow + row);
+    for (let row = minRow; row <= maxRow; row++) {
+      for (let col = minCol; col <= maxCol; col++) {
+        const dx = heightAt(col + 1, row) - heightAt(col - 1, row);
+        const dz = heightAt(col, row + 1) - heightAt(col, row - 1);
+        const n = new THREE.Vector3(-dx, 2 * TERRAIN_CELL_SIZE, -dz).normalize();
+        normal.setXYZ(row * cols + col, n.x, n.y, n.z);
+      }
+    }
+
+    position.needsUpdate = true;
+    normal.needsUpdate = true;
+    geom.computeBoundingSphere();
+  }
+
+  /**
+   * Cut and fill: carves a shelf at road height along the whole track and ramps
+   * the sides back out to whatever the terrain was already doing. This is what
+   * puts a hill under a road that climbs, instead of leaving it on a ribbon.
+   */
+  public conformTerrainToRoad(corridor = 26, embankment = 90) {
+    if (this.roadSamplePoints.length === 0) return;
+
+    conformToRoad(
+      this.terrain,
+      (x, z) => {
+        const info = this.getTrackInfo(x, z);
+        // getTrackInfo always returns its nearest sample, so reject anything
+        // beyond reach here rather than dragging distant ground to road height.
+        if (info.dist > corridor + embankment) return null;
+        return { distance: info.dist, height: info.closestPt.y };
+      },
+      {
+        corridor,
+        embankment,
+        bounds: {
+          minCol: this.terrainMinCol,
+          minRow: this.terrainMinRow,
+          maxCol: this.terrainMinCol + this.terrainCols,
+          maxRow: this.terrainMinRow + this.terrainRows
+        }
+      }
+    );
+
+    this.refreshTerrainRegion();
+  }
+
   protected createRacetrackRoad(config: TrackConfig) {
     const pathPointsRaw = config.path;
-    if (pathPointsRaw.length < 3) return;
+    if (pathPointsRaw.length < 3) {
+      // Too few nodes for a ribbon. Drop the old samples rather than leaving them:
+      // in the editor a track can be taken back below three nodes, and stale samples
+      // would keep answering getGroundHeight with the previous layout's surface.
+      this.roadSamplePoints = [];
+      this.roadSampleLeftPoints = [];
+      this.roadSampleRightPoints = [];
+      this.roadSampleNodeIndex = [];
+      return;
+    }
 
     this.haveFence = config.HaveFence;
     this.haveGrass = config.HaveGrass ?? false;
@@ -238,10 +407,12 @@ export abstract class BaseMode implements GameMode {
     const sampleRightGrassWidths: number[] = [];
     const sampleLeftFences: boolean[] = [];
     const sampleRightFences: boolean[] = [];
+    const sampleNodeIndex: number[] = [];
     for (let i = 0; i < samplePoints.length; i++) {
         // Handle closed curve last point duplicating the first
         const u = i === samplePoints.length - 1 ? 1 : i / (samplePoints.length - 1);
         const exactIdx = centerline.nodeIndexAt(u); // Arc-length position in node-index space
+        sampleNodeIndex.push(exactIdx);
         const idx0 = Math.floor(exactIdx) % roadPoints.length;
         const idx1 = (idx0 + 1) % roadPoints.length;
         const frac = exactIdx - Math.floor(exactIdx);
@@ -279,6 +450,7 @@ export abstract class BaseMode implements GameMode {
     this.roadSampleRightGrassWidths = sampleRightGrassWidths;
     this.roadSampleLeftFences = sampleLeftFences;
     this.roadSampleRightFences = sampleRightFences;
+    this.roadSampleNodeIndex = sampleNodeIndex;
 
     const leftPoints: THREE.Vector3[] = [];
     const rightPoints: THREE.Vector3[] = [];
@@ -1683,10 +1855,24 @@ export abstract class BaseMode implements GameMode {
     }
   }
 
+  /**
+   * Where a world position sits relative to the road ribbon.
+   *
+   * The answer comes from the nearest *segment*, not the nearest sample point.
+   * Samples sit 4m apart, so reading one sample made every road property — the
+   * surface height most of all — a staircase with a step every 4m. A car cannot
+   * ride a staircase, which is why an elevated or climbing road behaved like
+   * scenery the car happened to hover near rather than something it sat on.
+   *
+   * `frac` is how far along segment `closestIdx` the point falls, and is what
+   * lets getGroundHeight interpolate the actual mesh quad the car is over.
+   */
   public getTrackInfo(x: number, z: number, yHint?: number): {
     dist: number;
     closestPt: THREE.Vector3;
     closestIdx: number;
+    /** Position along the segment from `closestIdx` to `closestIdx + 1`, 0..1. */
+    frac: number;
     width: number;
     leftScale?: number;
     rightScale?: number;
@@ -1698,11 +1884,12 @@ export abstract class BaseMode implements GameMode {
     grassWidth?: number;
     fence?: boolean;
   } {
-    if (this.roadSamplePoints.length === 0) {
+    if (this.roadSamplePoints.length < 2) {
       return {
         dist: 0,
         closestPt: new THREE.Vector3(x, 0, z),
         closestIdx: 0,
+        frac: 0,
         width: this.roadWidth,
         leftScale: 1.0,
         rightScale: 1.0,
@@ -1750,20 +1937,70 @@ export abstract class BaseMode implements GameMode {
       }
     }
 
-    const closestPt = this.roadSamplePoints[closestIdx];
-    const width = this.roadSampleWidths[closestIdx] ?? this.roadWidth;
-    const lScale = this.roadSampleLeftScale[closestIdx] ?? 1.0;
-    const rScale = this.roadSampleRightScale[closestIdx] ?? 1.0;
+    // Refine onto the ribbon itself by projecting across the segments either side
+    // of that sample. A closed loop repeats its first point at the end, so segment
+    // i always runs from sample i to sample i + 1.
+    const segCount = len - 1;
+    const closedLoop =
+      segCount > 1 &&
+      this.roadSamplePoints[0].distanceToSquared(this.roadSamplePoints[len - 1]) < 0.01;
+    const wrapSeg = (i: number) =>
+      closedLoop
+        ? ((i % segCount) + segCount) % segCount
+        : THREE.MathUtils.clamp(i, 0, segCount - 1);
+
+    let segIdx = wrapSeg(closestIdx);
+    let segFrac = 0;
+    let bestOffsetSq = Infinity;
+    for (let offset = -2; offset <= 1; offset++) {
+      const s = wrapSeg(closestIdx + offset);
+      const from = this.roadSamplePoints[s];
+      const to = this.roadSamplePoints[s + 1];
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const lengthSq = dx * dx + dz * dz;
+      if (lengthSq < 1e-8) continue;
+      const t = THREE.MathUtils.clamp(
+        ((px - from.x) * dx + (pz - from.z) * dz) / lengthSq,
+        0,
+        1
+      );
+      const offX = px - (from.x + dx * t);
+      const offZ = pz - (from.z + dz * t);
+      const offsetSq = offX * offX + offZ * offZ;
+      if (offsetSq < bestOffsetSq) {
+        bestOffsetSq = offsetSq;
+        segIdx = s;
+        segFrac = t;
+      }
+    }
+
+    const nextIdx = segIdx + 1;
+    const segStart = this.roadSamplePoints[segIdx];
+    const segEnd = this.roadSamplePoints[nextIdx];
+    const closestPt = new THREE.Vector3().lerpVectors(segStart, segEnd, segFrac);
+
+    const lerpSample = (values: number[], fallback: number) => {
+      const v0 = values[segIdx] ?? fallback;
+      const v1 = values[nextIdx] ?? v0;
+      return v0 + (v1 - v0) * segFrac;
+    };
+    // Per-side flags are one boolean per sample, so the nearer sample wins rather
+    // than trying to interpolate an on/off.
+    const flagIdx = segFrac < 0.5 ? segIdx : nextIdx;
+
+    const width = lerpSample(this.roadSampleWidths, this.roadWidth);
+    const lScale = lerpSample(this.roadSampleLeftScale, 1.0);
+    const rScale = lerpSample(this.roadSampleRightScale, 1.0);
 
     // Compute sideSign (1 = left, -1 = right)
-    const tangent = new THREE.Vector3();
-    if (closestIdx < len - 1) {
-      tangent.subVectors(this.roadSamplePoints[closestIdx + 1], closestPt);
-    } else {
-      tangent.subVectors(this.roadSamplePoints[1], this.roadSamplePoints[0]);
-    }
-    tangent.y = 0;
-    tangent.normalize();
+    const tangent = new THREE.Vector3(
+      segEnd.x - segStart.x,
+      0,
+      segEnd.z - segStart.z
+    );
+    if (tangent.lengthSq() < 1e-8) tangent.set(0, 0, 1);
+    else tangent.normalize();
     const normal = new THREE.Vector3(0, 1, 0).cross(tangent).normalize();
 
     const toCar = new THREE.Vector3(px - closestPt.x, 0, pz - closestPt.z);
@@ -1772,16 +2009,19 @@ export abstract class BaseMode implements GameMode {
     const activeScale = sideSign === 1 ? lScale : rScale;
     const activeCurb =
       sideSign === 1
-        ? this.roadSampleLeftCurbs[closestIdx]
-        : this.roadSampleRightCurbs[closestIdx];
+        ? this.roadSampleLeftCurbs[flagIdx]
+        : this.roadSampleRightCurbs[flagIdx];
     const activeGrassWidth =
-      (sideSign === 1
-        ? this.roadSampleLeftGrassWidths[closestIdx]
-        : this.roadSampleRightGrassWidths[closestIdx]) * activeScale;
+      lerpSample(
+        sideSign === 1
+          ? this.roadSampleLeftGrassWidths
+          : this.roadSampleRightGrassWidths,
+        0
+      ) * activeScale;
     const activeFence =
       sideSign === 1
-        ? this.roadSampleLeftFences[closestIdx]
-        : this.roadSampleRightFences[closestIdx];
+        ? this.roadSampleLeftFences[flagIdx]
+        : this.roadSampleRightFences[flagIdx];
 
     // Calculate dynamic track boundary on this side
     const halfWidth = (width / 2) * activeScale;
@@ -1790,12 +2030,13 @@ export abstract class BaseMode implements GameMode {
       (activeCurb ? this.curbWidth * activeScale : 0) +
       activeGrassWidth;
 
-    const banking = this.roadSampleBankings[closestIdx] ?? 0;
+    const banking = lerpSample(this.roadSampleBankings, 0);
 
     return {
       dist: Math.abs(dot),
-      closestPt: closestPt.clone(),
-      closestIdx: closestIdx,
+      closestPt: closestPt,
+      closestIdx: segIdx,
+      frac: segFrac,
       width: halfWidth * 2,
       leftScale: lScale,
       rightScale: rScale,
@@ -1914,6 +2155,19 @@ export abstract class BaseMode implements GameMode {
     const postGeom = new THREE.CylinderGeometry(0.08, 0.08, 3.2);
     const seatOverlay1Geom = new THREE.BoxGeometry(7.8, 0.1, 0.5);
 
+    /**
+     * Drops a prop onto the sculpted ground. The authored y is treated as height
+     * *above* terrain rather than an absolute world height, so a tree placed on a
+     * hillside sits on the slope instead of being buried at zero, and anything
+     * deliberately floated keeps its clearance when the ground moves under it.
+     */
+    const groundedPosition = (position: THREE.Vector3) =>
+      new THREE.Vector3(
+        position.x,
+        this.terrain.sampleAt(position.x, position.z) + position.y,
+        position.z
+      );
+
     // Foliage colour is jittered per instance, but bucketed so a forest needs a
     // handful of materials rather than one per tree.
     const leafMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -1953,7 +2207,7 @@ export abstract class BaseMode implements GameMode {
       const placeProp = (group: THREE.Object3D, strength = 1) => {
         const xz = 1 + (variation.scaleXZ - 1) * strength;
         const y = 1 + (variation.scaleY - 1) * strength;
-        group.position.copy(item.position);
+        group.position.copy(groundedPosition(item.position));
         group.scale.set(scale * xz, scale * y, scale * xz);
         // An authored rotation always wins; otherwise spin it deterministically.
         group.rotation.y = item.rotation ?? variation.rotation;
@@ -2031,7 +2285,7 @@ export abstract class BaseMode implements GameMode {
         snow.castShadow = true;
         mountainGroup.add(snow);
         
-        mountainGroup.position.copy(item.position);
+        mountainGroup.position.copy(groundedPosition(item.position));
         const heightScale = item.heightScale ?? scale;
         mountainGroup.scale.set(scale, heightScale, scale);
         if (item.rotation) {
@@ -2042,7 +2296,7 @@ export abstract class BaseMode implements GameMode {
         this.environmentGroup.add(mountainGroup);
       } else if (item.type === 'hill') {
         const hill = new THREE.Mesh(hillGeom, hillMat);
-        hill.position.copy(item.position);
+        hill.position.copy(groundedPosition(item.position));
         const heightScale = item.heightScale ?? (scale * 0.8);
         hill.scale.set(scale, heightScale, scale);
         hill.receiveShadow = true;
@@ -2162,7 +2416,7 @@ export abstract class BaseMode implements GameMode {
           blockGroup.add(tank);
         }
 
-        blockGroup.position.copy(item.position);
+        blockGroup.position.copy(groundedPosition(item.position));
         // Buildings are man-made, so no lean and no size noise: only the yaw,
         // snapped to 15 degrees so blocks still line up like a city grid.
         blockGroup.rotation.y =
@@ -2257,7 +2511,7 @@ export abstract class BaseMode implements GameMode {
           houseGroup.add(chimney);
         }
 
-        houseGroup.position.copy(item.position);
+        houseGroup.position.copy(groundedPosition(item.position));
         houseGroup.rotation.y = item.rotation ?? variation.rotation;
         houseGroup.userData = { isScenery: true, sceneryIndex: idx };
         this.environmentGroup.add(houseGroup);
@@ -2371,7 +2625,7 @@ export abstract class BaseMode implements GameMode {
           siteGroup.add(lamp);
         }
 
-        siteGroup.position.copy(item.position);
+        siteGroup.position.copy(groundedPosition(item.position));
         siteGroup.rotation.y =
           item.rotation ?? Math.round((variation.rotation / Math.PI) * 12) * (Math.PI / 12);
         siteGroup.userData = { isScenery: true, sceneryIndex: idx };
@@ -2452,7 +2706,7 @@ export abstract class BaseMode implements GameMode {
         seat3.castShadow = true;
         standGroup.add(seat3);
 
-        standGroup.position.copy(item.position);
+        standGroup.position.copy(groundedPosition(item.position));
         standGroup.scale.set(scale, scale, scale);
         if (item.rotation !== undefined) {
           standGroup.rotation.y = item.rotation;
@@ -2464,18 +2718,75 @@ export abstract class BaseMode implements GameMode {
     });
   }
 
+  /**
+   * The smooth surface the car rests on, ignoring curb lips and the verge step.
+   *
+   * Separate from getGroundHeight on purpose. That one has to include curbs and
+   * the grass drop so the suspension feels them, but feeding those steps into a
+   * slope calculation makes the ground appear to tilt violently the instant one
+   * wheel clips a kerb, and the resulting gravity kick reads as the car shaking.
+   * Which way is downhill has to come from something continuous.
+   */
+  public getSlopeHeight(x: number, z: number): number {
+    if (this.roadSamplePoints.length < 2) return this.terrain.sampleAt(x, z);
+
+    const info = this.getTrackInfo(x, z);
+    const reach = info.width / 2 + (info.grassWidth ?? 0) + this.curbWidth;
+    const terrainHeight = this.terrain.sampleAt(x, z);
+    // Same embankment rule as getGroundHeight, so which way the car thinks is
+    // downhill agrees with what is holding it up.
+    const shoulder = Math.max(12, Math.abs(info.closestPt.y - terrainHeight) * 1.5);
+    const blend = THREE.MathUtils.clamp((info.dist - reach) / shoulder, 0, 1);
+    return THREE.MathUtils.lerp(info.closestPt.y, terrainHeight, blend);
+  }
+
+  /**
+   * Where a point on the road sits in node-index space, or null if it is not on the
+   * tarmac. A result of 3.4 means "between node 3 and node 4", which is exactly what
+   * the editor needs to splice a new node into the lap without anyone typing an
+   * index. Only the road surface counts: clicking the grass beside it is a miss, so
+   * the editor can treat that as appending to the end instead.
+   */
+  public getNodeIndexAt(x: number, z: number): number | null {
+    if (this.roadSampleNodeIndex.length === 0) return null;
+
+    const info = this.getTrackInfo(x, z);
+    if (info.dist > info.width / 2) return null;
+
+    const from = this.roadSampleNodeIndex[info.closestIdx];
+    const to = this.roadSampleNodeIndex[info.closestIdx + 1];
+    if (from === undefined) return null;
+    // The sequence climbs to the node count and restarts at the seam; interpolating
+    // across that wrap would land the node at the wrong end of the lap.
+    if (to === undefined || to < from) return from;
+    return from + (to - from) * info.frac;
+  }
+
   public getGroundHeight(x: number, z: number, yHint?: number): number {
-    if (this.roadSamplePoints.length === 0 || this.roadSampleLeftPoints.length === 0 || this.roadSampleRightPoints.length === 0) return 0;
+    if (this.roadSamplePoints.length < 2 || this.roadSampleLeftPoints.length === 0 || this.roadSampleRightPoints.length === 0) {
+      return this.terrain.sampleAt(x, z);
+    }
 
     const info = this.getTrackInfo(x, z, yHint);
     const halfWidth = info.width / 2;
-    
-    // Find the left and right points for this segment
+
+    // The two road edges either end of the segment the car is over. Interpolating
+    // along the segment as well as across it makes this the actual mesh quad, so
+    // the surface the car rests on is the surface that was drawn — continuous,
+    // instead of a fresh flat step every sample.
     const idx = info.closestIdx;
-    const left = this.roadSampleLeftPoints[idx];
-    const right = this.roadSampleRightPoints[idx];
-    
-    if (!left || !right) return 0;
+    const nextIdx = Math.min(idx + 1, this.roadSampleLeftPoints.length - 1);
+    const leftStart = this.roadSampleLeftPoints[idx];
+    const leftEnd = this.roadSampleLeftPoints[nextIdx];
+    const rightStart = this.roadSampleRightPoints[idx];
+    const rightEnd = this.roadSampleRightPoints[nextIdx];
+
+    if (!leftStart || !leftEnd || !rightStart || !rightEnd) {
+      return this.terrain.sampleAt(x, z);
+    }
+
+    const left = new THREE.Vector3().lerpVectors(leftStart, leftEnd, info.frac);
+    const right = new THREE.Vector3().lerpVectors(rightStart, rightEnd, info.frac);
 
     // We interpolate the height between left and right points based on the XZ projection
     const segmentXZ = new THREE.Vector2(left.x - right.x, left.z - right.z);
@@ -2512,6 +2823,20 @@ export abstract class BaseMode implements GameMode {
       return THREE.MathUtils.lerp(innerHeight, outerHeight, t);
     }
 
-    return 0; // Off-track ground level
+    // Past the verge the ground is whatever the terrain says, reached down an
+    // embankment rather than a step.
+    const terrainHeight = this.terrain.sampleAt(x, z);
+    const vergeHeight =
+      localGrassWidth > 0
+        ? Math.max(info.closestPt.y + 0.02, baseRoadHeight - 0.24)
+        : baseRoadHeight;
+    // The embankment is sized by how far it has to fall, not by a fixed 6m. A road
+    // 30m up used to reach the ground over those same 6m, which is a wall at 79°:
+    // a wheel a metre off the edge read as 5m underground and dragged the whole car
+    // down with it. Capping the shoulder at about 1:1.5 keeps a raised road
+    // something the car sits on top of instead of something it slides off.
+    const shoulder = Math.max(6, Math.abs(vergeHeight - terrainHeight) * 1.5);
+    const blend = THREE.MathUtils.clamp((info.dist - grassEnd) / shoulder, 0, 1);
+    return THREE.MathUtils.lerp(vergeHeight, terrainHeight, blend);
   }
 }

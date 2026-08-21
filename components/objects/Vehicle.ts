@@ -70,6 +70,10 @@ export class Vehicle {
   private rimMaterials: THREE.MeshPhysicalMaterial[] = [];
   private underglowMaterial?: THREE.ShaderMaterial;
   private taillightMaterials: THREE.MeshStandardMaterial[] = [];
+  private visualGeneration = 0;
+  private committedVisualCarId: string | null = null;
+  private visualOrphanedGeometries = new Set<THREE.BufferGeometry>();
+  private visualOrphanedMaterials = new Set<THREE.Material>();
 
   // Physics parameters
   public pos = new THREE.Vector3(0, 0, 0);
@@ -87,6 +91,8 @@ export class Vehicle {
   public steeringTorqueNm = 0;
   public steeringAssistFraction = 0;
   public getGroundHeight?: (x: number, z: number, yHint?: number) => number;
+  /** Smooth support surface without curb or verge steps, used only for slope. */
+  public getSlopeHeight?: (x: number, z: number) => number;
   public getTrackInfo?: (x: number, z: number, yHint?: number) => {
     dist: number;
     closestPt: THREE.Vector3;
@@ -134,6 +140,11 @@ export class Vehicle {
   public suspensionOffset = 0;      // Vertical chassis displacement from suspension compression
   public prevSpeed = 0;             // Previous frame speed for computing longitudinal acceleration
   public longitudinalAccel = 0;     // Smoothed acceleration value (m/s²) for pitch effects
+  /** Ground slope under the car, in its own axes: +pitch climbing, +roll right-side-high. */
+  public terrainPitchRad = 0;
+  public terrainRollRad = 0;
+  /** World height of the surface under the contact patches — what the body rides at. */
+  public supportHeight = 0;
   public shiftPitchImpulse = 0;     // Transient pitch impulse during gear shifts
   private wheelSpinAngle = 0;       // Accumulated wheel rolling angle (radians) for visual spin
 
@@ -329,7 +340,8 @@ export class Vehicle {
     this.color = color;
     this.mesh = new THREE.Group();
     this.updateStats();
-    this.buildMesh(onLoadProgress, onLoadComplete);
+    const generation = ++this.visualGeneration;
+    this.buildMesh(onLoadProgress, onLoadComplete, generation, carId, color);
   }
 
   private getDefaultPeakTorque(config: CarConfig): number {
@@ -778,61 +790,136 @@ export class Vehicle {
     );
   }
 
-  public rebuild(carId: string, color: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
-    const isSameCar = this.carId === carId;
-    this.carId = carId;
-    this.color = color;
-    this.updateStats();
-
-    // Instant color update if it is the same car and meshes are already loaded
-    if (isSameCar && this.paintMaterials.length > 0 && this.mesh.children.length > 0) {
-      const paintColor = new THREE.Color(color);
-      this.paintMaterials.forEach((mat) => {
-        mat.color.copy(paintColor);
-      });
-      if (onLoadComplete) onLoadComplete();
-      return;
-    }
-
-    // Otherwise, we are switching cars or loading for the first time
+  private resetVisualReferences() {
     this.paintMaterials = [];
     this.windshieldMaterials = [];
     this.rimMaterials = [];
     this.underglowMaterial = undefined;
     this.taillightMaterials = [];
+    this.wheels = [];
+    this.leftFrontWheel = undefined;
+    this.rightFrontWheel = undefined;
+    this.leftRearWheel = undefined;
+    this.rightRearWheel = undefined;
+  }
 
-    // Note: Do NOT clear old children immediately for GLTF models to avoid showing skeleton.
-    // Procedural cars build instantly, so we can clear them now.
+  private disposeVisualResources(
+    roots: THREE.Object3D[],
+    extraGeometries: Iterable<THREE.BufferGeometry> = [],
+    extraMaterials: Iterable<THREE.Material> = []
+  ) {
+    const geometries = new Set<THREE.BufferGeometry>(extraGeometries);
+    const materials = new Set<THREE.Material>(extraMaterials);
+    const textures = new Set<THREE.Texture>();
+    const skeletons = new Set<THREE.Skeleton>();
+
+    roots.forEach((root) => {
+      root.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          if (object.geometry) geometries.add(object.geometry);
+          const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+          objectMaterials.forEach((material) => {
+            if (material) materials.add(material);
+          });
+        }
+        if (object instanceof THREE.SkinnedMesh && object.skeleton) {
+          skeletons.add(object.skeleton);
+        }
+        if (
+          object instanceof THREE.DirectionalLight ||
+          object instanceof THREE.PointLight ||
+          object instanceof THREE.SpotLight
+        ) {
+          object.shadow.map?.dispose();
+        }
+      });
+    });
+
+    materials.forEach((material) => {
+      Object.values(material).forEach((value) => {
+        if (value instanceof THREE.Texture) textures.add(value);
+      });
+      if (material instanceof THREE.ShaderMaterial) {
+        Object.values(material.uniforms).forEach((uniform) => {
+          if (uniform?.value instanceof THREE.Texture) textures.add(uniform.value);
+        });
+      }
+    });
+
+    skeletons.forEach((skeleton) => {
+      if (skeleton.boneTexture) textures.add(skeleton.boneTexture);
+      skeleton.dispose();
+    });
+    textures.forEach((texture) => texture.dispose());
+    materials.forEach((material) => material.dispose());
+    geometries.forEach((geometry) => geometry.dispose());
+  }
+
+  private clearCurrentVisual() {
+    const roots = [...this.mesh.children];
+    roots.forEach((root) => this.mesh.remove(root));
+    this.disposeVisualResources(
+      roots,
+      this.visualOrphanedGeometries,
+      this.visualOrphanedMaterials
+    );
+    this.visualOrphanedGeometries.clear();
+    this.visualOrphanedMaterials.clear();
+    this.committedVisualCarId = null;
+    this.resetVisualReferences();
+  }
+
+  public rebuild(carId: string, color: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
+    const generation = ++this.visualGeneration;
+    const isSameCommittedCar = this.committedVisualCarId === carId;
+    this.carId = carId;
+    this.color = color;
+    this.updateStats();
+
+    // A new generation invalidates every older async callback, including recolors.
+    if (isSameCommittedCar && this.paintMaterials.length > 0 && this.mesh.children.length > 0) {
+      const paintColor = new THREE.Color(color);
+      this.paintMaterials.forEach((mat) => {
+        mat.color.copy(paintColor);
+      });
+      onLoadComplete?.();
+      return;
+    }
+
+    // Procedural cars commit synchronously. GLTF cars keep the previous visual until
+    // their owned generation finishes, preventing an empty frame while loading.
     if (
       carId !== 'honda_s2000' &&
       carId !== 'ford_gt_2006' &&
       carId !== 'cybertruck'
     ) {
-      while (this.mesh.children.length > 0) {
-        this.mesh.remove(this.mesh.children[0]);
-      }
-      this.wheels = [];
-      this.leftFrontWheel = undefined;
-      this.rightFrontWheel = undefined;
-      this.leftRearWheel = undefined;
-      this.rightRearWheel = undefined;
+      this.clearCurrentVisual();
       this.buildProceduralMesh();
-      if (onLoadComplete) onLoadComplete();
+      this.committedVisualCarId = carId;
+      onLoadComplete?.();
     } else {
-      this.buildMesh(onLoadProgress, onLoadComplete);
+      this.buildMesh(onLoadProgress, onLoadComplete, generation, carId, color);
     }
   }
  
-  private buildMesh(onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
-    if (this.carId === 'honda_s2000') {
-      this.buildGltfMesh('/models/honda_s2000.glb', onLoadProgress, onLoadComplete);
-    } else if (this.carId === 'ford_gt_2006') {
-      this.buildGltfMesh('/models/ford_gt_2006.glb', onLoadProgress, onLoadComplete);
-    } else if (this.carId === 'cybertruck') {
-      this.buildGltfMesh('/models/tesla_cybertruck_awd.glb', onLoadProgress, onLoadComplete);
-    } else {
+  private buildMesh(
+    onLoadProgress: ((progress: number) => void) | undefined,
+    onLoadComplete: (() => void) | undefined,
+    generation: number,
+    carId: string,
+    color: string
+  ) {
+    if (carId === 'honda_s2000') {
+      this.buildGltfMesh('/models/honda_s2000.glb', generation, carId, color, onLoadProgress, onLoadComplete);
+    } else if (carId === 'ford_gt_2006') {
+      this.buildGltfMesh('/models/ford_gt_2006.glb', generation, carId, color, onLoadProgress, onLoadComplete);
+    } else if (carId === 'cybertruck') {
+      this.buildGltfMesh('/models/tesla_cybertruck_awd.glb', generation, carId, color, onLoadProgress, onLoadComplete);
+    } else if (generation === this.visualGeneration) {
+      this.clearCurrentVisual();
       this.buildProceduralMesh();
-      if (onLoadComplete) onLoadComplete();
+      this.committedVisualCarId = carId;
+      onLoadComplete?.();
     }
   }
 
@@ -1030,13 +1117,20 @@ export class Vehicle {
     });
   }
 
-  private buildGltfMesh(modelPath: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
-    // 1. If there is no previous car visible, build a basic procedural box placeholder and fallback wheels synchronously
-    // so visual bounds are present and physics loop doesn't crash during network load.
+  private buildGltfMesh(
+    modelPath: string,
+    generation: number,
+    requestedCarId: string,
+    requestedColor: string,
+    onLoadProgress?: (progress: number) => void,
+    onLoadComplete?: () => void
+  ) {
+    // If there is no previous car visible, build a temporary placeholder. It is
+    // owned by the current visual and is disposed when an active request commits.
     if (this.mesh.children.length === 0) {
       const placeholderGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
       const placeholderMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(this.color),
+        color: new THREE.Color(requestedColor),
         roughness: 0.5,
         metalness: 0.5,
         transparent: true,
@@ -1049,22 +1143,20 @@ export class Vehicle {
       this.buildFallbackWheels();
     }
 
-    onLoadProgress?.(0);
+    if (generation === this.visualGeneration) onLoadProgress?.(0);
 
-    // 2. Load the actual model asynchronously
     const loader = new GLTFLoader();
     loader.load(
       modelPath,
       (gltf: GLTF) => {
-        // Clear all old model/placeholder meshes from this.mesh only when loaded
-        while (this.mesh.children.length > 0) {
-          this.mesh.remove(this.mesh.children[0]);
+        // Parsing may finish after another carousel click or dealer exit. A stale
+        // generation owns its parsed scene, so release it without touching live UI.
+        if (generation !== this.visualGeneration) {
+          this.disposeVisualResources([gltf.scene]);
+          return;
         }
-        this.wheels = [];
-        this.leftFrontWheel = undefined;
-        this.rightFrontWheel = undefined;
-        this.leftRearWheel = undefined;
-        this.rightRearWheel = undefined;
+
+        this.clearCurrentVisual();
 
         const model = gltf.scene;
 
@@ -1089,7 +1181,7 @@ export class Vehicle {
         const scaleFactor = targetLength / Math.max(0.1, carLength);
 
         // Apply config visualScale override if defined
-        const config = CARS_DATABASE.find(c => c.id === this.carId) || CARS_DATABASE[0];
+        const config = CARS_DATABASE.find(c => c.id === requestedCarId) || CARS_DATABASE[0];
         const dbScale = config.visualScale !== undefined ? config.visualScale : 1.0;
         const finalScale = scaleFactor * dbScale;
         model.scale.set(finalScale, finalScale, finalScale);
@@ -1111,7 +1203,7 @@ export class Vehicle {
             child.receiveShadow = true;
 
             // Dynamically paint the car body parts and upgrade other surfaces (handles array materials safely)
-            const paintColor = new THREE.Color(this.color);
+            const paintColor = new THREE.Color(requestedColor);
             const materials = Array.isArray(child.material) ? child.material : [child.material];
             materials.forEach((mat, idx) => {
               if (mat?.name) {
@@ -1129,6 +1221,7 @@ export class Vehicle {
                   matName.includes('brake') ||
                   matName.includes('break')
                 ) {
+                  this.visualOrphanedMaterials.add(mat);
                   const upgradedBrakeMat = new THREE.MeshStandardMaterial({
                     color: 0x550000,
                     roughness: 0.2,
@@ -1153,6 +1246,7 @@ export class Vehicle {
                    matName.includes('car_paint')) &&
                   !matName.includes('white')
                 ) {
+                  this.visualOrphanedMaterials.add(mat);
                   const upgradedPaintMat = this.createPaintMaterial(paintColor);
                   if (Array.isArray(child.material)) {
                     child.material[idx] = upgradedPaintMat;
@@ -1165,6 +1259,7 @@ export class Vehicle {
                   matName.includes('glass') ||
                   matName.includes('windshield')
                 ) {
+                  this.visualOrphanedMaterials.add(mat);
                   const upgradedGlassMat = this.createWindshieldMaterial();
                   if (Array.isArray(child.material)) {
                     child.material[idx] = upgradedGlassMat;
@@ -1175,6 +1270,7 @@ export class Vehicle {
                   nodeName.includes('rim') ||
                   matName.includes('rim')
                 ) {
+                  this.visualOrphanedMaterials.add(mat);
                   const upgradedRimMat = this.createRimMaterial();
                   if (Array.isArray(child.material)) {
                     child.material[idx] = upgradedRimMat;
@@ -1187,7 +1283,7 @@ export class Vehicle {
           }
         });
 
-        if (this.carId === 'ford_gt_2006') {
+        if (requestedCarId === 'ford_gt_2006') {
           this.buildFordGtWheels(model, finalScale);
         } else {
           // Search for wheel groups/nodes by name
@@ -1271,7 +1367,9 @@ export class Vehicle {
 
             // Shift child's own geometry if it is a Mesh
             if (child instanceof THREE.Mesh && child.geometry) {
-              child.geometry = child.geometry.clone();
+              const sourceGeometry = child.geometry;
+              child.geometry = sourceGeometry.clone();
+              this.visualOrphanedGeometries.add(sourceGeometry);
               child.geometry.translate(-localCenter.x, -localCenter.y, -localCenter.z);
             }
 
@@ -1364,18 +1462,23 @@ export class Vehicle {
 
         // Add underglow, lights, and exhaust particle systems (only light sources/particles, no duplicate box meshes)
         this.addGltfVisualHelpers();
+        this.committedVisualCarId = requestedCarId;
 
-        onLoadProgress?.(100);
-        onLoadComplete?.();
+        if (generation === this.visualGeneration) {
+          onLoadProgress?.(100);
+          onLoadComplete?.();
+        }
       },
       (xhr: ProgressEvent) => {
+        if (generation !== this.visualGeneration) return;
         if (xhr.lengthComputable) {
           const pct = Math.round((xhr.loaded / xhr.total) * 100);
           onLoadProgress?.(pct);
         }
       },
       (err: unknown) => {
-        console.error('Failed to load Honda S2000 model:', err);
+        if (generation !== this.visualGeneration) return;
+        console.error(`Failed to load ${requestedCarId} model:`, err);
         onLoadComplete?.();
       }
     );
@@ -1403,7 +1506,11 @@ export class Vehicle {
     // 3. Convert to non-indexed to make splitting simple
     const nonIndexed = modelGeom.index ? modelGeom.toNonIndexed() : modelGeom;
     const posAttr = nonIndexed.getAttribute('position');
-    if (!posAttr) return {};
+    if (!posAttr) {
+      if (nonIndexed !== modelGeom) nonIndexed.dispose();
+      modelGeom.dispose();
+      return {};
+    }
 
     const normalAttr = nonIndexed.getAttribute('normal');
     const uvAttr = nonIndexed.getAttribute('uv');
@@ -1525,6 +1632,8 @@ export class Vehicle {
       }
     }
 
+    if (nonIndexed !== modelGeom) nonIndexed.dispose();
+    modelGeom.dispose();
     return result;
   }
 
@@ -1681,7 +1790,16 @@ export class Vehicle {
 
     this.wheels = wheelNodes;
 
-    // Remove original merged nodes to avoid double rendering
+    // Original merged wheel geometries leave the committed scene after splitting.
+    // Keep ownership with this visual so the next swap can release them safely.
+    [nodes.ftL, nodes.rrL, nodes.rims, nodes.disks, nodes.brakes].forEach((node) => {
+      node?.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.geometry) {
+          this.visualOrphanedGeometries.add(child.geometry);
+        }
+      });
+    });
+
     if (nodes.ftL) nodes.ftL.parent?.remove(nodes.ftL);
     if (nodes.rrL) nodes.rrL.parent?.remove(nodes.rrL);
     if (nodes.rims) nodes.rims.parent?.remove(nodes.rims);
@@ -2113,10 +2231,18 @@ export class Vehicle {
         converterCoupling
       );
     } else {
-      const launchCoupling = THREE.MathUtils.smoothstep(
-        wheelRpm,
-        350,
-        1450
+      const launchCoupling = Math.max(
+        THREE.MathUtils.smoothstep(wheelRpm, 350, 1450),
+        // A driver launching does not wait for the speedometer before letting the
+        // clutch out; they raise clamp force against a disc that is still slipping.
+        // Keying the target to wheel speed alone made that impossible and deadlocked
+        // the car: engagement stayed at its 0.24 floor until the wheels turned, and
+        // the wheels could not turn on 24% of the drivetrain. On anything past about
+        // 6 degrees of grade a manual car sat at walking pace with the engine on the
+        // limiter, disengaging its own clutch further the harder the driver pushed.
+        // The rate limiter below still spends about a second getting there, which is
+        // the slip a real launch has.
+        this.engineThrottlePosition
       );
       const minimumEngagement =
         this.transmissionType === 'dual_clutch' ? 0.38 : 0.24;
@@ -2164,7 +2290,15 @@ export class Vehicle {
         this.rpm = Math.max(1000, Math.min(this.maxRpm, this.rpm + rpmChange));
       }
     } else {
-      if (this.speed < 0) {
+      // Rolling backwards. Holding the engine just off idle is right when the car
+      // is being driven backwards, but this used to fire on any negative speed at
+      // all — including a car sliding back down a hill with the driver flooring it.
+      // Pinned near idle the torque curve gives almost nothing, so driveForce could
+      // never beat gravity, the car kept sliding, and the pin never lifted: past
+      // about 8 degrees of grade that was a permanent deadlock at walking pace with
+      // the throttle wide open. Forward throttle now hands back to the launch clutch
+      // below, which is what lets the engine rev and pull the car out.
+      if (this.speed < 0 && throttleValue <= 0.01) {
         this.rpm = 1000 + Math.abs(this.speed) * 3.6 * 100;
       } else if (
         this.transmissionType === 'automatic' &&
@@ -2347,6 +2481,92 @@ export class Vehicle {
       return this.getGroundHeight(x, z, this.pos.y);
     };
 
+    const frontLeftGround = sampleGround(frontDistance, -halfTrack);
+    const frontRightGround = sampleGround(frontDistance, halfTrack);
+    const rearLeftGround = sampleGround(-rearDistance, -halfTrack);
+    const rearRightGround = sampleGround(-rearDistance, halfTrack);
+
+    // Which way is downhill. Deliberately sampled from getSlopeHeight rather than
+    // the four contact patches: those include curb lips and the verge step, so a
+    // single wheel touching a kerb read as a violent tilt and the gravity kick
+    // that followed showed up as the car shaking on a perfectly flat road.
+    const slopeSample = (forwardOffset: number, rightOffset: number): number => {
+      const x = this.pos.x + sinYaw * forwardOffset + cosYaw * rightOffset;
+      const z = this.pos.z + cosYaw * forwardOffset - sinYaw * rightOffset;
+      if (this.getSlopeHeight) return this.getSlopeHeight(x, z);
+      return this.getGroundHeight ? this.getGroundHeight(x, z, this.pos.y) : 0;
+    };
+
+    // A baseline at least as long as the car, so surface detail averages out.
+    const pitchBase = Math.max(this.wheelBase, 2.0);
+    const rollBase = Math.max(this.trackWidth, 1.4);
+    // terrainPitchRad is positive climbing, terrainRollRad positive with the right
+    // wheels higher. Both match the axes applyLocalForce uses, since the +right
+    // offset here is the same world direction as a positive lateral force.
+    const rawPitch = Math.atan2(
+      slopeSample(pitchBase * 0.5, 0) - slopeSample(-pitchBase * 0.5, 0),
+      pitchBase
+    );
+    const rawRoll = Math.atan2(
+      slopeSample(0, rollBase * 0.5) - slopeSample(0, -rollBase * 0.5),
+      rollBase
+    );
+    // Anything under about half a degree is sampling noise, not a hill. Letting it
+    // through would apply a permanent small sideways nudge on flat ground.
+    const deadzone = (angle: number) => (Math.abs(angle) < 0.009 ? 0 : angle);
+    // A car dropped onto a slope is already on it, so the first frame adopts the
+    // gradient outright. Easing up from zero instead meant the support plane below
+    // was briefly flat while the ground was not, and a car spawned on a hillside
+    // took a load spike through one axle before the estimate caught up.
+    const slopeBlend = this.suspensionOutput ? Math.min(1, 12 * deltaTime) : 1;
+    this.terrainPitchRad += (deadzone(rawPitch) - this.terrainPitchRad) * slopeBlend;
+    this.terrainRollRad += (deadzone(rawRoll) - this.terrainRollRad) * slopeBlend;
+
+    // A car standing on a tilted surface sits parallel to it, and every spring still
+    // carries its normal static load. The suspension model measures each corner
+    // against the average of the four, which treats any tilt as though the body had
+    // stayed level while the ground moved: on a climb the front wheels look a whole
+    // wheelbase of rise too high and their springs get driven into the ground. That
+    // put a 1580kg car's entire weight on the front axle at 5 degrees and left the
+    // rear — the driven axle on a rear-drive car — with nothing to push against.
+    //
+    // So fit the plane the four contact points define and hand the model only what
+    // is left over. Fitting it from the contact heights themselves, rather than from
+    // terrainPitchRad, means a banked corner and a cambered verge come out for free
+    // and nothing is counted twice. What survives is the warp mode — one wheel over
+    // a kerb, a diagonal dip — which is exactly what a suspension should feel.
+    //
+    // The residuals are also centred on zero rather than on the car's altitude,
+    // because the model differentiates these heights to get the speed the road is
+    // moving at. Left absolute, driving down a 10-degree slope at 90km/h fed it
+    // 4.3 m/s of descent as though the whole road were dropping away underneath;
+    // the dampers answered that by unloading every wheel to nothing, and a car with
+    // no tire load has no grip and will not turn. Height for the body to ride at is
+    // kept separately below, where it is not being differentiated.
+    const meanGround =
+      (frontLeftGround + frontRightGround + rearLeftGround + rearRightGround) * 0.25;
+    const pitchSlope =
+      ((frontLeftGround + frontRightGround) - (rearLeftGround + rearRightGround)) /
+      (2 * Math.max(frontDistance + rearDistance, 0.1));
+    const rollSlope =
+      ((frontRightGround + rearRightGround) - (frontLeftGround + rearLeftGround)) /
+      (4 * Math.max(halfTrack, 0.1));
+    // The contact patches' centroid, which is what the plane pivots about.
+    const centroidForward = (frontDistance - rearDistance) * 0.5;
+    const bumpOnly = (
+      groundHeight: number,
+      forwardOffset: number,
+      rightOffset: number
+    ) =>
+      groundHeight -
+      meanGround -
+      (forwardOffset - centroidForward) * pitchSlope -
+      rightOffset * rollSlope;
+
+    // What the body rides at. Kept here rather than read back off the suspension
+    // model, which no longer sees an absolute height at all.
+    this.supportHeight = meanGround;
+
     const loadTransfer = this.massDynamics.calculateLoadTransfer({
       gravity: GRAVITY,
       longitudinalAcceleration: this.longitudinalAccel,
@@ -2370,10 +2590,10 @@ export class Vehicle {
       pitchInertia: this.pitchInertia,
       rollInertia: this.rollInertia,
       groundHeights: {
-        frontLeft: sampleGround(frontDistance, -halfTrack),
-        frontRight: sampleGround(frontDistance, halfTrack),
-        rearLeft: sampleGround(-rearDistance, -halfTrack),
-        rearRight: sampleGround(-rearDistance, halfTrack)
+        frontLeft: bumpOnly(frontLeftGround, frontDistance, -halfTrack),
+        frontRight: bumpOnly(frontRightGround, frontDistance, halfTrack),
+        rearLeft: bumpOnly(rearLeftGround, -rearDistance, -halfTrack),
+        rearRight: bumpOnly(rearRightGround, -rearDistance, halfTrack)
       },
       grounded: this.isGrounded
     });
@@ -2867,7 +3087,15 @@ export class Vehicle {
         driveForce = -(currentTorque * reverseGearRatio * this.finalDrive * gearEfficiency * reverseValue) / this.wheelRadius;
       }
     }
-    if (throttleValue > 0.01 && local.forward < -0.5) {
+    // Pressing the accelerator while still travelling backwards brakes the car out
+    // of reverse, which is the right feel on the flat. On a climb the car is rolling
+    // back because of gravity, not because the driver chose reverse, and answering
+    // full throttle with full brakes pinned it against the hill: brake and drive
+    // balanced each other exactly, so the car sat at walking pace with the throttle
+    // wide open, unable to move and therefore unable to steer. Facing uphill, the
+    // accelerator has to mean accelerate.
+    const slidingBackDownAClimb = this.terrainPitchRad > 0.02;
+    if (throttleValue > 0.01 && local.forward < -0.5 && !slidingBackDownAClimb) {
       // Brake from reverse
       brakeForce = this.brakeForce * throttleValue * brakeFade;
     }
@@ -3380,10 +3608,25 @@ export class Vehicle {
     }
 
     // --- APPLY FORCES TO VELOCITY ---
+    // Gravity resolved along the ground plane. Without this a hill is only scenery:
+    // the car climbs a 20% grade at full throttle speed, coasting downhill never
+    // gains pace, and parking on a slope holds instead of rolling back.
+    const slopeForwardForce = -this.mass * GRAVITY * Math.sin(this.terrainPitchRad);
+    const slopeLateralForce = -this.mass * GRAVITY * Math.sin(this.terrainRollRad);
+
     const lateralGravityForce = -this.mass * GRAVITY * Math.sin(bankAngleRad);
     const totalLatForce =
-      frontBodyLatForce + rearBodyLatForce + dragLateral + lateralGravityForce;
-    this.applyLocalForce(totalForwardForce, totalLatForce, deltaTime);
+      frontBodyLatForce + rearBodyLatForce + dragLateral + lateralGravityForce + slopeLateralForce;
+    const totalForwardWithSlope = totalForwardForce + slopeForwardForce;
+    this.applyLocalForce(totalForwardWithSlope, totalLatForce, deltaTime);
+
+    // Load transfer is driven by what the tires push against the road, not by the
+    // chassis acceleration. Taking moments about a contact patch, the inertial term
+    // m*a and the gravity term m*g*sin(slope) sum back to exactly the tire force, so
+    // the slope has to be left out here even though it is very much in the velocity
+    // integration above. Adding it in cancelled the transfer instead of causing it:
+    // a front-drive car launched *better* uphill than on the flat, because climbing
+    // reported less acceleration and so kept weight on the driven axle.
 
     // Chassis accelerations come straight from the forces that were just applied, in
     // the same substep. The old estimates arrived through a pair of ~150 ms filters
@@ -3392,7 +3635,10 @@ export class Vehicle {
     // lag is what load transfer depends on, and it is why the transition hacks were
     // needed at all.
     this.longitudinalAccel = totalForwardForce / Math.max(this.mass, 1);
-    this.lateralAccel = totalLatForce / Math.max(this.mass, 1);
+    // Banking's gravity term is left in, as it always has been, rather than changed
+    // here on the way past; only the new slope term is excluded.
+    this.lateralAccel =
+      (totalLatForce - slopeLateralForce) / Math.max(this.mass, 1);
 
     // --- SPEED LIMITING ---
     // Top speed is set by gearing and the rev limiter, which is physical: finalDrive
@@ -3522,7 +3768,7 @@ export class Vehicle {
     // longitudinalAccel is no longer derived here from a speed delta. updateTirePhysics
     // sets it from the forces it actually applied, in the same substep, so the load
     // transfer the suspension sees is not a filtered guess about last frame.
-    const targetGroundHeight = this.suspensionOutput?.averageGroundHeight ?? 0;
+    const targetGroundHeight = this.supportHeight;
 
     if (!this.isGrounded) {
       this.yVelocity -= GRAVITY * deltaTime;
@@ -3534,7 +3780,9 @@ export class Vehicle {
         this.pos.y = targetGroundHeight;
         this.yVelocity = 0;
         this.isGrounded = true;
-        this.pitch = 0;
+        // Pitch is left to settle through the grounded lerp rather than snapped to
+        // zero: the snap fought whatever attitude the slope wanted and showed up
+        // as a jolt every time the car touched down.
         this.suspensionOffset = -0.06;
       }
     } else {
@@ -3549,14 +3797,17 @@ export class Vehicle {
       const suspensionPitch = this.suspensionOutput?.pitch ?? 0;
       const suspensionRoll = this.suspensionOutput?.roll ?? 0;
       const suspensionHeave = this.suspensionOutput?.heave ?? 0;
+      // Rotation is composed YXZ, so pitch turns about the car's own right axis:
+      // a positive rotation there puts the nose down, hence the sign flip when
+      // laying the body onto rising ground.
       this.pitch = THREE.MathUtils.lerp(
         this.pitch,
-        suspensionPitch + this.shiftPitchImpulse,
+        suspensionPitch + this.shiftPitchImpulse - this.terrainPitchRad,
         10.0 * deltaTime
       );
       this.roll = THREE.MathUtils.lerp(
         this.roll,
-        suspensionRoll,
+        suspensionRoll + this.terrainRollRad,
         10.0 * deltaTime
       );
       this.suspensionOffset = THREE.MathUtils.lerp(
@@ -3564,7 +3815,17 @@ export class Vehicle {
         suspensionHeave,
         12.0 * deltaTime
       );
-      this.pos.y = THREE.MathUtils.lerp(this.pos.y, targetGroundHeight, 15 * deltaTime);
+
+      // Cresting a rise: if the ground has dropped further than the wheels could
+      // reasonably follow, let the car leave it instead of magnetising downhill.
+      // The body follows the surface stiffly so that on an ordinary descent the
+      // gap stays small; without that, the lag alone crossed the threshold and
+      // the car flickered between airborne and grounded all the way down a hill.
+      this.pos.y = THREE.MathUtils.lerp(this.pos.y, targetGroundHeight, 25 * deltaTime);
+      if (this.pos.y - targetGroundHeight > 0.6 && Math.abs(this.speed) > 12) {
+        this.isGrounded = false;
+        this.yVelocity = 0;
+      }
     }
 
     if (!this.isGrounded) {
@@ -3632,7 +3893,10 @@ export class Vehicle {
 
     this.updateSuspensionWheelVisuals();
     this.mesh.position.set(this.pos.x, this.pos.y + this.suspensionOffset, this.pos.z);
-    this.mesh.rotation.set(this.pitch, this.yaw, this.roll);
+    // YXZ so yaw is applied first and pitch/roll then act about the car's own
+    // axes. With the default XYZ order pitch rotated about the world X axis, so a
+    // car driving along X would tip sideways when it should have tipped nose-up.
+    this.mesh.rotation.set(this.pitch, this.yaw, this.roll, 'YXZ');
 
     const isBraking = this.brakeInput > 0.05;
     this.taillightMaterials.forEach((mat) => {
@@ -3740,6 +4004,8 @@ export class Vehicle {
     this.suspensionOffset = 0;
     this.prevSpeed = 0;
     this.longitudinalAccel = 0;
+    this.terrainPitchRad = 0;
+    this.terrainRollRad = 0;
     this.lateralAccel = 0;
     this.shiftPitchImpulse = 0;
     this.rearSlipAngle = 0;
@@ -3775,7 +4041,10 @@ export class Vehicle {
     this.limiterReferenceRpm = 1000;
     this.brakeTemperatureFront = 25;
     this.brakeTemperatureRear = 25;
-    this.suspensionModel.reset(pos.y);
+    // Corner heights reaching the suspension are bump residuals centred on zero, so
+    // that is what its previous-height memory starts from, not the car's altitude.
+    this.supportHeight = pos.y;
+    this.suspensionModel.reset(0);
     this.suspensionOutput = undefined;
     this.wheels.forEach((wheel) => {
       if (wheel.userData.suspensionBaseY !== undefined) {

@@ -14,7 +14,12 @@ import { Sky } from './objects/Sky';
 import { PostProcessing } from './PostProcessing';
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
 import { KeyBindings, DEFAULT_KEY_BINDINGS } from './option';
-import { EditorScenery, GameModeName, GameStatus } from './engine/types';
+import {
+  EditorState,
+  GameModeName,
+  GameStatus,
+  createDefaultEditorState
+} from './engine/types';
 import { InputController } from './engine/InputController';
 import { createThreeWorld } from './engine/threeWorld';
 import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
@@ -84,6 +89,8 @@ export class GameEngine {
   public keys: { [key: string]: boolean } = {};
   public keyBindings: KeyBindings = { ...DEFAULT_KEY_BINDINGS };
   public activeGarageTab: string | null = null;
+  public dealerMarketMode: 'new' | 'used' | 'race' | 'museum' | null = null;
+  public dealerShowroomColor = 0x06b6d4;
   public tuningState: 'closed' | 'entering' | 'open' | 'exiting' = 'closed';
   public tuningCameraProgress = 0;
   private inputController!: InputController;
@@ -99,27 +106,10 @@ export class GameEngine {
   // Gameplay State
   public activeMode: GameModeName = 'garage';
 
-  // Editor State
-  public editorState = {
-    nodes: [] as { x: number; z: number; y?: number; width?: number }[],
-    scenery: [] as EditorScenery[],
-    tool: 'node' as string,
-    snapToGrid: 10,
-    sceneryFreeMove: true,
-    cornerHeight: 2,
-    selectedNodeIndex: null as number | null,
-    selectedSceneryIndex: null as number | null,
-    roadWidth: 18,
-    activeMode: 'garage' as string,
-    onUpdateNodes: null as ((nodes: any[]) => void) | null,
-    onUpdateScenery: null as ((scenery: any[]) => void) | null,
-    onSelectNode: null as ((idx: number | null) => void) | null,
-    onSelectScenery: null as ((idx: number | null) => void) | null,
-    onDragNodeStart: null as ((idx: number) => void) | null,
-    onDragNodeEnd: null as (() => void) | null,
-    onDragSceneryStart: null as ((idx: number) => void) | null,
-    onDragSceneryEnd: null as (() => void) | null,
-  };
+  // Editor State. types.ts already declares this shape and its defaults; this used
+  // to be a hand-rolled copy of both, so every editor default existed in two places
+  // and only one of them was ever the one you found.
+  public editorState: EditorState = createDefaultEditorState();
   public currentModeInstance: GameMode | null = null;
   public gameStatus: GameStatus = 'idle';
   public gameTimer = 0;
@@ -356,10 +346,14 @@ export class GameEngine {
     if (upgrades) {
       this.vehicle.upgrades = upgrades;
     }
+    // Vehicle keeps a stable root mesh, so swapping its contents does not require
+    // rebuilding the active mode or reallocating the full showroom environment.
     this.vehicle.rebuild(carId, color);
+  }
 
-    if (this.activeMode === 'garage') {
-      this.buildGarage();
+  public triggerPurchaseCelebration() {
+    if (this.currentModeInstance instanceof GarageMode) {
+      this.currentModeInstance.triggerPurchaseCelebration();
     }
   }
 

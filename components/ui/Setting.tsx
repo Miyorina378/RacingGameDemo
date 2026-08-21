@@ -79,6 +79,13 @@ export default function Setting({
   backLabel = 'Back to Garage',
 }: SettingProps) {
   const [rebindingAction, setRebindingAction] = useState<keyof KeyBindings | null>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (settingsVisible) {
+      scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [settingsVisible, settingsSubTab]);
 
   useEffect(() => {
     if (!rebindingAction) return;
@@ -151,12 +158,12 @@ export default function Setting({
 
       {/* DEDICATED SETTINGS CONTENT */}
       <div
-        className={`absolute inset-0 z-30 flex items-center justify-center p-8 pointer-events-auto transition-opacity duration-300 ${settingsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        className={`absolute inset-0 z-30 flex flex-col items-center justify-start p-4 md:p-8 pointer-events-auto transition-opacity duration-300 ${settingsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
       >
-        <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-8 relative z-35 p-6">
-          {/* Settings Header Row */}
-          <div className="flex justify-between items-start pb-4 border-b border-zinc-900">
+        <div className="w-full max-w-2xl lg:max-w-5xl h-full flex flex-col relative z-35">
+          {/* FIXED HEADER: Title + Back Button */}
+          <div className="flex justify-between items-start pb-4 border-b border-zinc-900 shrink-0">
             <div className="text-left">
               <h2 className="text-3xl font-black italic bg-gradient-to-r from-zinc-100 via-zinc-350 to-zinc-400 bg-clip-text text-transparent uppercase tracking-wider mt-1">
                 settings
@@ -166,15 +173,15 @@ export default function Setting({
             <div className="flex items-center gap-3">
               <button
                 onClick={handleSettingBackClick}
-                className="bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-300 hover:text-white px-5 py-2.5 rounded-xl text-xs font-black tracking-widest uppercase transition-all cursor-pointer"
+                className="bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-300 hover:text-white px-5 py-2.5 rounded-xl text-xs font-black tracking-widest uppercase transition-all cursor-pointer shadow-md"
               >
                 {backLabel}
               </button>
             </div>
           </div>
 
-          {/* Sub-Tabs Selector */}
-          <div className="flex justify-start border-b border-rose-600/60 pb-3 w-full">
+          {/* FIXED TABS: Sub-Tabs Selector */}
+          <div className="flex justify-start border-b border-rose-600/60 py-3 w-full shrink-0">
             <div className="flex bg-zinc-950/80 border border-zinc-900 shadow-md transform -skew-x-12 overflow-hidden">
               {(['audio', 'graphics', 'control', 'layout'] as const).map((tab) => {
                 const isActive = settingsSubTab === tab;
@@ -196,14 +203,19 @@ export default function Setting({
             </div>
           </div>
 
-          {/* Tab content - Audio */}
-          {settingsSubTab === 'audio' && (
-            <div className="flex flex-col gap-6 text-left">
-              <div className="pb-2 border-b border-zinc-900">
-                <h3 className="text-xs font-black text-rose-500 tracking-widest uppercase">
-                  Audio Volume & Levels
-                </h3>
-              </div>
+          {/* SCROLLABLE TAB CONTENT BODY */}
+          <div
+            ref={scrollContainerRef}
+            className="flex-1 min-h-0 overflow-y-auto pt-6 pb-8 pr-2 custom-scrollbar"
+          >
+            {/* Tab content - Audio */}
+            {settingsSubTab === 'audio' && (
+              <div className="flex flex-col gap-6 text-left">
+                <div className="pb-2 border-b border-zinc-900">
+                  <h3 className="text-xs font-black text-rose-500 tracking-widest uppercase">
+                    Audio Volume & Levels
+                  </h3>
+                </div>
 
               <div className="flex flex-col select-none">
                 {/* Master Volume */}
@@ -819,6 +831,7 @@ export default function Setting({
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </>

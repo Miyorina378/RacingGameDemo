@@ -885,3 +885,27 @@ body {
   }
 }
 
+/* Custom sleek scrollbar for modals & panels */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(225, 29, 72, 0.4) rgba(9, 9, 11, 0.3);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(9, 9, 11, 0.3);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(225, 29, 72, 0.4);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(225, 29, 72, 0.8);
+}
+

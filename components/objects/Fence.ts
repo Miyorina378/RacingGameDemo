@@ -19,8 +19,11 @@ export function enforceFenceBoundary(vehicle: Vehicle): void {
     if (pushDir.lengthSq() < 0.0001) pushDir.set(1, 0, 0);
     else pushDir.normalize();
 
-    // Snap position back inside boundary
+    // Snap position back inside boundary. Only sideways: closestPt sits on the
+    // centreline, so copying its height as well teleported the car to the middle
+    // of the road's elevation every time it brushed a fence.
     const snappedPos = info.closestPt.clone().addScaledVector(pushDir, maxAllowedDist);
+    snappedPos.y = vehicle.pos.y;
     vehicle.pos.copy(snappedPos);
 
     // Reflect velocity off the wall normal

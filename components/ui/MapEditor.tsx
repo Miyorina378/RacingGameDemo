@@ -3,6 +3,7 @@
 import React from 'react';
 import { Copy, Play } from 'lucide-react';
 import { CURB_WIDTH } from '../modes/trackNodes';
+import { MIN_TERRAIN_BRUSH_RADIUS } from '../modes/terrain';
 import { DEFAULT_FOG_DISTANCE } from '../modes/sceneryDecor';
 import type { TimeOfDay } from '../engine/types';
 
@@ -47,6 +48,24 @@ interface MapEditorProps {
   setSnapToGrid: (g: number) => void;
   sceneryFreeMove: boolean;
   setSceneryFreeMove: (b: boolean) => void;
+  editLayer: 'track' | 'decorate' | 'terrain';
+  setEditLayer: (l: 'track' | 'decorate' | 'terrain') => void;
+  terrainBrush: 'raise' | 'lower' | 'smooth' | 'flatten';
+  setTerrainBrush: (b: 'raise' | 'lower' | 'smooth' | 'flatten') => void;
+  terrainBrushRadius: number;
+  setTerrainBrushRadius: (r: number) => void;
+  terrainBrushStrength: number;
+  setTerrainBrushStrength: (s: number) => void;
+  conformTerrain: () => void;
+  drapeTrackToTerrain: () => void;
+  raiseTrackAboveTerrain: () => void;
+  clearTerrain: () => void;
+  tracks: { id: string; name: string; updatedAt: number; nodes: unknown[] }[];
+  activeTrackId: string;
+  selectTrack: (id: string) => void;
+  createNewTrack: () => void;
+  duplicateActiveTrack: () => void;
+  deleteTrack: (id: string) => void;
   livePreview: boolean;
   setLivePreview: (p: boolean) => void;
   
@@ -74,6 +93,15 @@ const STYLE_OPTIONS: Partial<Record<string, { v: number | undefined; label: stri
     { v: 1, label: 'Hip' },
     { v: 2, label: 'Flat Roof' }
   ]
+};
+
+/** "just now" / "6m ago" / "2h ago" / a date, so the list shows which is freshest. */
+const formatSavedAt = (timestamp: number) => {
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 45) return 'just now';
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+  return new Date(timestamp).toLocaleDateString();
 };
 
 const renderToolIcon = (tool: string, isActive: boolean) => {
@@ -290,6 +318,24 @@ export default function MapEditor({
   setSnapToGrid,
   sceneryFreeMove,
   setSceneryFreeMove,
+  editLayer,
+  setEditLayer,
+  terrainBrush,
+  setTerrainBrush,
+  terrainBrushRadius,
+  setTerrainBrushRadius,
+  terrainBrushStrength,
+  setTerrainBrushStrength,
+  conformTerrain,
+  drapeTrackToTerrain,
+  raiseTrackAboveTerrain,
+  clearTerrain,
+  tracks,
+  activeTrackId,
+  selectTrack,
+  createNewTrack,
+  duplicateActiveTrack,
+  deleteTrack,
   livePreview,
   setLivePreview,
   saveCustomTrack,
@@ -364,14 +410,14 @@ export default function MapEditor({
               <div className="space-y-1.5 p-3 bg-slate-950/50 border border-purple-500/30 rounded-xl mb-4">
                 <div className="flex justify-between text-[10px] font-bold text-purple-400 tracking-wider uppercase">
                   <span>Node {selectedNodeIndex} Elevation</span>
-                  <span className="font-mono">{editorNodes[selectedNodeIndex].y ?? 2}m</span>
+                  <span className="font-mono">{editorNodes[selectedNodeIndex].y ?? 0}m</span>
                 </div>
                 <input
                   type="range"
-                  min="2"
-                  max="35"
+                  min="0"
+                  max="150"
                   step="1"
-                  value={editorNodes[selectedNodeIndex].y ?? 2}
+                  value={editorNodes[selectedNodeIndex].y ?? 0}
                   onChange={(e) => updateSelectedNode({ y: parseInt(e.target.value) })}
                   className="w-full accent-purple-500 cursor-pointer"
                 />
@@ -709,6 +755,67 @@ export default function MapEditor({
             )}
           </div>
 
+          {/* Saved Tracks */}
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider">My Tracks</h3>
+              <span className="text-[9px] font-mono text-slate-500">{tracks.length}</span>
+            </div>
+
+            <div className="space-y-1 max-h-[168px] overflow-y-auto pr-0.5">
+              {tracks.map((track) => {
+                const isActive = track.id === activeTrackId;
+                return (
+                  <div
+                    key={track.id}
+                    className={`group flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all ${
+                      isActive
+                        ? 'bg-purple-950/40 border-purple-500/70'
+                        : 'bg-slate-950/50 border-slate-900 hover:bg-slate-900/70'
+                    }`}
+                  >
+                    <button
+                      onClick={() => selectTrack(track.id)}
+                      className="flex-1 min-w-0 text-left cursor-pointer bg-transparent border-0 p-0"
+                    >
+                      <div className={`text-[11px] font-bold truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>
+                        {track.name || 'Untitled'}
+                      </div>
+                      <div className="text-[9px] font-mono text-slate-500">
+                        {track.nodes.length} nodes · {formatSavedAt(track.updatedAt)}
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => deleteTrack(track.id)}
+                      title="Delete track"
+                      className="opacity-0 group-hover:opacity-100 text-[10px] text-red-400 hover:text-red-300 cursor-pointer bg-transparent border-0 px-1 transition-opacity"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-1.5 mt-2">
+              <button
+                onClick={createNewTrack}
+                className="flex-1 bg-purple-700 hover:bg-purple-600 text-white py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+              >
+                New
+              </button>
+              <button
+                onClick={duplicateActiveTrack}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+              >
+                Duplicate
+              </button>
+            </div>
+            <p className="text-[9px] text-slate-500 leading-snug mt-1.5">
+              Edits save to the selected track automatically, so switching never loses work.
+            </p>
+          </div>
+
           {/* Track Design Settings */}
           <div>
             <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Track Design & Setup</h3>
@@ -761,7 +868,7 @@ export default function MapEditor({
               </div>
               <input
                 type="range"
-                min="2"
+                min="0"
                 max="35"
                 step="1"
                 value={editorCornerHeight}
@@ -1066,31 +1173,137 @@ export default function MapEditor({
       {/* Bottom Floating Editor Panel */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-3xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col items-center gap-4 w-[620px]">
         {/* Mode Tab Toggle */}
-        <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 w-full max-w-[320px]">
+        <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 w-full max-w-[420px]">
           <button
-            onClick={() => setEditorTool('node')}
-            className={`flex-1 text-xs font-extrabold py-2 px-4 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
-              editorTool === 'node'
+            onClick={() => {
+              setEditLayer('track');
+              setEditorTool('node');
+            }}
+            className={`flex-1 text-xs font-extrabold py-2 px-3 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
+              editLayer === 'track'
                 ? 'bg-purple-600 text-white shadow-[0_0_10px_rgba(168,85,247,0.3)]'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Track Mode
+            Track
           </button>
           <button
-            onClick={() => setEditorTool('tree1')}
-            className={`flex-1 text-xs font-extrabold py-2 px-4 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
-              editorTool !== 'node'
+            onClick={() => {
+              setEditLayer('decorate');
+              if (editorTool === 'node') setEditorTool('tree1');
+            }}
+            className={`flex-1 text-xs font-extrabold py-2 px-3 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
+              editLayer === 'decorate'
                 ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(16,185,129,0.3)]'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Decorate Mode
+            Decorate
+          </button>
+          <button
+            onClick={() => setEditLayer('terrain')}
+            className={`flex-1 text-xs font-extrabold py-2 px-3 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
+              editLayer === 'terrain'
+                ? 'bg-amber-600 text-white shadow-[0_0_10px_rgba(217,119,6,0.3)]'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Terrain
           </button>
         </div>
 
         {/* Selected Mode Options */}
-        {editorTool === 'node' ? (
+        {editLayer === 'terrain' ? (
+          <div className="flex flex-col gap-3 w-full">
+            <div className="flex gap-2 justify-center">
+              {([
+                { id: 'raise', label: 'Raise' },
+                { id: 'lower', label: 'Lower' },
+                { id: 'smooth', label: 'Smooth' },
+                { id: 'flatten', label: 'Flatten' }
+              ] as const).map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => setTerrainBrush(b.id)}
+                  className={`px-4 py-2 rounded-xl border text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer ${
+                    terrainBrush === b.id
+                      ? 'bg-amber-950/50 border-amber-500/80 text-amber-200'
+                      : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex-1 space-y-1">
+                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                  <span>Brush Size</span>
+                  <span className="text-amber-400 font-mono">{terrainBrushRadius}m</span>
+                </div>
+                <input
+                  type="range"
+                  min={MIN_TERRAIN_BRUSH_RADIUS}
+                  max="250"
+                  step="1"
+                  value={terrainBrushRadius}
+                  onChange={(e) => setTerrainBrushRadius(parseInt(e.target.value))}
+                  className="w-full accent-amber-500 cursor-pointer"
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                  <span>Strength</span>
+                  <span className="text-amber-400 font-mono">{terrainBrushStrength.toFixed(1)}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="5"
+                  step="0.1"
+                  value={terrainBrushStrength}
+                  onChange={(e) => setTerrainBrushStrength(parseFloat(e.target.value))}
+                  className="w-full accent-amber-500 cursor-pointer"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={() => raiseTrackAboveTerrain()}
+              className="w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2.5 rounded-xl text-[11px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+            >
+              Lift Track Above Terrain
+            </button>
+            <p className="text-[9px] text-slate-500 leading-snug text-center -mt-1">
+              The easy one. Raises every node until the full width of the road clears the ground under it, so nothing pokes through. Sculpt freely, then press this.
+            </p>
+
+            <div className="flex gap-2 pt-1 border-t border-slate-900">
+              <button
+                onClick={conformTerrain}
+                className="flex-1 bg-amber-700 hover:bg-amber-600 text-white py-2 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+              >
+                Terrain → Road
+              </button>
+              <button
+                onClick={drapeTrackToTerrain}
+                className="flex-1 bg-amber-900/70 hover:bg-amber-800 border border-amber-700/60 text-amber-100 py-2 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+              >
+                Road → Terrain
+              </button>
+              <button
+                onClick={clearTerrain}
+                className="bg-red-950/60 hover:bg-red-900 border border-red-800/80 text-red-300 hover:text-white px-3 py-2 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+              >
+                Reset
+              </button>
+            </div>
+            <p className="text-[9px] text-slate-500 leading-snug text-center">
+              <span className="text-amber-400">Terrain → Road</span> cuts a shelf at road height and ramps the sides out. <span className="text-amber-400">Road → Terrain</span> sets each node exactly to ground level.
+            </p>
+          </div>
+        ) : editLayer === 'track' ? (
           /* Track Mode options */
           <div className="flex gap-4">
             <button

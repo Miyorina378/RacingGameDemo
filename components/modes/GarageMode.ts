@@ -14,7 +14,17 @@ export class GarageMode extends BaseMode {
   private tuningSpot?: THREE.SpotLight;
   private wasTuningState = 'closed';
   private srOuterRingMat?: THREE.MeshBasicMaterial;
+  private srInnerRingMat?: THREE.MeshBasicMaterial;
+  private srFloorMat?: THREE.MeshStandardMaterial;
+  private srStageMat?: THREE.MeshStandardMaterial;
+  private srBackdropMat?: THREE.MeshStandardMaterial;
+  private srPrimaryAccentMats: THREE.MeshBasicMaterial[] = [];
+  private srBrandAccentMats: THREE.MeshBasicMaterial[] = [];
   private srCenterPoint?: THREE.PointLight;
+  private showroomThemeKey = '';
+  private showroomBackground = new THREE.Color(0x05080d);
+  private currentShowroomPrimary = 0x22d3ee;
+  private currentShowroomSecondary = 0xf43f5e;
   private purchaseCelebrationTimer = 0;
   private quickPlayLeftLight?: THREE.DirectionalLight;
   private quickPlayRightLight?: THREE.DirectionalLight;
@@ -56,121 +66,201 @@ export class GarageMode extends BaseMode {
     this.ring.position.y = 0.16;
     this.environmentGroup.add(this.ring);
 
-    // --- DEDICATED 3D SHOWROOM ENVIRONMENT (ULTRA-LUXURY STUDIO ATMOSPHERE) ---
+    // --- DEDICATED 3D DEALER SHOWROOM ---
     this.showroomGroup = new THREE.Group();
+    this.srPrimaryAccentMats = [];
+    this.srBrandAccentMats = [];
+    this.showroomThemeKey = '';
 
-    // 1. Matte Non-Reflective Showroom Floor (Zero shiny reflections)
-    const srFloorGeom = new THREE.PlaneGeometry(120, 120);
-    const srFloorMat = new THREE.MeshStandardMaterial({
-      color: 0x0f1115,
-      roughness: 0.95,
-      metalness: 0.0,
+    this.srFloorMat = new THREE.MeshStandardMaterial({
+      color: 0x080b10,
+      roughness: 0.72,
+      metalness: 0.08,
     });
-    const srFloor = new THREE.Mesh(srFloorGeom, srFloorMat);
+    const srFloor = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), this.srFloorMat);
     srFloor.rotation.x = -Math.PI / 2;
     srFloor.receiveShadow = true;
     this.showroomGroup.add(srFloor);
 
-    // 2. Matte Charcoal Stage Pedestal
-    const srStageGeom = new THREE.CylinderGeometry(5.2, 5.5, 0.22, 64);
-    const srStageMat = new THREE.MeshStandardMaterial({
-      color: 0x12151c,
-      roughness: 0.95,
-      metalness: 0.0,
+    // Low, wide turntable keeps the car as the visual focus.
+    const srPlinth = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.9, 6.2, 0.18, 96),
+      new THREE.MeshStandardMaterial({ color: 0x07090d, roughness: 0.7, metalness: 0.28 })
+    );
+    srPlinth.position.y = 0.09;
+    srPlinth.receiveShadow = true;
+    this.showroomGroup.add(srPlinth);
+
+    this.srStageMat = new THREE.MeshStandardMaterial({
+      color: 0x151a22,
+      roughness: 0.42,
+      metalness: 0.34,
     });
-    const srStage = new THREE.Mesh(srStageGeom, srStageMat);
-    srStage.position.y = 0.11;
+    const srStage = new THREE.Mesh(new THREE.CylinderGeometry(5.35, 5.65, 0.16, 96), this.srStageMat);
+    srStage.position.y = 0.19;
     srStage.receiveShadow = true;
     this.showroomGroup.add(srStage);
 
-    // Dual Concentric Glowing Stage Rings (Subtle Cyber Cyan Outer + Rose Accent Inner)
-    const srOuterRingGeom = new THREE.RingGeometry(5.2, 5.35, 64);
-    srOuterRingGeom.rotateX(-Math.PI / 2);
-    this.srOuterRingMat = new THREE.MeshBasicMaterial({
-      color: 0x0284c7,
-      side: THREE.DoubleSide,
+    const primaryAccentStrong = new THREE.MeshBasicMaterial({
+      color: 0x22d3ee,
+      transparent: true,
+      opacity: 0.9,
+      toneMapped: false,
     });
+    const primaryAccentSoft = new THREE.MeshBasicMaterial({
+      color: 0x22d3ee,
+      transparent: true,
+      opacity: 0.34,
+      toneMapped: false,
+    });
+    const brandAccentStrong = new THREE.MeshBasicMaterial({
+      color: 0xf43f5e,
+      transparent: true,
+      opacity: 0.82,
+      toneMapped: false,
+    });
+    const brandAccentSoft = new THREE.MeshBasicMaterial({
+      color: 0xf43f5e,
+      transparent: true,
+      opacity: 0.26,
+      toneMapped: false,
+    });
+    this.srPrimaryAccentMats.push(primaryAccentStrong, primaryAccentSoft);
+    this.srBrandAccentMats.push(brandAccentStrong, brandAccentSoft);
+
+    const srOuterRingGeom = new THREE.RingGeometry(5.32, 5.48, 96);
+    srOuterRingGeom.rotateX(-Math.PI / 2);
+    this.srOuterRingMat = primaryAccentStrong;
     const srOuterRing = new THREE.Mesh(srOuterRingGeom, this.srOuterRingMat);
-    srOuterRing.position.y = 0.225;
+    srOuterRing.position.y = 0.285;
     this.showroomGroup.add(srOuterRing);
 
-    const srInnerRingGeom = new THREE.RingGeometry(4.4, 4.48, 64);
+    const srInnerRingGeom = new THREE.RingGeometry(4.72, 4.78, 96);
     srInnerRingGeom.rotateX(-Math.PI / 2);
-    const srInnerRingMat = new THREE.MeshBasicMaterial({
-      color: 0xe11d48,
-      side: THREE.DoubleSide,
-    });
-    const srInnerRing = new THREE.Mesh(srInnerRingGeom, srInnerRingMat);
-    srInnerRing.position.y = 0.226;
+    this.srInnerRingMat = brandAccentStrong;
+    const srInnerRing = new THREE.Mesh(srInnerRingGeom, this.srInnerRingMat);
+    srInnerRing.position.y = 0.288;
     this.showroomGroup.add(srInnerRing);
 
-    // 3. Soft Overhead Halo Ring
-    const srHaloGeom = new THREE.TorusGeometry(6.5, 0.14, 16, 64);
-    srHaloGeom.rotateX(Math.PI / 2);
-    const srHaloMat = new THREE.MeshBasicMaterial({
-      color: 0x334155,
+    // Embedded floor rails pull the room toward the display platform.
+    [-10.5, -7.5, 7.5, 10.5].forEach((x, index) => {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.055, 0.025, 38),
+        index % 2 === 0 ? primaryAccentSoft : brandAccentSoft
+      );
+      rail.position.set(x, 0.018, -1);
+      this.showroomGroup!.add(rail);
     });
-    const srHalo = new THREE.Mesh(srHaloGeom, srHaloMat);
-    srHalo.position.set(0, 8.0, 0);
+
+    // Deep architectural wall with a recessed central presentation bay.
+    this.srBackdropMat = new THREE.MeshStandardMaterial({
+      color: 0x080b11,
+      roughness: 0.78,
+      metalness: 0.12,
+      emissive: 0x22d3ee,
+      emissiveIntensity: 0.035,
+    });
+    const srBackWall = new THREE.Mesh(new THREE.BoxGeometry(48, 20, 0.65), this.srBackdropMat);
+    srBackWall.position.set(0, 10, -17);
+    srBackWall.receiveShadow = true;
+    this.showroomGroup.add(srBackWall);
+
+    const srCenterBay = new THREE.Mesh(
+      new THREE.BoxGeometry(19, 7.8, 0.42),
+      new THREE.MeshStandardMaterial({ color: 0x020305, roughness: 0.88, metalness: 0.05 })
+    );
+    srCenterBay.position.set(0, 7.4, -16.58);
+    this.showroomGroup.add(srCenterBay);
+
+    // Portal frame around the car reads clearly from every orbit angle.
+    [-10.2, 10.2].forEach((x) => {
+      const upright = new THREE.Mesh(new THREE.BoxGeometry(0.16, 10.5, 0.18), primaryAccentStrong);
+      upright.position.set(x, 7.2, -16.28);
+      this.showroomGroup!.add(upright);
+    });
+    const portalHeader = new THREE.Mesh(new THREE.BoxGeometry(20.55, 0.16, 0.18), primaryAccentStrong);
+    portalHeader.position.set(0, 12.45, -16.28);
+    this.showroomGroup.add(portalHeader);
+
+    // Alternating wall fins give the selected brand a secondary color identity.
+    [-4, -3, -2, 2, 3, 4].forEach((slot, index) => {
+      const fin = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 14.5, 0.16),
+        index % 2 === 0 ? brandAccentStrong : primaryAccentSoft
+      );
+      fin.position.set(slot * 4.35, 8.2, -16.22);
+      this.showroomGroup!.add(fin);
+    });
+
+    // Angled side galleries make the studio feel enclosed without a heavy vignette.
+    const sideWallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x05070b,
+      roughness: 0.82,
+      metalness: 0.08,
+    });
+    [-1, 1].forEach((side) => {
+      const sideWall = new THREE.Mesh(new THREE.BoxGeometry(0.6, 17, 34), sideWallMaterial);
+      sideWall.position.set(side * 24, 8.5, -1);
+      this.showroomGroup!.add(sideWall);
+
+      const sideStrip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 28), brandAccentSoft);
+      sideStrip.position.set(side * 23.65, 5.2, -1);
+      this.showroomGroup!.add(sideStrip);
+    });
+
+    // Floating ceiling canopy and light lanes frame the car from above.
+    const canopyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0c1016,
+      roughness: 0.58,
+      metalness: 0.3,
+    });
+    [-11, -5.5, 0, 5.5, 11].forEach((x, index) => {
+      const canopyBeam = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.22, 32), canopyMaterial);
+      canopyBeam.position.set(x, 10.8, -1.5);
+      this.showroomGroup!.add(canopyBeam);
+
+      if (index !== 2) {
+        const canopyLight = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14, 0.06, 26),
+          index % 2 === 0 ? primaryAccentSoft : brandAccentSoft
+        );
+        canopyLight.position.set(x, 10.65, -1.5);
+        this.showroomGroup!.add(canopyLight);
+      }
+    });
+
+    const srHaloGeom = new THREE.TorusGeometry(6.8, 0.09, 16, 96);
+    srHaloGeom.rotateX(Math.PI / 2);
+    const srHalo = new THREE.Mesh(srHaloGeom, primaryAccentSoft);
+    srHalo.position.set(0, 9.7, 0);
     this.showroomGroup.add(srHalo);
 
-    // 4. Rear Architectural Studio Wall with Soft LED Accent Columns
-    const wallBack = new THREE.Group();
-    wallBack.position.set(0, 0, -14);
+    const lightTarget = new THREE.Object3D();
+    lightTarget.position.set(0, 0.8, 0);
+    this.showroomGroup.add(lightTarget);
 
-    const backWallGeom = new THREE.PlaneGeometry(60, 22);
-    const backWallMat = new THREE.MeshStandardMaterial({
-      color: 0x030406,
-      roughness: 0.95,
-      metalness: 0.0,
-    });
-    const backWallMesh = new THREE.Mesh(backWallGeom, backWallMat);
-    backWallMesh.position.y = 11;
-    wallBack.add(backWallMesh);
-
-    // Soft Glowing Vertical Columns
-    for (let i = -4; i <= 4; i++) {
-      if (i === 0) continue;
-      const pillarGeom = new THREE.BoxGeometry(0.15, 16, 0.15);
-      const pillarMat = new THREE.MeshBasicMaterial({
-        color: i % 2 === 0 ? 0x0369a1 : 0x1e40af,
-      });
-      const pillar = new THREE.Mesh(pillarGeom, pillarMat);
-      pillar.position.set(i * 4.5, 8, 0.1);
-      wallBack.add(pillar);
-    }
-    this.showroomGroup.add(wallBack);
-
-    // 5. Overhead Soft Studio Lighting Rig
-    const srTopDir = new THREE.DirectionalLight(0xffffff, 0.4);
-    srTopDir.position.set(0, 40, 0);
-    const srTopDirTarget = new THREE.Object3D();
-    srTopDirTarget.position.set(0, 0, 0);
-    this.showroomGroup.add(srTopDirTarget);
-    srTopDir.target = srTopDirTarget;
-    this.showroomGroup.add(srTopDir);
-
-    // Soft Low-Intensity Spotlight
-    this.srTopSpot = new THREE.SpotLight(0xffffff, 3.5, 30, Math.PI / 3, 0.8, 0.5);
-    this.srTopSpot.position.set(0, 12, 0);
-    const spotTarget = new THREE.Object3D();
-    spotTarget.position.set(0, 0, 0);
-    this.showroomGroup.add(spotTarget);
-    this.srTopSpot.target = spotTarget;
+    this.srTopSpot = new THREE.SpotLight(0xffffff, 5.5, 34, Math.PI / 3.1, 0.72, 0.55);
+    this.srTopSpot.position.set(0, 12, 1);
+    this.srTopSpot.target = lightTarget;
     this.srTopSpot.castShadow = true;
     this.srTopSpot.shadow.mapSize.width = 2048;
     this.srTopSpot.shadow.mapSize.height = 2048;
     this.srTopSpot.shadow.bias = -0.0008;
     this.showroomGroup.add(this.srTopSpot);
 
-    // Soft Overhead Fill Light
-    this.srCenterPoint = new THREE.PointLight(0xffffff, 5.0, 20, 0);
-    this.srCenterPoint.position.set(0, 7.0, 0);
-    this.showroomGroup.add(this.srCenterPoint);
+    this.srKeySpot = new THREE.SpotLight(0x22d3ee, 7.2, 34, Math.PI / 3.4, 0.82, 0.65);
+    this.srKeySpot.position.set(-10, 5.8, 7);
+    this.srKeySpot.target = lightTarget;
+    this.showroomGroup.add(this.srKeySpot);
 
-    (this.engine as any).triggerPurchaseCelebration = () => {
-      this.purchaseCelebrationTimer = 2.5;
-    };
+    this.srFillSpot = new THREE.SpotLight(0xf43f5e, 5.8, 32, Math.PI / 3.2, 0.86, 0.7);
+    this.srFillSpot.position.set(10, 4.6, 4);
+    this.srFillSpot.target = lightTarget;
+    this.showroomGroup.add(this.srFillSpot);
+
+    this.srCenterPoint = new THREE.PointLight(0xffffff, 4.2, 18, 1.1);
+    this.srCenterPoint.position.set(0, 6.8, 1.5);
+    this.showroomGroup.add(this.srCenterPoint);
 
     this.showroomGroup.visible = false;
     this.environmentGroup.add(this.showroomGroup);
@@ -262,12 +352,96 @@ export class GarageMode extends BaseMode {
     this.engine.callbacks.onGameStatus('idle');
   }
 
+  public triggerPurchaseCelebration() {
+    this.purchaseCelebrationTimer = 2.5;
+  }
+
+  private applyShowroomTheme(mode: string | null, brandColor: number) {
+    const themes: Record<string, {
+      primary: number;
+      fallbackSecondary: number;
+      background: number;
+      floor: number;
+      stage: number;
+      wall: number;
+    }> = {
+      default: {
+        primary: 0x22d3ee,
+        fallbackSecondary: 0xf43f5e,
+        background: 0x05080d,
+        floor: 0x080b10,
+        stage: 0x151a22,
+        wall: 0x080b11,
+      },
+      new: {
+        primary: 0x22d3ee,
+        fallbackSecondary: 0x3b82f6,
+        background: 0x041016,
+        floor: 0x071116,
+        stage: 0x10212a,
+        wall: 0x07141b,
+      },
+      used: {
+        primary: 0xf59e0b,
+        fallbackSecondary: 0xfb923c,
+        background: 0x120c04,
+        floor: 0x151008,
+        stage: 0x251b0d,
+        wall: 0x171006,
+      },
+      race: {
+        primary: 0xf43f5e,
+        fallbackSecondary: 0xef4444,
+        background: 0x120309,
+        floor: 0x16070c,
+        stage: 0x280d16,
+        wall: 0x19060d,
+      },
+      museum: {
+        primary: 0xa855f7,
+        fallbackSecondary: 0xf59e0b,
+        background: 0x0d0614,
+        floor: 0x120a18,
+        stage: 0x21122b,
+        wall: 0x16091f,
+      },
+    };
+
+    const theme = themes[mode || 'default'] || themes.default;
+    const safeBrandColor = Number.isFinite(brandColor) ? brandColor : theme.fallbackSecondary;
+    const themeKey = `${mode || 'default'}-${safeBrandColor}`;
+    if (this.showroomThemeKey === themeKey) return;
+    this.showroomThemeKey = themeKey;
+
+    this.currentShowroomPrimary = theme.primary;
+    this.currentShowroomSecondary = safeBrandColor;
+    this.showroomBackground.setHex(theme.background);
+    this.srFloorMat?.color.setHex(theme.floor);
+    this.srStageMat?.color.setHex(theme.stage);
+    if (this.srBackdropMat) {
+      this.srBackdropMat.color.setHex(theme.wall);
+      this.srBackdropMat.emissive.setHex(theme.primary);
+    }
+    this.srPrimaryAccentMats.forEach((material) => material.color.setHex(theme.primary));
+    this.srBrandAccentMats.forEach((material) => material.color.setHex(safeBrandColor));
+    this.srKeySpot?.color.setHex(theme.primary);
+    this.srFillSpot?.color.setHex(safeBrandColor);
+  }
+
   public update(deltaTime: number) {
     const tuningState = (this.engine as any).tuningState || 'closed';
     const isTuning = tuningState !== 'closed';
     const progress = (this.engine as any).tuningCameraProgress || 0;
     const isQuickPlay = (this.engine as any).isQuickPlayCarSelect;
-    const isShowroomMode = isQuickPlay || ((this.engine as any).activeGarageTab === 'dealer' && (this.engine as any).dealerMarketMode !== null);
+    const dealerMarketMode = this.engine.dealerMarketMode;
+    const isShowroomMode = isQuickPlay || (this.engine.activeGarageTab === 'dealer' && dealerMarketMode !== null);
+
+    if (isShowroomMode) {
+      this.applyShowroomTheme(
+        isQuickPlay ? 'default' : dealerMarketMode,
+        this.engine.dealerShowroomColor
+      );
+    }
 
     if (isTuning) {
       // Keep vehicle stationary facing the camera directly
@@ -350,9 +524,10 @@ export class GarageMode extends BaseMode {
       if (this.ring) this.ring.visible = false;
       if (this.roomGroup) this.roomGroup.visible = false;
 
-      // Keep sky dome visible
-      if (this.engine.sky) this.engine.sky.setVisible(true);
-      if (this.engine.scene) this.engine.scene.background = null;
+      // Enclosed studio: no outdoor sky or dark vignette overlay is needed.
+      if (this.engine.sky) this.engine.sky.setVisible(false);
+      if (this.engine.renderer) this.engine.renderer.setClearColor(this.showroomBackground, 1);
+      if (this.engine.scene) this.engine.scene.background = this.showroomBackground;
 
       // Calculate dynamic dimensions of the vehicle to position top spotlight correctly
       const box = new THREE.Box3().setFromObject(this.vehicle.mesh);
@@ -360,39 +535,42 @@ export class GarageMode extends BaseMode {
       const carHeight = size.y > 0.5 ? size.y : 1.2;
       const targetLightY = Math.max(10, carHeight + 9.0);
 
-      // Handle Purchase Celebration Lighting Animation
+      // Purchase celebration pulses the room accents without moving or scaling the view.
       if (this.purchaseCelebrationTimer > 0) {
         this.purchaseCelebrationTimer -= deltaTime;
-        const progress = Math.max(0, this.purchaseCelebrationTimer / 2.5);
-        const pulse = Math.sin(progress * Math.PI * 6) * 0.5 + 0.5;
+        const celebrationProgress = Math.max(0, this.purchaseCelebrationTimer / 2.5);
+        const pulse = Math.sin(celebrationProgress * Math.PI * 6) * 0.5 + 0.5;
 
         if (this.srTopSpot) {
-          this.srTopSpot.position.set(0, targetLightY, 0);
-          this.srTopSpot.intensity = 10.0 + pulse * 15.0;
+          this.srTopSpot.position.set(0, targetLightY, 1);
+          this.srTopSpot.intensity = 8.0 + pulse * 9.0;
         }
         if (this.srCenterPoint) {
-          this.srCenterPoint.intensity = 18.0 + pulse * 30.0;
+          this.srCenterPoint.intensity = 6.0 + pulse * 10.0;
         }
-        if (this.srOuterRingMat) {
-          this.srOuterRingMat.color.setHex(pulse > 0.5 ? 0x06b6d4 : 0xf59e0b);
-        }
+        this.srPrimaryAccentMats.forEach((material) => {
+          material.color.setHex(pulse > 0.5 ? this.currentShowroomPrimary : 0xfbbf24);
+        });
         if (this.engine.ambientLight) {
-          this.engine.ambientLight.intensity = 0.25 + pulse * 0.2;
+          this.engine.ambientLight.intensity = 0.32 + pulse * 0.18;
         }
       } else {
         if (this.srTopSpot) {
-          this.srTopSpot.position.set(0, targetLightY, 0);
-          this.srTopSpot.intensity = 3.5;
+          this.srTopSpot.position.set(0, targetLightY, 1);
+          this.srTopSpot.intensity = 5.5;
         }
         if (this.srCenterPoint) {
-          this.srCenterPoint.intensity = 5.0;
+          this.srCenterPoint.intensity = 4.2;
         }
-        if (this.srOuterRingMat) {
-          this.srOuterRingMat.color.setHex(0x0284c7);
-        }
+        this.srPrimaryAccentMats.forEach((material) => {
+          material.color.setHex(this.currentShowroomPrimary);
+        });
+        this.srBrandAccentMats.forEach((material) => {
+          material.color.setHex(this.currentShowroomSecondary);
+        });
         if (this.engine.ambientLight) {
-          this.engine.ambientLight.color.setHex(0xd1d5db);
-          this.engine.ambientLight.intensity = 0.25;
+          this.engine.ambientLight.color.setHex(0xdbeafe);
+          this.engine.ambientLight.intensity = 0.32;
         }
       }
 
@@ -403,8 +581,16 @@ export class GarageMode extends BaseMode {
       if (this.mainGarageSpot) this.mainGarageSpot.visible = false;
       if (this.tuningSpot) this.tuningSpot.visible = false;
       if (this.srTopSpot) this.srTopSpot.visible = true;
+      if (this.srKeySpot) {
+        this.srKeySpot.visible = true;
+        this.srKeySpot.intensity = 7.2;
+      }
+      if (this.srFillSpot) {
+        this.srFillSpot.visible = true;
+        this.srFillSpot.intensity = 5.8;
+      }
 
-      // Hide cyber lights
+      // Hide quick-play-only exterior lights; the studio owns its light rig.
       if (this.quickPlayLeftLight) this.quickPlayLeftLight.visible = false;
       if (this.quickPlayRightLight) this.quickPlayRightLight.visible = false;
 
@@ -453,6 +639,7 @@ export class GarageMode extends BaseMode {
 
       // Restore light intensities and positions when not in tuning
       if (this.engine.ambientLight) {
+        this.engine.ambientLight.color.setHex(0x24244d);
         this.engine.ambientLight.intensity = 1.0;
       }
       if (this.engine.dirLight) {

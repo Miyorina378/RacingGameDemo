@@ -5,6 +5,10 @@ import { GameEngine } from '../gameEngine';
 import { Vehicle } from '../objects/Vehicle';
 import { ParticleSystem } from '../objects/ParticleSystem';
 import { getMinNodeSpacing } from '../engine/types';
+import { applyBrush } from './terrain';
+
+/** Vertices per brush ring. Enough that a 250m brush still reads as a circle. */
+const BRUSH_RING_SEGMENTS = 72;
 
 export class PreviewMode extends BaseMode {
   // Static state to preserve camera between track geometry rebuilds
@@ -25,10 +29,13 @@ export class PreviewMode extends BaseMode {
   // 3D Editor drag state
   private draggedNodeIdx: number | null = null;
   private draggedSceneryIdx: number | null = null;
+  private isSculpting = false;
+  private flattenTarget: number | undefined;
   
   // Visual markers and helpers
   private nodesVisualGroup = new THREE.Group();
   private hoverCursor: THREE.Mesh | null = null;
+  private brushCursor: THREE.Group | null = null;
   private gridHelper: THREE.GridHelper | null = null;
   private sceneryOutlineHelper: THREE.BoxHelper | null = null;
   private lastSelectedSceneryIndex: number | null = null;
@@ -79,24 +86,6 @@ export class PreviewMode extends BaseMode {
   }
 
   /**
-   * Distance from node `idx` to whichever loop neighbour is closest, or null when
-   * both are comfortably far. Only the neighbours in sequence order are measured:
-   * a track that legitimately crosses over itself (figure-8) has spatially close
-   * nodes that are far apart in the loop, and those are fine.
-   */
-  private neighbourGap(nodes: any[], idx: number, minSpacing: number): number | null {
-    const n = nodes.length;
-    let worst: number | null = null;
-    for (const offset of [-1, 1]) {
-      const other = nodes[(((idx + offset) % n) + n) % n];
-      if (!other || other === nodes[idx]) continue;
-      const dist = Math.hypot(nodes[idx].x - other.x, nodes[idx].z - other.z);
-      if (dist < minSpacing && (worst === null || dist < worst)) worst = dist;
-    }
-    return worst;
-  }
-
-  /**
    * Pushes a dragged position back out to the minimum spacing from its loop
    * neighbours. Clamping keeps the drag smooth, where rejecting it outright would
    * make the node stick.
@@ -138,7 +127,7 @@ export class PreviewMode extends BaseMode {
    * `free` skips the snap but keeps the clamp, so nothing can be placed off-map.
    */
   private applyGridSnap(
-    state: { snapToGrid: number },
+    state: { snapToGrid: number; gridLimit: number },
     target: THREE.Vector3,
     free: boolean
   ): { x: number; z: number } {
@@ -148,11 +137,59 @@ export class PreviewMode extends BaseMode {
       x = Math.round(target.x / state.snapToGrid) * state.snapToGrid;
       z = Math.round(target.z / state.snapToGrid) * state.snapToGrid;
     }
-    const limit = state.snapToGrid * 250;
+    // The bound is the map size, not the snap size. Deriving it from snapToGrid
+    // meant turning snapping off collapsed it to zero and nothing could be moved.
+    const limit = Math.max(1, state.gridLimit) * 2;
     return {
       x: Math.max(-limit, Math.min(limit, x)),
       z: Math.max(-limit, Math.min(limit, z))
     };
+  }
+
+  /**
+   * Drapes the brush rings over the ground at the cursor. Following the terrain
+   * rather than drawing a flat disc is the whole point: on a slope a flat circle
+   * sits half-buried and gives no idea what the brush will actually reach.
+   */
+  private updateBrushCursor(x: number, z: number, radius: number, brush: string) {
+    if (!this.brushCursor) return;
+    this.brushCursor.visible = true;
+
+    // Digging reads red, building up reads amber, levelling reads blue.
+    const color = brush === 'lower' ? 0xff5c5c : brush === 'raise' ? 0xffb020 : 0x5cc8ff;
+
+    this.brushCursor.children.forEach((child, ring) => {
+      const line = child as THREE.LineLoop;
+      (line.material as THREE.LineBasicMaterial).color.setHex(color);
+      // Outer ring is where the brush stops mattering; inner is roughly half strength.
+      const r = radius * (ring === 0 ? 1 : 0.5);
+      const pos = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < BRUSH_RING_SEGMENTS; i++) {
+        const angle = (i / BRUSH_RING_SEGMENTS) * Math.PI * 2;
+        const px = x + Math.cos(angle) * r;
+        const pz = z + Math.sin(angle) * r;
+        pos.setXYZ(i, px, this.terrain.sampleAt(px, pz) + 0.35, pz);
+      }
+      pos.needsUpdate = true;
+      line.geometry.computeBoundingSphere();
+    });
+  }
+
+  /**
+   * Applies one brush dab and refreshes only the patch of mesh it moved, so a
+   * stroke costs the brush area rather than the whole terrain.
+   */
+  private sculptAt(x: number, z: number) {
+    const state = this.engine.editorState;
+    const rect = applyBrush(this.terrain, {
+      brush: state.terrainBrush,
+      x,
+      z,
+      radius: state.terrainBrushRadius,
+      strength: state.terrainBrushStrength,
+      targetHeight: this.flattenTarget
+    });
+    this.refreshTerrainRegion(rect);
   }
 
   private getDefaultScale(tool: string): number {
@@ -204,6 +241,21 @@ export class PreviewMode extends BaseMode {
       const state = this.engine.editorState;
       if (state.activeMode !== 'editor') return;
 
+      // Terrain sculpting owns the whole canvas while it is the active layer,
+      // so a stroke never accidentally grabs a node or a prop.
+      if (state.editLayer === 'terrain') {
+        const hit = this.getRaycastIntersection(e);
+        if (hit) {
+          this.isSculpting = true;
+          // A flatten stroke locks onto the height it started on, so dragging
+          // levels ground to where you first clicked rather than chasing itself.
+          this.flattenTarget =
+            state.terrainBrush === 'flatten' ? this.terrain.sampleAt(hit.x, hit.z) : undefined;
+          this.sculptAt(hit.x, hit.z);
+        }
+        return;
+      }
+
       // 1. Raycast against node spheres directly
       const nodeIntersects = raycaster.intersectObjects(this.nodesVisualGroup.children, true);
       let clickedNodeIdx = -1;
@@ -214,7 +266,10 @@ export class PreviewMode extends BaseMode {
         }
       }
 
-      // 2. Raycast against scenery meshes directly
+      // 2. Raycast against scenery. Only the nearest hit counts: the environment
+      //    group also holds the terrain and road, so scanning past the first hit
+      //    would let a click on open ground reach through and grab a prop stood
+      //    somewhere behind it.
       const sceneryIntersects = raycaster.intersectObjects(this.environmentGroup.children, true);
       let clickedSceneryIdx = -1;
       if (sceneryIntersects.length > 0) {
@@ -249,47 +304,34 @@ export class PreviewMode extends BaseMode {
         const finalZ = snapped.z;
 
         if (state.tool === 'node') {
-          // Place new node
-          const maxPosition = state.nodes.length;
-          const userInput = window.prompt(
-            `Set node sequence index (0 to ${maxPosition}):\n` +
-            `- Enter the index (0-based) to place this node at (subsequent nodes will shift down by 1).\n` +
-            `- Or leave as is and press OK to append it to the end (index ${maxPosition}).\n` +
-            `- Or press CANCEL to discard this node.`,
-            String(maxPosition)
-          );
-          
-          if (userInput === null) {
-            // User cancelled
-            return;
-          }
-
-          let insertIdx = maxPosition;
-          if (userInput.trim() !== '') {
-            const parsed = parseInt(userInput, 10);
-            if (!isNaN(parsed) && parsed >= 0 && parsed <= maxPosition) {
-              insertIdx = parsed;
-            } else {
-              alert(`Invalid index! Must be between 0 and ${maxPosition}.`);
-              return;
-            }
-          }
+          // Where in the lap this click belongs. Clicking the tarmac splices the node
+          // between the two it fell between; clicking open ground continues the lap
+          // from its end. Both used to be one window.prompt asking for the sequence
+          // index by hand, once per node, which is most of why laying out a track was
+          // such a chore.
+          const onRoad = this.getNodeIndexAt(finalX, finalZ);
+          const insertIdx =
+            onRoad === null ? state.nodes.length : Math.floor(onRoad) + 1;
 
           const newNodes = [...state.nodes];
-          const newNode = { x: finalX, z: finalZ, y: state.cornerHeight, width: state.roadWidth };
-          newNodes.splice(insertIdx, 0, newNode);
+          newNodes.splice(insertIdx, 0, {
+            x: finalX,
+            z: finalZ,
+            y: state.cornerHeight,
+            width: state.roadWidth
+          });
 
-          const minSpacing = getMinNodeSpacing(state.roadWidth);
-          const gap = this.neighbourGap(newNodes, insertIdx, minSpacing);
-          if (gap !== null) {
-            alert(
-              `Too close to the neighbouring node: ${gap.toFixed(1)}m apart, minimum is ${minSpacing.toFixed(1)}m.\n\n` +
-              `Nodes packed this tightly warp the road mesh. Place it further away, ` +
-              `or reduce the road width first.\n\n` +
-              `For a tight corner, use one node with Sharp Corner enabled instead of several close ones.`
-            );
-            return;
-          }
+          // Nodes packed tighter than this warp the road mesh, so the new one slides
+          // out to a legal gap. It used to be rejected outright with an alert, which
+          // threw the click away and left you guessing where the line was.
+          const spaced = this.clampToNeighbourSpacing(
+            newNodes,
+            insertIdx,
+            finalX,
+            finalZ,
+            getMinNodeSpacing(state.roadWidth)
+          );
+          newNodes[insertIdx] = { ...newNodes[insertIdx], x: spaced.x, z: spaced.z };
 
           state.onUpdateNodes?.(newNodes);
           state.onSelectNode?.(insertIdx);
@@ -312,6 +354,12 @@ export class PreviewMode extends BaseMode {
     this.isDraggingCamera = false;
 
     const state = this.engine.editorState;
+    if (this.isSculpting) {
+      this.isSculpting = false;
+      this.flattenTarget = undefined;
+      // Persist once per stroke rather than per dab.
+      state.onTerrainChange?.();
+    }
     if (this.draggedNodeIdx !== null) {
       state.onUpdateNodes?.(state.nodes); // trigger final rebuild
       state.onDragNodeEnd?.();
@@ -343,23 +391,40 @@ export class PreviewMode extends BaseMode {
     const state = this.engine.editorState;
     if (state.activeMode !== 'editor') return;
 
+    const hideCursors = () => {
+      if (this.hoverCursor) this.hoverCursor.visible = false;
+      if (this.brushCursor) this.brushCursor.visible = false;
+    };
+
     const target = this.getRaycastIntersection(e);
     if (!target) {
-      if (this.hoverCursor) this.hoverCursor.visible = false;
+      hideCursors();
       return;
     }
 
+    // The panel check has to come before any editing, or dragging a brush slider
+    // would keep painting terrain under the panel.
     const targetEl = e.target as HTMLElement;
     if (
-      targetEl.closest('.pointer-events-auto') || 
-      targetEl.closest('button') || 
-      targetEl.closest('input') || 
+      targetEl.closest('.pointer-events-auto') ||
+      targetEl.closest('button') ||
+      targetEl.closest('input') ||
       targetEl.closest('select') ||
       targetEl.closest('textarea')
     ) {
-      if (this.hoverCursor) this.hoverCursor.visible = false;
+      hideCursors();
       return;
     }
+
+    if (state.editLayer === 'terrain') {
+      // Show the footprint whether or not a stroke is in progress, so the size
+      // can be judged before committing to it.
+      this.updateBrushCursor(target.x, target.z, state.terrainBrushRadius, state.terrainBrush);
+      if (this.hoverCursor) this.hoverCursor.visible = false;
+      if (this.isSculpting) this.sculptAt(target.x, target.z);
+      return;
+    }
+    if (this.brushCursor) this.brushCursor.visible = false;
 
     // Snapping. Decoration can move freely; nodes always stay on the grid.
     const movingScenery = this.draggedSceneryIdx !== null || (this.draggedNodeIdx === null && state.tool !== 'node');
@@ -481,7 +546,7 @@ export class PreviewMode extends BaseMode {
         depthTest: false // render on top of the road surface
       });
       const mesh = new THREE.Mesh(geom, mat);
-      mesh.position.set(n.x, n.y ?? 2, n.z);
+      mesh.position.set(n.x, n.y ?? 0, n.z);
       mesh.name = `node-${idx}`;
       this.nodesVisualGroup.add(mesh);
     });
@@ -497,6 +562,7 @@ export class PreviewMode extends BaseMode {
     const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
     
     // Create visual road mesh with curbs and fences
+    this.createTerrain(trackConfig, trackConfig.time);
     this.createRacetrackRoad(trackConfig);
     this.createScenery(trackConfig.scenery, trackConfig.time);
 
@@ -555,6 +621,26 @@ export class PreviewMode extends BaseMode {
       });
       this.hoverCursor = new THREE.Mesh(cursorGeom, cursorMat);
       this.scene.add(this.hoverCursor);
+
+      // Terrain brush footprint. Two rings drawn as line loops: the outer one is
+      // where the brush stops having any effect, the inner one is roughly where
+      // its strength has halved, so the falloff is readable and not just a circle.
+      this.brushCursor = new THREE.Group();
+      this.brushCursor.visible = false;
+      for (const opacity of [0.95, 0.45]) {
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute(
+          'position',
+          new THREE.BufferAttribute(new Float32Array(BRUSH_RING_SEGMENTS * 3), 3)
+        );
+        const ring = new THREE.LineLoop(
+          geom,
+          new THREE.LineBasicMaterial({ color: 0xffb020, transparent: true, opacity, depthTest: false })
+        );
+        ring.renderOrder = 999;
+        this.brushCursor.add(ring);
+      }
+      this.scene.add(this.brushCursor);
     }
 
     // Add event listeners
@@ -638,6 +724,15 @@ export class PreviewMode extends BaseMode {
     if (this.hoverCursor) {
       this.scene.remove(this.hoverCursor);
       this.hoverCursor = null;
+    }
+    if (this.brushCursor) {
+      this.brushCursor.children.forEach((child) => {
+        const line = child as THREE.LineLoop;
+        line.geometry.dispose();
+        (line.material as THREE.Material).dispose();
+      });
+      this.scene.remove(this.brushCursor);
+      this.brushCursor = null;
     }
     if (this.sceneryOutlineHelper) {
       this.scene.remove(this.sceneryOutlineHelper);

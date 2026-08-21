@@ -47,6 +47,8 @@ export interface TrackConfig {
   HaveGrass?: boolean;
   GrassWidth?: number;
   time?: TimeOfDay;
+  /** Sculpted ground, as flat col/row/height triples. Omit for a flat world. */
+  terrain?: number[];
   /**
    * Distance at which the horizon fully fades into the sky colour. Omit for the
    * per-time default; 0 switches fog off entirely.

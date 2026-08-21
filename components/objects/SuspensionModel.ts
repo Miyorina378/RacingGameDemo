@@ -46,7 +46,6 @@ export interface SuspensionOutput {
   heave: number;
   pitch: number;
   roll: number;
-  averageGroundHeight: number;
 }
 
 const CORNERS: SuspensionCorner[] = [
@@ -160,6 +159,9 @@ export class SuspensionModel {
       )
     };
 
+    // Corner heights arrive as bump residuals about the surface the car sits on, so
+    // this is normally zero; it is still taken from the input rather than assumed,
+    // so the model stays correct for any caller that hands it absolute heights.
     const averageGroundHeight =
       CORNERS.reduce((sum, corner) => sum + input.groundHeights[corner], 0) /
       CORNERS.length;
@@ -308,8 +310,7 @@ export class SuspensionModel {
           pitchResponse,
       roll:
         Math.atan2(leftBodyCompression - rightBodyCompression, input.trackWidth) *
-          rollResponse,
-      averageGroundHeight
+          rollResponse
     };
   }
 

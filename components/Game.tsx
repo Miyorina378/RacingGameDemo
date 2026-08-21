@@ -4,7 +4,20 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GameEngine } from './gameEngine';
 import type { SuggestedGearAdvice } from './engine/SuggestedGearAdvisor';
-import type { EditorScenery, SceneryType, TimeOfDay } from './engine/types';
+import type { EditorNode, EditorScenery, SceneryType, TimeOfDay } from './engine/types';
+import { DEFAULT_TERRAIN_BRUSH_RADIUS } from './modes/terrain';
+import {
+  SavedTrack,
+  TrackLibrary,
+  addTrack,
+  createEmptyTrack,
+  duplicateTrack,
+  getActiveTrack,
+  loadLibrary,
+  removeTrack,
+  saveLibrary,
+  writeActiveTrack
+} from './config/TrackLibrary';
 import type { RaceDifficulty } from './modes/RaceMode';
 import { CARS_DATABASE, CarConfig } from './config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig, TrackNode, TrackScenery } from './config/TrackDatabase';
@@ -70,22 +83,6 @@ import {
 // default (editorHaveCurb/editorHaveFence/editorGrassWidth), or set it explicitly
 // to force that side on or off for just this node -- so a curb can sit on an
 // otherwise plain straight, independent of what the rest of the track does.
-type EditorTrackNode = {
-  x: number;
-  z: number;
-  y?: number;
-  width?: number;
-  banking?: number;
-  leftCurb?: boolean;
-  rightCurb?: boolean;
-  leftFence?: boolean;
-  rightFence?: boolean;
-  leftGrassWidth?: number;
-  rightGrassWidth?: number;
-  sharp?: boolean;
-  cornerRadius?: number;
-};
-
 const RacingFlagsIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     {/* Flagpoles */}
@@ -1020,14 +1017,14 @@ export default function Game() {
 
   // Custom Map Editor States
   const [livePreview, setLivePreview] = useState<boolean>(false);
-  const [editorNodes, setEditorNodes] = useState<EditorTrackNode[]>([]);
+  const [editorNodes, setEditorNodes] = useState<EditorNode[]>([]);
   const [editorScenery, setEditorScenery] = useState<EditorScenery[]>([]);
   const [editorTool, setEditorTool] = useState<'node' | SceneryType>('node');
   const [editorTimeOfDay, setEditorTimeOfDay] = useState<TimeOfDay>('afternoon');
   // Horizon distance for the track's fog: null follows the time-of-day default,
   // 0 switches fog off, anything else is an explicit distance.
   const [editorFogDistance, setEditorFogDistance] = useState<number | null>(null);
-  const [editorCornerHeight, setEditorCornerHeight] = useState<number>(2);
+  const [editorCornerHeight, setEditorCornerHeight] = useState<number>(0);
   const [selectedNodeIndex, setSelectedNodeIndex] = useState<number | null>(null);
   const [selectedSceneryIndex, setSelectedSceneryIndex] = useState<number | null>(null);
   const [editorTrackName, setEditorTrackName] = useState<string>('Custom Gridway');
@@ -1044,6 +1041,17 @@ export default function Game() {
   const [snapToGrid, setSnapToGrid] = useState<number>(10);
   // Decoration is placed by eye, so it defaults to ignoring the track grid.
   const [sceneryFreeMove, setSceneryFreeMove] = useState<boolean>(true);
+  const [editLayer, setEditLayer] = useState<'track' | 'decorate' | 'terrain'>('track');
+  const [terrainBrush, setTerrainBrush] = useState<'raise' | 'lower' | 'smooth' | 'flatten'>('raise');
+  const [terrainBrushRadius, setTerrainBrushRadius] = useState<number>(DEFAULT_TERRAIN_BRUSH_RADIUS);
+  const [terrainBrushStrength, setTerrainBrushStrength] = useState<number>(1.5);
+  // Serialized heightmap. Held here only so it can be persisted; the engine owns
+  // the live Heightmap that sculpting mutates.
+  const [editorTerrain, setEditorTerrain] = useState<number[]>([]);
+  const [trackLibrary, setTrackLibrary] = useState<TrackLibrary>(() => {
+    const first = createEmptyTrack('Custom Gridway');
+    return { version: 1, activeId: first.id, tracks: [first] };
+  });
   const [draggedNodeIndex, setDraggedNodeIndex] = useState<number | null>(null);
   const [draggedSceneryIndex, setDraggedSceneryIndex] = useState<number | null>(null);
   const [editorGridLimit, setEditorGridLimit] = useState<number>(250);
@@ -1076,7 +1084,9 @@ export default function Game() {
       setSoundEnabled(loadSoundEnabled());
       setKeyBindings(loadKeyBindings());
 
-      const savedTrack = localStorage.getItem('cyberdrive_custom_track');
+      const library = loadLibrary();
+      setTrackLibrary(library);
+      const savedTrack = JSON.stringify(getActiveTrack(library));
       if (savedTrack) {
         try {
           const parsed = JSON.parse(savedTrack);
@@ -1104,6 +1114,7 @@ export default function Game() {
           if (parsed.HaveCurb !== undefined) setEditorHaveCurb(parsed.HaveCurb);
           if (parsed.time) setEditorTimeOfDay(parsed.time);
           if (parsed.fogDistance !== undefined) setEditorFogDistance(parsed.fogDistance);
+          if (Array.isArray(parsed.terrain)) setEditorTerrain(parsed.terrain);
           if (parsed.HaveFence !== undefined) setEditorHaveFence(parsed.HaveFence);
           if (parsed.scenery) setEditorScenery(parsed.scenery);
         } catch (e) {
@@ -1297,6 +1308,20 @@ export default function Game() {
     }
   }, [activeGarageTab]);
 
+  const handleDealerShowroomChange = React.useCallback((
+    mode: 'new' | 'used' | 'race' | 'museum' | null,
+    brandColor: string
+  ) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    engine.dealerMarketMode = mode;
+    const parsedBrandColor = Number.parseInt(brandColor.replace('#', ''), 16);
+    if (Number.isFinite(parsedBrandColor)) {
+      engine.dealerShowroomColor = parsedBrandColor;
+    }
+  }, []);
+
   // Initialize Game Engine
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -1478,6 +1503,16 @@ export default function Game() {
     return carUpgrades[carId] || JSON.parse(JSON.stringify(DEFAULT_UPGRADES));
   };
 
+  const previewGarageCar = React.useCallback((carId: string, colorOverride?: string) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const carDb = CARS_DATABASE.find((car) => car.id === carId);
+    const colorToUse = colorOverride || carDb?.color || selectedColor;
+    const upgrades = carUpgrades[carId] || JSON.parse(JSON.stringify(DEFAULT_UPGRADES));
+    engine.setActiveCar(carId, colorToUse, upgrades);
+  }, [carUpgrades, selectedColor]);
+
   // Sync state modifications to Engine
   const changeCarColor = (hex: string) => {
     setSelectedColor(hex);
@@ -1519,6 +1554,7 @@ export default function Game() {
       }
 
       selectCar(car.id);
+      engineRef.current?.triggerPurchaseCelebration();
 
       confetti({
         particleCount: 100,
@@ -2182,7 +2218,7 @@ export default function Game() {
   };
 
   const saveCustomTrack = (
-    nodes: EditorTrackNode[],
+    nodes: EditorNode[],
     name: string,
     width: number,
     time: number,
@@ -2208,16 +2244,23 @@ export default function Game() {
         HaveFence: haveFence,
         scenery,
         time: editorTimeOfDay,
-        fogDistance: editorFogDistance
-      };
-      localStorage.setItem('cyberdrive_custom_track', JSON.stringify(trackData));
+        fogDistance: editorFogDistance,
+        terrain: editorTerrain
+      } satisfies Omit<SavedTrack, 'id' | 'updatedAt'>;
+      // Writes into whichever library entry is active, so several tracks can be
+      // worked on in turn without overwriting each other.
+      setTrackLibrary((prev) => {
+        const next = writeActiveTrack(prev, trackData);
+        saveLibrary(next);
+        return next;
+      });
     }
   };
 
   const importTrack = (text: string) => {
     try {
       const vectorRegex = /(?:THREE\.)?Vector3\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/gi;
-      const nodes: EditorTrackNode[] = [];
+      const nodes: EditorNode[] = [];
       let match;
       while ((match = vectorRegex.exec(text)) !== null) {
         nodes.push({
@@ -2309,7 +2352,7 @@ export default function Game() {
       // explicit override, so they fall back to the track-wide HaveCurb/HaveFence/
       // GrassWidth defaults below (see BaseMode.createRacetrackRoad).
       path: nodes.map((n): TrackNode => ({
-        pos: new THREE.Vector3(n.x, n.y ?? 2, n.z),
+        pos: new THREE.Vector3(n.x, n.y ?? 0, n.z),
         width: n.width ?? width,
         banking: n.banking ?? 0,
         leftCurb: n.leftCurb,
@@ -2336,7 +2379,8 @@ export default function Game() {
       GrassWidth: grassW,
       time: editorTimeOfDay,
       // null means "follow the time-of-day default", which is what omitting it does.
-      fogDistance: editorFogDistance ?? undefined
+      fogDistance: editorFogDistance ?? undefined,
+      terrain: editorTerrain.length > 0 ? editorTerrain : undefined
     };
 
     const existingIdx = TRACKS_DATABASE.findIndex(t => t.id === 'custom');
@@ -2382,10 +2426,162 @@ export default function Game() {
     editorScenery,
     editorTimeOfDay,
     editorFogDistance,
+    editorTerrain,
     activeMode,
     draggedNodeIndex,
     draggedSceneryIndex
   ]);
+
+  // A sculpt stroke must not trigger a full track rebuild: the terrain mesh has
+  // already been updated in place, and rebuilding would throw away the camera.
+  const conformTerrain = () => {
+    const mode = engineRef.current?.currentModeInstance as { conformTerrainToRoad?: () => void } | undefined;
+    if (!mode?.conformTerrainToRoad) return;
+    mode.conformTerrainToRoad();
+    captureTerrain();
+  };
+
+  /**
+   * The other direction from Conform: instead of dragging terrain up to the road,
+   * this reads the sculpted ground under each node and sets the node's elevation
+   * from it, so a track laid across hills actually climbs them.
+   */
+  const drapeTrackToTerrain = () => {
+    const mode = engineRef.current?.currentModeInstance as
+      | { terrain?: { sampleAt: (x: number, z: number) => number } }
+      | undefined;
+    if (!mode?.terrain || editorNodes.length === 0) return;
+    const draped = editorNodes.map((n) => ({
+      ...n,
+      y: Math.max(0, Math.round(mode.terrain!.sampleAt(n.x, n.z) * 10) / 10)
+    }));
+    setEditorNodes(draped);
+    saveCustomTrack(draped, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery, editorHaveCurb, editorHaveFence);
+  };
+
+  /**
+   * Lifts every node until the whole road deck clears the ground beneath it.
+   *
+   * Sampling only the node's own point is not enough: the road is wide, so terrain
+   * just off-centre can still cut up through the surface. This takes the highest
+   * ground within the node's own half-width and adds a clearance on top.
+   */
+  const raiseTrackAboveTerrain = (clearance = 0.4) => {
+    const mode = engineRef.current?.currentModeInstance as
+      | { terrain?: { sampleAt: (x: number, z: number) => number } }
+      | undefined;
+    if (!mode?.terrain || editorNodes.length === 0) return;
+
+    const lifted = editorNodes.map((n) => {
+      const reach = (n.width ?? editorRoadWidth) / 2 + (editorHaveGrass ? editorGrassWidth : 0) + 2;
+      let highest = mode.terrain!.sampleAt(n.x, n.z);
+      // A ring of probes around the node, plus a mid ring, so a slope crossing the
+      // carriageway diagonally still gets caught.
+      for (const radius of [reach * 0.5, reach]) {
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2;
+          highest = Math.max(
+            highest,
+            mode.terrain!.sampleAt(n.x + Math.cos(angle) * radius, n.z + Math.sin(angle) * radius)
+          );
+        }
+      }
+      return { ...n, y: Math.round((highest + clearance) * 10) / 10 };
+    });
+
+    setEditorNodes(lifted);
+    saveCustomTrack(lifted, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery, editorHaveCurb, editorHaveFence);
+  };
+
+  const clearTerrain = () => {
+    const mode = engineRef.current?.currentModeInstance as
+      | { terrain?: { clear: () => void }; refreshTerrainRegion?: () => void }
+      | undefined;
+    mode?.terrain?.clear();
+    mode?.refreshTerrainRegion?.();
+    setEditorTerrain([]);
+  };
+
+  /** Pours a saved track into every piece of editor state. */
+  const applySavedTrack = (track: SavedTrack) => {
+    setEditorNodes(track.nodes);
+    setEditorScenery(track.scenery);
+    setEditorTerrain(track.terrain);
+    setEditorTrackName(track.name);
+    setEditorRoadWidth(track.roadWidth);
+    setEditorTimeLimit(track.timeLimit);
+    setEditorHasObstacles(track.hasObstacles);
+    setEditorGridLimit(track.gridLimit);
+    setEditorHaveGrass(track.HaveGrass);
+    setEditorGrassWidth(track.GrassWidth);
+    setEditorHaveCurb(track.HaveCurb);
+    setEditorHaveFence(track.HaveFence);
+    setEditorTimeOfDay(track.time);
+    setEditorFogDistance(track.fogDistance);
+    setSelectedNodeIndex(null);
+    setSelectedSceneryIndex(null);
+  };
+
+  /** Snapshot of what the editor currently holds, for writing into the library. */
+  const currentTrackData = (): Omit<SavedTrack, 'id' | 'updatedAt'> => ({
+    name: editorTrackName,
+    nodes: editorNodes,
+    scenery: editorScenery,
+    terrain: editorTerrain,
+    roadWidth: editorRoadWidth,
+    timeLimit: editorTimeLimit,
+    hasObstacles: editorHasObstacles,
+    gridLimit: editorGridLimit,
+    HaveGrass: editorHaveGrass,
+    GrassWidth: editorGrassWidth,
+    HaveCurb: editorHaveCurb,
+    HaveFence: editorHaveFence,
+    time: editorTimeOfDay,
+    fogDistance: editorFogDistance
+  });
+
+  /**
+   * Commits whatever is on screen into the active entry before doing anything
+   * that changes which track is active, so switching away never loses edits.
+   */
+  const commitActiveTrack = (library: TrackLibrary) => writeActiveTrack(library, currentTrackData());
+
+  const selectTrack = (id: string) => {
+    if (id === trackLibrary.activeId) return;
+    const committed = { ...commitActiveTrack(trackLibrary), activeId: id };
+    const target = committed.tracks.find((t) => t.id === id);
+    if (!target) return;
+    setTrackLibrary(committed);
+    saveLibrary(committed);
+    applySavedTrack(target);
+  };
+
+  const createNewTrack = () => {
+    const fresh = createEmptyTrack(`Track ${trackLibrary.tracks.length + 1}`);
+    const next = addTrack(commitActiveTrack(trackLibrary), fresh);
+    setTrackLibrary(next);
+    saveLibrary(next);
+    applySavedTrack(fresh);
+  };
+
+  const duplicateActiveTrack = () => {
+    const next = duplicateTrack(commitActiveTrack(trackLibrary), trackLibrary.activeId);
+    setTrackLibrary(next);
+    saveLibrary(next);
+    const copy = next.tracks.find((t) => t.id === next.activeId);
+    if (copy) applySavedTrack(copy);
+  };
+
+  const deleteTrack = (id: string) => {
+    const doomed = trackLibrary.tracks.find((t) => t.id === id);
+    if (!doomed) return;
+    if (!confirm(`Delete "${doomed.name}"? This cannot be undone.`)) return;
+    const next = removeTrack(commitActiveTrack(trackLibrary), id);
+    setTrackLibrary(next);
+    saveLibrary(next);
+    const active = next.tracks.find((t) => t.id === next.activeId);
+    if (active) applySavedTrack(active);
+  };
 
   const launchTestDrive = () => {
     if (editorNodes.length < 3) return;
@@ -2555,14 +2751,35 @@ export default function Game() {
       engineRef.current.editorState.scenery = editorScenery;
       engineRef.current.editorState.tool = editorTool;
       engineRef.current.editorState.snapToGrid = snapToGrid;
+      engineRef.current.editorState.gridLimit = editorGridLimit;
       engineRef.current.editorState.sceneryFreeMove = sceneryFreeMove;
+      engineRef.current.editorState.editLayer = editLayer;
+      engineRef.current.editorState.terrainBrush = terrainBrush;
+      engineRef.current.editorState.terrainBrushRadius = terrainBrushRadius;
+      engineRef.current.editorState.terrainBrushStrength = terrainBrushStrength;
       engineRef.current.editorState.cornerHeight = editorCornerHeight;
       engineRef.current.editorState.selectedNodeIndex = selectedNodeIndex;
       engineRef.current.editorState.selectedSceneryIndex = selectedSceneryIndex;
       engineRef.current.editorState.roadWidth = editorRoadWidth;
       engineRef.current.editorState.activeMode = activeMode;
     }
-  }, [editorNodes, editorScenery, editorTool, snapToGrid, sceneryFreeMove, editorCornerHeight, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, activeMode]);
+  }, [editorNodes, editorScenery, editorTool, snapToGrid, sceneryFreeMove, editLayer, terrainBrush, terrainBrushRadius, terrainBrushStrength, editorCornerHeight, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, activeMode]);
+
+  // Sculpting mutates the engine's Heightmap directly, so React only finds out
+  // when the stroke ends. Pulling the serialized form here is what gets terrain
+  // into the save file and into the TrackConfig on the next rebuild.
+  const captureTerrain = () => {
+    const mode = engineRef.current?.currentModeInstance as { terrain?: { serialize: () => number[] } } | undefined;
+    if (!mode?.terrain) return;
+    setEditorTerrain(mode.terrain.serialize());
+  };
+
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.editorState.onTerrainChange = captureTerrain;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMode]);
 
   // Automatically start 3D preview mode when entering editor
   useEffect(() => {
@@ -2662,7 +2879,7 @@ export default function Game() {
                 zIndex: 80,
                 overflow: 'hidden',
                 pointerEvents: 'auto',
-                transition: noTransition
+                transition: (settingsState === 'open' || tuningState === 'open' || noTransition)
                   ? 'none'
                   : 'transform 0.7s ease-in-out, border-radius 0.7s ease-in-out',
               })
@@ -3131,14 +3348,7 @@ export default function Game() {
             handleExitDealerClick={handleExitDealerClick}
             placeholderRef={placeholderRef}
             setActiveMode={setActiveMode}
-            previewCar={(carId: string) => {
-              if (engineRef.current) {
-                const carDb = CARS_DATABASE.find(c => c.id === carId);
-                const colorToUse = carDb ? carDb.color : selectedColor;
-                const activeUpgrades = getCarUpgrades(carId);
-                engineRef.current.setActiveCar(carId, colorToUse, activeUpgrades);
-              }
-            }}
+            previewCar={previewGarageCar}
             onQuickPlayCarSelectChange={(isCarSelect: boolean, isActiveCarSelectStep: boolean, isInteractable: boolean) => {
               if (engineRef.current) {
                 (engineRef.current as any).isQuickPlayCarSelect = isCarSelect;
@@ -3148,6 +3358,7 @@ export default function Game() {
                 }
               }
             }}
+            onDealerShowroomChange={handleDealerShowroomChange}
           />
         </div>
       )}
@@ -3229,6 +3440,24 @@ export default function Game() {
         snapToGrid={snapToGrid}
         sceneryFreeMove={sceneryFreeMove}
         setSceneryFreeMove={setSceneryFreeMove}
+        editLayer={editLayer}
+        setEditLayer={setEditLayer}
+        terrainBrush={terrainBrush}
+        setTerrainBrush={setTerrainBrush}
+        terrainBrushRadius={terrainBrushRadius}
+        setTerrainBrushRadius={setTerrainBrushRadius}
+        terrainBrushStrength={terrainBrushStrength}
+        setTerrainBrushStrength={setTerrainBrushStrength}
+        conformTerrain={conformTerrain}
+        drapeTrackToTerrain={drapeTrackToTerrain}
+        raiseTrackAboveTerrain={raiseTrackAboveTerrain}
+        clearTerrain={clearTerrain}
+        tracks={trackLibrary.tracks}
+        activeTrackId={trackLibrary.activeId}
+        selectTrack={selectTrack}
+        createNewTrack={createNewTrack}
+        duplicateActiveTrack={duplicateActiveTrack}
+        deleteTrack={deleteTrack}
         setSnapToGrid={setSnapToGrid}
         livePreview={livePreview}
         setLivePreview={setLivePreview}
