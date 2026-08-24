@@ -2711,26 +2711,26 @@ export class Vehicle {
     // At high speeds, full steering angle causes instant tire saturation (extreme understeer).
     // We scale down the max steering angle based on speed to keep tires near peak grip,
     // but better compounds now earn more usable rack angle instead of feeling capped.
-    // However, if the player is drifting or handbraking, we allow a wider steering angle to control the slide or spin.
-    const isDriftingOrHandbraking = this.isDrifting || handbrake;
+    // Keep the high-speed steering limit focused on genuine vehicle slip, not braking.
+    const isDrifting = this.isDrifting;
     const steeringSpeedRatio = THREE.MathUtils.clamp(absForward / 45, 0, 1);
     const steeringFalloff = THREE.MathUtils.smoothstep(steeringSpeedRatio, 0.12, 0.92);
     const highSpeedGripSteerRatio = THREE.MathUtils.clamp(
       0.16 +
         tireSteeringAuthority * 0.13 +
-        (this.driveType === 'AWD' && !handbrake ? 0.025 : 0),
+        (this.driveType === 'AWD' ? 0.025 : 0),
       0.16,
       0.32
     );
     const highSpeedSteerLimit =
       this.maxSteeringAngle *
-      (isDriftingOrHandbraking ? 0.38 : highSpeedGripSteerRatio);
+      (isDrifting ? 0.38 : highSpeedGripSteerRatio);
     const maxSteer = THREE.MathUtils.lerp(this.maxSteeringAngle, highSpeedSteerLimit, steeringFalloff);
 
     // Dynamic Countersteer Assist (Stability Helper)
-    // Disabled if handbrake is pulled or if the slide exceeds the point of no return (driftAngle >= 0.75 rad)
+    // Assist remains active during emergency braking so the car can recover from slip.
     let assistSteer = 0;
-    if (absForward > 5 && Math.abs(this.driftAngle) > 0.05 && !handbrake && Math.abs(this.driftAngle) < 0.75) {
+    if (absForward > 5 && Math.abs(this.driftAngle) > 0.05 && Math.abs(this.driftAngle) < 0.75) {
       const isCounterSteer = turnInput * this.driftAngle < 0;
       const isNeutral = Math.abs(turnInput) < 0.05;
       
@@ -2931,11 +2931,9 @@ export class Vehicle {
       this.relaxedRearSlipAngle
     );
 
-    // Handbrake: dramatically reduce rear grip to initiate drift
-    if (handbrake) {
-      rearGrip *= 0.15;
-    }
+    const serviceBrakeInput = Math.max(reverseValue, handbrake ? 1 : 0);
 
+    // Emergency braking uses the same tire grip and stability limits as normal braking.
     // Lift-off oversteer. Most of this is now genuine physics: closing the throttle
     // applies engine braking, which transfers load forward and unloads the rear axle
     // through the suspension. What stays here is the per-car character trim, halved
@@ -2971,7 +2969,7 @@ export class Vehicle {
     }
 
     // ESC: boost rear grip when sliding
-    if (this.upgrades.brake.hasESC && Math.abs(rearSlipAngle) > 0.05 && !handbrake) {
+    if (this.upgrades.brake.hasESC && Math.abs(rearSlipAngle) > 0.05) {
       rearGrip *= 1.35;
     }
 
@@ -2979,14 +2977,14 @@ export class Vehicle {
     // A small non-ABS penalty represents steering loss as the front tires
     // approach lock, without the old arcade-style 65% force deletion.
     let brakingSteerReduction = 1.0;
-    if (reverseValue > 0.01 && local.forward > 0) {
+    if (serviceBrakeInput > 0.01 && absForward > 0.5) {
       if (this.upgrades.brake.hasABS) {
         brakingSteerReduction = 1.0;
       } else {
         brakingSteerReduction = THREE.MathUtils.lerp(
           1.0,
           0.78,
-          THREE.MathUtils.clamp(reverseValue, 0, 1)
+          THREE.MathUtils.clamp(serviceBrakeInput, 0, 1)
         );
       }
     }
@@ -3013,7 +3011,7 @@ export class Vehicle {
         driveForce *= tcsFactor;
       }
 
-      if (this.driveType === 'AWD' && !handbrake) {
+      if (this.driveType === 'AWD') {
         const steeringDemand = THREE.MathUtils.clamp(
           Math.abs(this.steerAngle) / Math.max(maxSteer, 0.01),
           0,
@@ -3048,11 +3046,12 @@ export class Vehicle {
       ) *
         0.42;
 
+    const emergencyBrakeIsMoving = handbrake && absForward > 0.5;
     const targetBrakePressure =
-      reverseValue > 0.01 && local.forward > 0.5
+      ((reverseValue > 0.01 && local.forward > 0.5) || emergencyBrakeIsMoving)
         ? 1.0 -
           Math.pow(
-            1.0 - THREE.MathUtils.clamp(reverseValue, 0, 1),
+            1.0 - THREE.MathUtils.clamp(serviceBrakeInput, 0, 1),
             1.65
           )
         : 0;
@@ -3066,10 +3065,11 @@ export class Vehicle {
       brakePressureResponse
     );
 
-    if (this.serviceBrakePressure > 0.001 && local.forward > 0.5) {
+    if (this.serviceBrakePressure > 0.001 && absForward > 0.5) {
       brakeForce =
         -this.brakeForce *
         this.serviceBrakePressure *
+        Math.sign(local.forward) *
         brakeFade;
     } else if (reverseValue > 0.01 && local.forward <= 0.5) {
       // Reversing (uses engine torque in 1st/reverse gear instead of accelerationRate)
@@ -3098,14 +3098,6 @@ export class Vehicle {
     if (throttleValue > 0.01 && local.forward < -0.5 && !slidingBackDownAClimb) {
       // Brake from reverse
       brakeForce = this.brakeForce * throttleValue * brakeFade;
-    }
-
-    // Handbrake braking force: locks the rear wheels, applying heavy braking force
-    let handbrakeBrakeForce = 0;
-    if (handbrake) {
-      const speedSign = Math.sign(local.forward) || 1;
-      const lowSpeedScale = Math.min(1.0, absForward / 0.5);
-      handbrakeBrakeForce = -this.brakeForce * 0.75 * speedSign * lowSpeedScale;
     }
 
     // Drag and rolling resistance both oppose the direction the car is actually
@@ -3140,7 +3132,7 @@ export class Vehicle {
 
     // Engine braking when coasting
     let engineBraking = 0;
-    if (throttleValue <= 0.01 && reverseValue <= 0.01 && absForward > 0.5) {
+    if (throttleValue <= 0.01 && serviceBrakeInput <= 0.01 && absForward > 0.5) {
       if (this.powertrainType === 'electric') {
         engineBraking =
           -1.15 * this.mass * Math.sign(local.forward);
@@ -3175,7 +3167,7 @@ export class Vehicle {
     let frontEngineBrake = 0;
     let rearEngineBrake = 0;
 
-    const diffLock = this.getDifferentialLock(throttleValue, reverseValue);
+    const diffLock = this.getDifferentialLock(throttleValue, serviceBrakeInput);
     const awdFrontBias = THREE.MathUtils.clamp(this.differential.awdFrontBias ?? 0.4, 0.2, 0.8);
 
     if (this.driveType === 'FWD') {
@@ -3191,11 +3183,7 @@ export class Vehicle {
       rearEngineBrake = engineBraking * (1.0 - awdFrontBias);
     }
 
-    // Handbrake disables rear drive force
-    if (handbrake) {
-      rearDrive *= 0.05;
-    }
-
+    // Emergency braking keeps normal drive distribution; it does not cut rear drive.
     const frontMaxGrip = this.computeAxleGripLimit(frontGrip, frontWeight, frontLateralTransfer);
     const rearMaxGrip = this.computeAxleGripLimit(rearGrip, rearWeight, rearLateralTransfer);
     const frontDriveGripLimit =
@@ -3263,20 +3251,21 @@ export class Vehicle {
         0.74,
         serviceSteeringDemand
       );
-    const rearServiceBrakeMagnitude = handbrake
-      ? desiredRearBrakeMagnitude
-      : Math.min(desiredRearBrakeMagnitude, rearMaxGrip * rearServiceGripReserve);
+    const rearServiceBrakeMagnitude = Math.min(
+      desiredRearBrakeMagnitude,
+      rearMaxGrip * rearServiceGripReserve
+    );
     const frontServiceBrakeMagnitude =
       Math.abs(tireAwareBrakeForce) - rearServiceBrakeMagnitude;
     const brakeDirection = Math.sign(tireAwareBrakeForce);
     const frontBrake = brakeDirection * frontServiceBrakeMagnitude;
     const rearBrake =
-      brakeDirection * rearServiceBrakeMagnitude + handbrakeBrakeForce;
+      brakeDirection * rearServiceBrakeMagnitude;
     let frontRequestedForce = frontDrive + frontBrake + frontEngineBrake;
     let rearRequestedForce = rearDrive + rearBrake + rearEngineBrake;
 
     // ABS cycles brake pressure near peak slip rather than hard-clamping final tire force.
-    if (reverseValue > 0.01 && local.forward > 0.5 && this.upgrades.brake.hasABS) {
+    if (serviceBrakeInput > 0.01 && absForward > 0.5 && this.upgrades.brake.hasABS) {
       // Stability-oriented ABS releases more pressure while steering, similar
       // to the forgiving default ABS behavior used by Gran Turismo.
       const targetUtilization = THREE.MathUtils.lerp(
@@ -3410,8 +3399,7 @@ export class Vehicle {
       local.forward,
       deltaTime
     );
-    // The handbrake needs no special case any more: it applies a large opposing
-    // force with rear drive cut, so the wheel ODE locks the axle on its own.
+    // Emergency braking keeps rear cornering stiffness intact so it cannot initiate a drift.
     this.frontWheelSpeed = frontAxleState.wheelSpeed;
     this.rearWheelSpeed = rearAxleState.wheelSpeed;
     const frontSlipRatio = frontAxleState.slipRatio;
@@ -3498,19 +3486,6 @@ export class Vehicle {
     const yawMomentOfInertia = Math.max(this.yawInertia, 100);
     const yawAccel = yawTorque / yawMomentOfInertia;
 
-    // A locked rear axle loses cornering stiffness, which is what lets a handbrake
-    // turn rotate. That now happens through the tire forces above instead of
-    // through a separate damping override.
-    const handbrakeSteerDemand = THREE.MathUtils.clamp(
-      Math.abs(this.steerAngle) / Math.max(maxSteer, 0.01),
-      0,
-      1
-    );
-    const rearLockSeverity =
-      (handbrake ? 1 : 0) *
-      handbrakeSteerDemand *
-      THREE.MathUtils.smoothstep(absForward, 18, 55);
-
     // The textbook claim that (Cf*a^2 + Cr*b^2)/(Iz*V) is already fully produced by
     // the yawRate terms inside the slip angles only holds for an idealized bicycle
     // model: instantaneous slip response and a constant (linear) cornering stiffness.
@@ -3556,8 +3531,7 @@ export class Vehicle {
       rearCamberEffects.corneringStiffnessMultiplier *
       pressureEffects.stiffnessMultiplier *
       1.3 *
-      rearStiffnessRetention *
-      (1.0 - rearLockSeverity * 0.92);
+      rearStiffnessRetention;
     const axleYawStiffness =
       frontCorneringStiffness * frontAxleDist * frontAxleDist +
       rearCorneringStiffness * rearAxleDist * rearAxleDist;
@@ -3575,7 +3549,7 @@ export class Vehicle {
     // rate, and it keeps one bad frame from becoming an unrecoverable spin.
     this.yawRate = THREE.MathUtils.clamp(this.yawRate, -4.0, 4.0);
 
-    const spinThreshold = THREE.MathUtils.lerp(1.9, 1.15, rearLockSeverity);
+    const spinThreshold = 1.9;
     if (
       absForward > 18 &&
       (Math.abs(this.yawRate) > spinThreshold || Math.abs(this.driftAngle) > 0.72)
@@ -3714,7 +3688,7 @@ export class Vehicle {
     const averageSlipAngle =
       (Math.abs(this.relaxedFrontSlipAngle) + Math.abs(this.relaxedRearSlipAngle)) * 0.5;
     const averageSlipRatio = (Math.abs(frontSlipRatio) + Math.abs(rearSlipRatio)) * 0.5;
-    const brakeIntensity = reverseValue > 0.01 && local.forward > 0 ? reverseValue : 0;
+    const brakeIntensity = serviceBrakeInput > 0.01 && absForward > 0.5 ? serviceBrakeInput : 0;
     updateTireTemperature(
       this.tireState,
       absForward / Math.max(this.maxSpeed, 1),
@@ -3948,6 +3922,30 @@ export class Vehicle {
       this.stepPhysics(step, throttleValue, reverseValue, turnInput, handbrake);
     }
 
+    this.updateVisualState(deltaTime);
+  }
+
+  /**
+   * Apply a recorded transform during a post-race replay without advancing physics.
+   */
+  public applyReplayTransform(transform: {
+    position: THREE.Vector3;
+    yaw: number;
+    pitch: number;
+    roll: number;
+    speed: number;
+    isGrounded: boolean;
+  }, deltaTime: number = 1 / 60): void {
+    this.pos.copy(transform.position);
+    this.yaw = transform.yaw;
+    this.pitch = transform.pitch;
+    this.roll = transform.roll;
+    this.speed = transform.speed;
+    this.groundSpeed = Math.abs(transform.speed);
+    this.velocityX = Math.sin(transform.yaw) * transform.speed;
+    this.velocityZ = Math.cos(transform.yaw) * transform.speed;
+    this.wheelSpeed = Math.abs(transform.speed);
+    this.isGrounded = transform.isGrounded;
     this.updateVisualState(deltaTime);
   }
 

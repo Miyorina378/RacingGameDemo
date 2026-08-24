@@ -10,6 +10,7 @@ import { GameEngine } from '../gameEngine';
 import { ParticleSystem } from '../objects/ParticleSystem';
 import { buildCenterline } from './centerline';
 import { resolveTrackNodes } from './trackNodes';
+import type { ReplayCameraTrack } from '../engine/ReplayCameraDirector';
 import type { DrivingMode } from '../option';
 
 const isTrackVector = (point: THREE.Vector3 | TrackNode): point is THREE.Vector3 =>
@@ -24,12 +25,61 @@ export interface RaceOptions {
   opponentCount?: number;
 }
 
+export interface ReplayTarget {
+  vehicle: Vehicle;
+  name: string;
+  isPlayer: boolean;
+}
+
 const DIFFICULTY_SPEED_MULTIPLIER: Record<RaceDifficulty, number> = {
   easy: 0.84,
   normal: 1,
   hard: 1.12,
   veryHard: 1.24
 };
+
+interface ReplayTransform {
+  position: THREE.Vector3;
+  yaw: number;
+  pitch: number;
+  roll: number;
+  speed: number;
+  isGrounded: boolean;
+}
+
+/** Compact transform stored for every vehicle at a replay sample. */
+export type RaceReplayTransform = [
+  x: number,
+  y: number,
+  z: number,
+  yaw: number,
+  pitch: number,
+  roll: number,
+  speed: number,
+  grounded: number
+];
+
+export interface RaceReplayFrame {
+  player: RaceReplayTransform;
+  opponents: RaceReplayTransform[];
+}
+
+export interface RaceReplayExport {
+  format: 'cyberdrive-race-replay';
+  version: 1;
+  trackId: string;
+  carId: string;
+  totalLaps: number;
+  sampleInterval: number;
+  duration: number;
+  frameCount: number;
+  opponents: Array<{
+    carId: string;
+    color: string;
+    name: string;
+  }>;
+  frames: RaceReplayFrame[];
+}
 
 export class RaceMode extends BaseMode {
   public checkpoints: Checkpoint[] = [];
@@ -52,6 +102,15 @@ export class RaceMode extends BaseMode {
   public lapStartTimes: number[] = [0, 0];
   public bestLapTime = Infinity;
   private densePath: THREE.Vector3[] = [];
+  private replayFrames: RaceReplayFrame[] = [];
+  private replayCaptureAccumulator = 0;
+  private replayElapsed = 0;
+  private replayActive = false;
+  private finishAutopilot?: RacingAI;
+  private finishAutopilotActive = false;
+  /** Stable opponent vehicle list handed to the replay camera director. */
+  private replayOpponents: Vehicle[] = [];
+  private readonly replayFrameInterval = 1 / 20;
   private aiCars: {
     vehicle: Vehicle;
     ai: RacingAI;
@@ -134,13 +193,20 @@ export class RaceMode extends BaseMode {
     this.raceTime = 0;
     this.lapStartTimes = [0, 0];
     this.bestLapTime = Infinity;
+    this.replayFrames = [];
+    this.replayCaptureAccumulator = 0;
+    this.replayElapsed = 0;
+    this.replayActive = false;
+    this.finishAutopilot = undefined;
+    this.finishAutopilotActive = false;
 
     // Clean up any existing AI cars from the scene to prevent duplicates
     this.aiCars.forEach(ai => {
       this.scene.remove(ai.vehicle.mesh);
     });
     this.aiCars = [];
-    
+    this.replayOpponents = [];
+
     // Find track configuration in database
     const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
     const path = trackConfig.path;
@@ -178,7 +244,18 @@ export class RaceMode extends BaseMode {
       resolvedNodes,
       { curveType: trackConfig.curveType, tension: trackConfig.tension, roadWidth: trackConfig.roadWidth }
     ).curve;
-    this.densePath = aiCurve.getSpacedPoints(250);
+    // The road ribbon keeps a duplicate first point for its closing quad. The AI
+    // needs a unique loop, and its sample density must stay physical on both small
+    // circuits and multi-kilometre courses.
+    const aiSampleCount = Math.max(180, Math.ceil(aiCurve.getLength() / 4));
+    const aiSamples = aiCurve.getSpacedPoints(aiSampleCount);
+    if (
+      aiSamples.length > 2 &&
+      aiSamples[0].distanceToSquared(aiSamples[aiSamples.length - 1]) < 1e-4
+    ) {
+      aiSamples.pop();
+    }
+    this.densePath = aiSamples;
 
     const difficultyMultiplier = DIFFICULTY_SPEED_MULTIPLIER[this.difficulty] ?? DIFFICULTY_SPEED_MULTIPLIER.normal;
 
@@ -287,6 +364,8 @@ export class RaceMode extends BaseMode {
     const trackInfoCallback = (x: number, z: number, yHint?: number) =>
       this.getTrackInfo(x, z, yHint);
 
+    // Keep one live array object so controllers receive the obstacles spawned below.
+    this.obstacles = [];
     this.aiCars.forEach(aiCar => {
       aiCar.vehicle.haveFence = this.haveFence;
       aiCar.vehicle.trackBoundary = this.trackBoundary;
@@ -300,15 +379,13 @@ export class RaceMode extends BaseMode {
       aiCar.ai.getTrackInfo = trackInfoCallback;
       aiCar.ai.isOnGrass = grassCallback;
       aiCar.ai.trackBoundary = this.trackBoundary;
-      aiCar.ai.obstacles = this.obstacles;
     });
 
     // Spawn obstacles (Cylinder warning cones) on high-tier race track
-    this.obstacles = [];
     if (trackConfig.hasObstacles) {
-      for (let i = 0; i < path.length - 1; i++) {
+      for (let i = 0; i < pathVectors.length; i++) {
         const p1 = pathVectors[i];
-        const p2 = pathVectors[i+1];
+        const p2 = pathVectors[(i + 1) % pathVectors.length];
         
         // Spawn mid-way between checkpoints, offset slightly randomly
         const midPoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
@@ -324,6 +401,20 @@ export class RaceMode extends BaseMode {
       }
     }
 
+    this.aiCars.forEach(aiCar => {
+      aiCar.ai.obstacles = this.obstacles;
+    });
+    this.replayOpponents = this.aiCars.map(aiCar => aiCar.vehicle);
+
+    // Use the same track-aware AI controller for the player's short post-finish
+    // cruise. It remains separate from aiCars so standings and replay data stay unchanged.
+    this.finishAutopilot = new RacingAI(this.vehicle, this.densePath, 0.65, 0);
+    this.finishAutopilot.drivingMode = this.drivingMode;
+    this.finishAutopilot.getTrackInfo = trackInfoCallback;
+    this.finishAutopilot.isOnGrass = grassCallback;
+    this.finishAutopilot.trackBoundary = this.trackBoundary;
+    this.finishAutopilot.obstacles = this.obstacles;
+
     this.activeCheckpointIndex = 0;
     this.currentLap = 1;
     this.hasQualifiedForLap = false;
@@ -337,6 +428,29 @@ export class RaceMode extends BaseMode {
   }
 
   public update(deltaTime: number) {
+    if (this.replayActive) {
+      this.updateReplay(deltaTime);
+      return;
+    }
+    if (this.engine.gameStatus === 'success') {
+      if (this.finishAutopilotActive && this.finishAutopilot) {
+        this.updateScrollingFloor();
+        this.updateGrass(deltaTime);
+        const autopilotInputs = this.finishAutopilot.computeInputs(deltaTime);
+        this.vehicle.update(deltaTime, autopilotInputs);
+        if (this.vehicle.speed > 5.6) {
+          this.particles.emitBoosters(
+            this.vehicle.mesh.matrixWorld,
+            this.vehicle.yaw,
+            this.vehicle.speed,
+            this.vehicle.boosterColor
+          );
+        }
+        this.particles.update(deltaTime);
+      }
+      return;
+    }
+
     this.updateScrollingFloor();
     this.updateGrass(deltaTime);
 
@@ -503,7 +617,7 @@ export class RaceMode extends BaseMode {
       }
 
       // Calculate smooth curve forward direction vector at closest dense point
-      let trackForward = new THREE.Vector3(0, 0, 1);
+      const trackForward = new THREE.Vector3(0, 0, 1);
       if (this.densePath.length > 1) {
         const nextDenseIdx = (closestDenseIdx + 1) % this.densePath.length;
         trackForward.subVectors(this.densePath[nextDenseIdx], this.densePath[closestDenseIdx]).normalize();
@@ -574,42 +688,52 @@ export class RaceMode extends BaseMode {
               name: 'You',
               car: playerCarName,
               time: this.raceTime,
+              status: 'finished' as const,
+              lapsBehind: 0,
               isPlayer: true
             };
 
             const playerTotalCheckpoints = path.length * this.totalLaps;
             const aiResults = this.aiCars.map(ai => {
+              const aiNextPt = path[ai.currentPathIndex];
+              const aiDistToNext = ai.vehicle.pos.distanceTo(aiNextPt);
+              const aiProgress = ai.checkpointsPassed - (aiDistToNext / 10000);
+              const hasFinished = ai.finishTime !== undefined || ai.checkpointsPassed >= playerTotalCheckpoints;
+              const lapsBehind = hasFinished
+                ? 0
+                : Math.max(0, Math.floor((playerTotalCheckpoints - aiProgress) / path.length));
               let finalTime = ai.finishTime;
+
               if (finalTime === undefined) {
-                // Calculate projected time for unfinished AI
-                const aiNextPt = path[ai.currentPathIndex];
-                const aiDistToNext = ai.vehicle.pos.distanceTo(aiNextPt);
-                const aiProgress = ai.checkpointsPassed - (aiDistToNext / 10000);
-                
+                // Calculate projected time only for unfinished AI so standings remain ordered.
                 const playerTimePerCp = this.raceTime / playerTotalCheckpoints;
                 const remainingCp = Math.max(0, playerTotalCheckpoints - aiProgress);
                 finalTime = this.raceTime + remainingCp * (playerTimePerCp / ai.config.speedFactor);
               }
-              
+
               return {
                 pos: 0,
                 name: ai.config.name,
                 car: ai.config.name,
                 time: finalTime,
+                status: hasFinished ? 'finished' as const : lapsBehind > 0 ? 'lapped' as const : 'in_progress' as const,
+                lapsBehind,
                 isPlayer: false
               };
             });
 
-            // Sort all by time
+            // Sort all by actual or projected time, then assign final positions.
             const allResults = [playerResult, ...aiResults];
             allResults.sort((a, b) => a.time - b.time);
-            
-            // Assign positions
             allResults.forEach((res, idx) => {
               res.pos = idx + 1;
             });
 
-            this.engine.handleSuccess(placement, allResults);
+            const finalPlacement = allResults.find(res => res.isPlayer)?.pos ?? placement;
+            this.captureReplayFrame();
+            this.finishAutopilotActive = true;
+            this.engine.handleSuccess(finalPlacement, allResults);
+
           } else {
             finishCheckpoint.deactivate();
             this.engine.callbacks.onCheckpointChange(this.currentLap, this.totalLaps);
@@ -651,6 +775,168 @@ export class RaceMode extends BaseMode {
         }
       }
     }
+
+    if (isPlaying && this.engine.gameStatus === 'playing') {
+      this.captureReplayFrame(deltaTime);
+    }
+  }
+
+  private captureReplayFrame(deltaTime = 0): void {
+    if (deltaTime > 0) {
+      this.replayCaptureAccumulator += deltaTime;
+      if (this.replayFrames.length > 0 && this.replayCaptureAccumulator < this.replayFrameInterval) {
+        return;
+      }
+      this.replayCaptureAccumulator %= this.replayFrameInterval;
+    }
+
+    const snapshot = (vehicle: Vehicle): RaceReplayTransform => [
+      vehicle.pos.x,
+      vehicle.pos.y,
+      vehicle.pos.z,
+      vehicle.yaw,
+      vehicle.pitch,
+      vehicle.roll,
+      vehicle.speed,
+      vehicle.isGrounded ? 1 : 0
+    ];
+
+    this.replayFrames.push({
+      player: snapshot(this.vehicle),
+      opponents: this.aiCars.map(ai => snapshot(ai.vehicle))
+    });
+  }
+
+  /** Course data the replay camera director stands its cameras on. Read-only. */
+  public getReplayCameraTrack(): ReplayCameraTrack {
+    return {
+      path: this.densePath,
+      boundary: this.trackBoundary,
+      getGroundHeight: (x: number, z: number, yHint?: number) =>
+        this.getGroundHeight(x, z, yHint)
+    };
+  }
+
+  /** Opponent cars the director can frame alongside the player. */
+  public getReplayOpponents(): Vehicle[] {
+    return this.replayOpponents;
+  }
+
+  /** Stable replay subjects used by the TV camera and spectator controls. */
+  public getReplayTargets(): ReplayTarget[] {
+    const playerCar = CARS_DATABASE.find(car => car.id === this.vehicle.carId);
+    return [
+      {
+        vehicle: this.vehicle,
+        name: playerCar ? `${playerCar.brand} ${playerCar.name}` : 'Hatchback-X',
+        isPlayer: true
+      },
+      ...this.aiCars.map(ai => ({
+        vehicle: ai.vehicle,
+        name: ai.config.name,
+        isPlayer: false
+      }))
+    ];
+  }
+
+  /** Return a detached, plain-data replay that can safely be downloaded. */
+  public getReplayExport(): RaceReplayExport | null {
+    if (this.replayFrames.length < 2) return null;
+
+    return {
+      format: 'cyberdrive-race-replay',
+      version: 1,
+      trackId: this.trackId,
+      carId: this.vehicle.carId,
+      totalLaps: this.totalLaps,
+      sampleInterval: this.replayFrameInterval,
+      duration: this.raceTime,
+      frameCount: this.replayFrames.length,
+      opponents: this.aiCars.map(ai => ({
+        carId: ai.config.carId,
+        color: ai.config.color,
+        name: ai.config.name
+      })),
+      frames: this.replayFrames.map(frame => ({
+        player: [...frame.player] as RaceReplayTransform,
+        opponents: frame.opponents.map(opponent => [...opponent] as RaceReplayTransform)
+      }))
+    };
+  }
+
+  public startReplay(): boolean {
+    if (this.replayFrames.length < 2 || this.replayActive) return false;
+
+    this.finishAutopilotActive = false;
+    this.replayActive = true;
+    this.replayElapsed = 0;
+    this.engine.startTvReplay();
+    this.applyReplayFrame(0, 0);
+    return true;
+  }
+
+  public skipReplay(): void {
+    if (!this.replayActive) return;
+
+    this.finishAutopilotActive = false;
+    this.replayActive = false;
+    this.engine.stopTvReplay();
+    const finalFrame = this.replayFrames[this.replayFrames.length - 1];
+    if (finalFrame) this.applyReplayFrame(this.replayFrames.length - 1, 0);
+    this.engine.callbacks.onReplayComplete?.('skipped');
+  }
+
+  private updateReplay(deltaTime: number): void {
+    if (this.replayFrames.length < 2) {
+      this.skipReplay();
+      return;
+    }
+
+    this.replayElapsed += deltaTime;
+    const framePosition = this.replayElapsed / this.replayFrameInterval;
+    const lastFrameIndex = this.replayFrames.length - 1;
+
+    if (framePosition >= lastFrameIndex) {
+      this.applyReplayFrame(lastFrameIndex, 0);
+      this.finishAutopilotActive = false;
+      this.replayActive = false;
+      this.engine.stopTvReplay();
+      this.engine.callbacks.onReplayComplete?.('ended');
+      return;
+    }
+
+    const frameIndex = Math.floor(framePosition);
+    this.applyReplayFrame(frameIndex, framePosition - frameIndex);
+  }
+
+  private applyReplayFrame(frameIndex: number, blend: number): void {
+    const frame = this.replayFrames[frameIndex];
+    const nextFrame = this.replayFrames[Math.min(frameIndex + 1, this.replayFrames.length - 1)] || frame;
+    const interpolateAngle = (from: number, to: number): number => {
+      const delta = THREE.MathUtils.euclideanModulo(to - from + Math.PI, Math.PI * 2) - Math.PI;
+      return from + delta * blend;
+    };
+    const interpolate = (from: RaceReplayTransform, to: RaceReplayTransform): ReplayTransform => ({
+      position: new THREE.Vector3(
+        THREE.MathUtils.lerp(from[0], to[0], blend),
+        THREE.MathUtils.lerp(from[1], to[1], blend),
+        THREE.MathUtils.lerp(from[2], to[2], blend)
+      ),
+      yaw: interpolateAngle(from[3], to[3]),
+      pitch: THREE.MathUtils.lerp(from[4], to[4], blend),
+      roll: THREE.MathUtils.lerp(from[5], to[5], blend),
+      speed: THREE.MathUtils.lerp(from[6], to[6], blend),
+      isGrounded: blend < 0.5 ? from[7] > 0.5 : to[7] > 0.5
+    });
+
+    this.vehicle.applyReplayTransform(interpolate(frame.player, nextFrame.player));
+    this.aiCars.forEach((ai, index) => {
+      const opponent = frame.opponents[index];
+      const nextOpponent = nextFrame.opponents[index] || opponent;
+      if (opponent && nextOpponent) {
+        ai.vehicle.applyReplayTransform(interpolate(opponent, nextOpponent));
+      }
+    });
   }
 
   private triggerCrash() {
@@ -671,6 +957,13 @@ export class RaceMode extends BaseMode {
   }
 
   public cleanup() {
+    this.finishAutopilotActive = false;
+    this.finishAutopilot = undefined;
+    this.replayOpponents = [];
+    this.replayActive = false;
+    this.replayFrames = [];
+    this.replayCaptureAccumulator = 0;
+    this.replayElapsed = 0;
     this.clearEnvironment();
     this.checkpoints.forEach(cp => this.scene.remove(cp.mesh));
     this.obstacles.forEach(ob => this.scene.remove(ob.mesh));

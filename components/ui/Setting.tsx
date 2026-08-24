@@ -555,7 +555,7 @@ export default function Setting({
                     { id: 'brake', label: 'BRAKE / REVERSE', desc: 'Apply brakes / Slow down / Go backwards.' },
                     { id: 'steerLeft', label: 'STEER LEFT', desc: 'Turn vehicle to the left.' },
                     { id: 'steerRight', label: 'STEER RIGHT', desc: 'Turn vehicle to the right.' },
-                    { id: 'handbrake', label: 'HANDBRAKE / DRIFT', desc: 'Engage rear handbrake for sliding / drifting.' }
+                    { id: 'handbrake', label: 'EMERGENCY BRAKE', desc: 'Apply firm braking without initiating a drift.' }
                   ].map((control) => {
                     const actionKey = control.id as keyof KeyBindings;
                     const currentKey = keyBindings[actionKey];

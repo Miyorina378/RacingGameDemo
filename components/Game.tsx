@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GameEngine } from './gameEngine';
+import type { ReplayTargetInfo } from './gameEngine';
 import type { SuggestedGearAdvice } from './engine/SuggestedGearAdvisor';
 import type { EditorNode, EditorScenery, SceneryType, TimeOfDay } from './engine/types';
 import { DEFAULT_TERRAIN_BRUSH_RADIUS } from './modes/terrain';
@@ -517,9 +518,14 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
   }
 };
 
+const RACE_RESULTS_HOLD_MS = 4500;
+const RACE_REPLAY_BLACKOUT_MS = 550;
+type RacePresentation = 'racing' | 'results' | 'fade_to_replay' | 'replay' | 'exiting';
+
 export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const racePresentationTimerRef = useRef<number | null>(null);
   const fordGtSoundRef = useRef<FordGtSound | null>(null);
   const menuMusicRef = useRef<HTMLAudioElement | null>(null);
   const menuMusicFadeRef = useRef<number | null>(null);
@@ -562,7 +568,7 @@ export default function Game() {
   const [tireTemperature, setTireTemperature] = useState<number>(25);
   const [tireCompound, setTireCompound] = useState<string>('economy');
   const [tireWearEnabled, setTireWearEnabled] = useState<boolean>(false);
-  const [cameraViewMode, setCameraViewMode] = useState<'chase' | 'driver'>('chase');
+  const [cameraViewMode, setCameraViewMode] = useState<'chase' | 'driver' | 'tv'>('chase');
   const [showMirrorInTPS, setShowMirrorInTPS] = useState<boolean>(false);
   const [hudConfig, setHudConfig] = useState<HUDConfig>(DEFAULT_HUD_CONFIG);
   const [showHUDCustomizer, setShowHUDCustomizer] = useState<boolean>(false);
@@ -587,6 +593,26 @@ export default function Game() {
   const [gameStatus, setGameStatus] = useState<'idle' | 'countdown' | 'playing' | 'success' | 'failed'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [raceResults, setRaceResults] = useState<any[] | null>(null);
+  const [racePresentation, setRacePresentation] = useState<RacePresentation>('racing');
+  const [replayTarget, setReplayTarget] = useState<ReplayTargetInfo | null>(null);
+  const [replaySaveMessage, setReplaySaveMessage] = useState<string>('');
+
+  const saveReplay = () => {
+    const didSave = engineRef.current?.downloadCurrentRaceReplay() ?? false;
+    setReplaySaveMessage(didSave ? 'Replay saved to downloads.' : 'Replay unavailable.');
+  };
+
+  const cycleReplayTarget = React.useCallback((direction: -1 | 1) => {
+    const nextTarget = engineRef.current?.cycleReplayTarget(direction) ?? null;
+    if (nextTarget) setReplayTarget(nextTarget);
+  }, []);
+
+  const clearRacePresentationTimer = React.useCallback(() => {
+    if (racePresentationTimerRef.current !== null) {
+      window.clearTimeout(racePresentationTimerRef.current);
+      racePresentationTimerRef.current = null;
+    }
+  }, []);
 
   // Sound toggle
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -1337,7 +1363,7 @@ export default function Game() {
           setTutorialStep((prevStep) => {
             if (prevStep === 0 && displayS > 15) return 1;
             if (prevStep === 1 && status.turnKeyPressed) return 2;
-            if (prevStep === 2 && status.isDrifting) return 3;
+            if (prevStep === 2 && status.emergencyBrakePressed) return 3;
             if (prevStep === 3 && !status.isGrounded && status.carPosY > 1.5) return 4;
             if (prevStep === 4 && status.crystalCollected) {
               engineRef.current?.handleSuccess();
@@ -1411,6 +1437,9 @@ export default function Game() {
         setTotalParticipants(total);
       },
       onGameStatus: (status: typeof gameStatus, message?: string, results?: any[]) => {
+        if (status === 'success' && engineRef.current?.activeMode === 'race') {
+          setRacePresentation('results');
+        }
         setGameStatus(status);
         if (message) setStatusMessage(message);
         if (results) {
@@ -1433,6 +1462,14 @@ export default function Game() {
             setLicenseProgress(engineRef.current.licenseProgress);
           }
         }
+      },
+      onReplayComplete: () => {
+        clearRacePresentationTimer();
+        setIsPaused(false);
+        if (engineRef.current) engineRef.current.isPaused = false;
+        setReplayTarget(null);
+        setRacePresentation('results');
+        setIsBlackOverlay(false);
       },
       onLicenseProgressChange: (progress: LicenseProgress, unlocked: boolean) => {
         setLicenseProgress(progress);
@@ -1497,6 +1534,45 @@ export default function Game() {
       engine.destroy();
     };
   }, []);
+
+  // Show results first, then cross through a full black frame before replay starts.
+  useEffect(() => {
+    clearRacePresentationTimer();
+
+    if (activeMode !== 'race' || gameStatus !== 'success' || !raceResults) {
+      if (activeMode !== 'race') {
+        setRacePresentation('racing');
+      }
+      return;
+    }
+
+    setRacePresentation('results');
+    setIsBlackOverlay(false);
+
+    racePresentationTimerRef.current = window.setTimeout(() => {
+      racePresentationTimerRef.current = null;
+      setRacePresentation('fade_to_replay');
+      setIsBlackOverlay(true);
+
+      racePresentationTimerRef.current = window.setTimeout(() => {
+        racePresentationTimerRef.current = null;
+        const started = engineRef.current?.startRaceReplay() ?? false;
+        if (!started) {
+          setReplayTarget(null);
+          setRacePresentation('results');
+          setIsBlackOverlay(false);
+          return;
+        }
+
+        setReplayTarget(engineRef.current?.getReplayTargetInfo() ?? null);
+        setIsPaused(false);
+        setRacePresentation('replay');
+        setIsBlackOverlay(false);
+      }, RACE_REPLAY_BLACKOUT_MS);
+    }, RACE_RESULTS_HOLD_MS);
+
+    return clearRacePresentationTimer;
+  }, [activeMode, gameStatus, raceResults, clearRacePresentationTimer]);
 
   // Helpers to get specific car upgrades safely
   const getCarUpgrades = (carId: string) => {
@@ -1832,6 +1908,9 @@ export default function Game() {
     if (!track) return;
     if (track.requiresLicense && !hasLicense) return; // Prevent unauthorized entry
 
+    clearRacePresentationTimer();
+    setRacePresentation('racing');
+    setGameStatus('idle');
     primeTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
@@ -1842,6 +1921,7 @@ export default function Game() {
       setPrevPlacement(1);
       setPlacementShift(null);
       setRaceResults(null);
+      setReplaySaveMessage('');
       if (engineRef.current) {
         engineRef.current.isPaused = false;
         engineRef.current.isQuickPlayRace = false;
@@ -1864,6 +1944,9 @@ export default function Game() {
     const track = TRACKS_DATABASE.find(t => t.id === trackId);
     if (!track) return;
 
+    clearRacePresentationTimer();
+    setRacePresentation('racing');
+    setGameStatus('idle');
     primeTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
@@ -1876,6 +1959,7 @@ export default function Game() {
       setPrevPlacement(1);
       setPlacementShift(null);
       setRaceResults(null);
+      setReplaySaveMessage('');
       if (engineRef.current) {
         engineRef.current.isPaused = false;
         engineRef.current.isQuickPlayRace = true;
@@ -1905,6 +1989,13 @@ export default function Game() {
   };
 
   const exitToGarage = () => {
+    clearRacePresentationTimer();
+    setReplayTarget(null);
+    setRacePresentation('exiting');
+    setIsPaused(true);
+    if (engineRef.current) {
+      engineRef.current.isPaused = true;
+    }
     pauseTrackMusic();
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
@@ -1925,6 +2016,7 @@ export default function Game() {
         setActiveMode('garage');
         setGameStatus('idle');
         setStatusMessage('');
+        setReplaySaveMessage('');
         setSpeed(0);
         setDriftScore(0);
         setPlacement(1);
@@ -2674,17 +2766,33 @@ export default function Game() {
   // Escape key handler to toggle pause overlay
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        activeMode === 'race' &&
+        racePresentation === 'replay' &&
+        !isPaused &&
+        !isTransitioningDrive &&
+        (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+      ) {
+        if (e.repeat) return;
+        e.preventDefault();
+        cycleReplayTarget(e.key === 'ArrowLeft' ? -1 : 1);
+        return;
+      }
+
       if (e.key === 'Escape') {
+        if (e.repeat || isTransitioningDrive) return;
         if (isPaused && pauseSettingsOpen) {
           e.preventDefault();
           handlePauseSettingBackClick();
           return;
         }
-        // Can only pause during active play or countdown in gameplay modes
-        if (
-          activeMode !== 'garage' &&
-          (gameStatus === 'playing' || gameStatus === 'countdown')
-        ) {
+        // Normal play and TV replay can be paused. Results/fade phases stay read-only.
+        const canPause = activeMode !== 'garage' && !isTransitioningDrive && (
+          gameStatus === 'playing' ||
+          gameStatus === 'countdown' ||
+          (activeMode === 'race' && racePresentation === 'replay')
+        );
+        if (canPause) {
           e.preventDefault();
           setIsPaused(prev => {
             const nextPaused = !prev;
@@ -2701,7 +2809,7 @@ export default function Game() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeMode, gameStatus, isPaused, pauseSettingsOpen]);
+  }, [activeMode, gameStatus, isPaused, pauseSettingsOpen, racePresentation, isTransitioningDrive, cycleReplayTarget]);
 
   useEffect(() => {
     if (!isPaused) {
@@ -2915,32 +3023,74 @@ export default function Game() {
       <HelpModal showHelp={showHelp} setShowHelp={setShowHelp} />
 
       {/* HUD LAYOUT CUSTOMIZER OVERLAY */}
-      <HUDCustomizer
+      {!(activeMode === 'race' && gameStatus === 'success') && (
+        <HUDCustomizer
         showHUDCustomizer={showHUDCustomizer}
         setShowHUDCustomizer={setShowHUDCustomizer}
         hudConfig={hudConfig}
         setHudConfig={setHudConfig}
         defaultHudConfig={DEFAULT_HUD_CONFIG}
         setShowMirrorInTPS={setShowMirrorInTPS}
-      />
+        />
+      )}
 
       {/* GAMEPLAY OVERLAYS: Countdown, Success, Failed */}
       <GameOverlays
         gameStatus={gameStatus}
         statusMessage={statusMessage}
         activeMode={activeMode}
+        racePresentation={racePresentation}
         raceResults={raceResults}
         placement={placement}
         activeTrackId={activeTrackId}
         activeLicenseTestId={activeLicenseTestId}
         exitToGarage={exitToGarage}
+        saveReplay={saveReplay}
+        replaySaveMessage={replaySaveMessage}
         startLicenseTest={startLicenseTest}
         startRace={startRace}
         startTutorial={startTutorial}
       />
 
+      {activeMode === 'race' && racePresentation === 'replay' && replayTarget && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-start px-6 md:px-9">
+          <div className="pointer-events-auto min-w-[250px] border-l-2 border-rose-500 bg-zinc-950/75 px-4 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur-md">
+            <div className="flex items-center justify-between gap-5 text-[9px] font-bold uppercase tracking-[0.24em] text-zinc-500">
+              <span>Replay camera</span>
+              <span>{replayTarget.index + 1} / {replayTarget.total}</span>
+            </div>
+            <div className="mt-1 text-lg font-black uppercase tracking-wider text-white">
+              {replayTarget.name}
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-4 text-[9px] font-mono uppercase tracking-wider text-zinc-400">
+              <span>{replayTarget.isPlayer ? 'You' : 'Rival'}</span>
+              <span>Left / Right: switch car</span>
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => cycleReplayTarget(-1)}
+                className="border border-zinc-700 bg-zinc-900/80 px-3 py-1 text-xs font-bold text-zinc-300 transition-colors hover:border-rose-500 hover:text-white"
+                aria-label="Show previous replay car"
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                onClick={() => cycleReplayTarget(1)}
+                className="border border-zinc-700 bg-zinc-900/80 px-3 py-1 text-xs font-bold text-zinc-300 transition-colors hover:border-rose-500 hover:text-white"
+                aria-label="Show next replay car"
+              >
+                →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DRIVING HUD: Speedometer, Timers, Checkpoints, Drift */}
-      <HUD
+      {!(activeMode === 'race' && gameStatus === 'success') && (
+        <HUD
         activeMode={activeMode}
         gameStatus={gameStatus}
         hudConfig={hudConfig}
@@ -2979,7 +3129,8 @@ export default function Game() {
         tireTemperature={tireTemperature}
         tireCompound={tireCompound}
         tireWearEnabled={tireWearEnabled}
-      />
+        />
+      )}
 
       {/* PAUSE MENU OVERLAY (When Esc is pressed in gameplay) */}
       {isPaused && !pauseSettingsOpen && (
@@ -3030,26 +3181,28 @@ export default function Game() {
                     Setting
                   </button>
 
-                  <button
-                    onClick={() => {
-                      resetCar();
-                      setIsPaused(false);
-                      if (engineRef.current) {
-                        engineRef.current.isPaused = false;
-                      }
-                    }}
-                    className="w-full bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-100 font-black py-3 px-6 transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-widest"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    Reset Car
-                  </button>
+                  {racePresentation !== 'replay' && (
+                    <button
+                      onClick={() => {
+                        resetCar();
+                        setIsPaused(false);
+                        if (engineRef.current) {
+                          engineRef.current.isPaused = false;
+                        }
+                      }}
+                      className="w-full bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-100 font-black py-3 px-6 transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-widest"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      Reset Car
+                    </button>
+                  )}
 
                   <button
                     onClick={exitToGarage}
                     className="w-full bg-rose-950/45 hover:bg-rose-900/65 border border-rose-800/60 text-rose-300 hover:text-white py-3 px-6 font-black transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-widest"
                   >
                     <LogOut className="w-4 h-4" />
-                    Abort Race
+                    {racePresentation === 'replay' ? 'Exit Replay' : 'Abort Race'}
                   </button>
                 </div>
               </div>
