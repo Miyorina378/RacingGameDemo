@@ -33,7 +33,7 @@ export default function HelpModal({ showHelp, setShowHelp }: HelpModalProps) {
             </h4>
             <ul className="list-disc pl-5 space-y-1 text-slate-400 text-left">
               <li>Use <span className="text-white font-semibold">W / A / S / D</span> or the <span className="text-white font-semibold">Arrow Keys</span> to steer, accelerate, and brake.</li>
-              <li>Hold <span className="text-white font-semibold">Spacebar</span> while turning to engage high-speed drifting.</li>
+              <li>Hold <span className="text-white font-semibold">Spacebar</span> for emergency braking without initiating a drift.</li>
               <li>Press <span className="text-white font-semibold">R</span> to reset the car position if you get stuck or go out-of-bounds.</li>
             </ul>
           </div>
@@ -44,7 +44,7 @@ export default function HelpModal({ showHelp, setShowHelp }: HelpModalProps) {
               Earning Credits (CR)
             </h4>
             <ul className="list-disc pl-5 space-y-1 text-slate-400 text-left">
-              <li><span className="text-white font-semibold">Drifting</span>: Accumulate slide points. Completing a drift successfully awards credits.</li>
+              <li><span className="text-white font-semibold">Driving</span>: Use controlled braking and steering to stay stable through corners.</li>
               <li><span className="text-white font-semibold">Crystals</span>: Search the Open World to find yellow crystals (+50 Credits each).</li>
               <li><span className="text-white font-semibold">Racing</span>: Complete circuit laps before the countdown limit. Medals award massive Credit payouts!</li>
             </ul>

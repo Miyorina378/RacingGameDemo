@@ -24,6 +24,7 @@ import { InputController } from './engine/InputController';
 import { createThreeWorld } from './engine/threeWorld';
 import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
 import { SuggestedGearAdvisor, SuggestedGearAdvice } from './engine/SuggestedGearAdvisor';
+import { ReplayCameraDirector } from './engine/ReplayCameraDirector';
 import {
   DEFAULT_LICENSE_TEST_ID,
   LicenseProgress,
@@ -39,6 +40,13 @@ import {
 } from './config/LicenseDatabase';
 
 export type { CarConfig };
+
+export interface ReplayTargetInfo {
+  index: number;
+  total: number;
+  name: string;
+  isPlayer: boolean;
+}
 
 export interface EngineCallbacks {
   onSpeedChange: (speed: number) => void;
@@ -68,6 +76,7 @@ export interface EngineCallbacks {
   ) => void;
   onSuggestedGearChange?: (advice: SuggestedGearAdvice | null) => void;
   onRaceTimeUpdate?: (totalTime: number, bestLapTime: number, currentLapTime: number, isWrongWay?: boolean, isCheat?: boolean) => void;
+  onReplayComplete?: (reason: 'ended' | 'skipped') => void;
 }
 
 export class GameEngine {
@@ -115,7 +124,12 @@ export class GameEngine {
   public gameTimer = 0;
   public isPaused = false;
   public activeTrackId = 'sprint_circuit';
-  public cameraViewMode: 'chase' | 'driver' = 'chase';
+  public cameraViewMode: 'chase' | 'driver' | 'tv' = 'chase';
+  private tvCameraTime = 0;
+  private replayTargetIndex = 0;
+  private replayDirector = new ReplayCameraDirector();
+  /** Camera FOV before the replay director started borrowing the lens. */
+  private replayBaseFov = 65;
   public isQuickPlayRace = false;
   private suggestedGearAdvisor = new SuggestedGearAdvisor();
 
@@ -205,6 +219,15 @@ export class GameEngine {
       isPaused: () => this.isPaused,
       resetCar: () => this.resetCar(),
       toggleCameraView: () => {
+        if (this.cameraViewMode === 'tv') {
+          if (this.currentModeInstance instanceof RaceMode) {
+            this.currentModeInstance.skipReplay();
+          } else {
+            this.stopTvReplay();
+          }
+          return;
+        }
+
         this.cameraViewMode = this.cameraViewMode === 'chase' ? 'driver' : 'chase';
         if (this.cameraViewMode === 'chase') {
           this.camera.up.set(0, 1, 0);
@@ -217,6 +240,7 @@ export class GameEngine {
   // --- STATE SWITCHING / FACTORY ---
 
   private changeMode(modeName: typeof this.activeMode, modeInstance: GameMode) {
+    this.stopTvReplay();
     if (this.currentModeInstance) {
       this.currentModeInstance.cleanup();
     }
@@ -305,6 +329,106 @@ export class GameEngine {
     this.sky.updateTimeOfDay(testConfig.time ?? 'afternoon', testConfig.fogDistance);
     this.suggestedGearAdvisor.setTrack(testConfig, true);
     this.changeMode('license', new LicenseMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, testConfig.id));
+  }
+
+  public startTvReplay(): void {
+    this.tvCameraTime = 0;
+    this.replayTargetIndex = 0;
+    this.cameraViewMode = 'tv';
+    this.camera.up.set(0, 1, 0);
+    // The director drives the lens, so remember the gameplay FOV to hand back.
+    this.replayBaseFov = this.camera.fov;
+    this.replayDirector.configure(
+      this.currentModeInstance instanceof RaceMode
+        ? this.currentModeInstance.getReplayCameraTrack()
+        : null
+    );
+  }
+
+  public stopTvReplay(): void {
+    this.tvCameraTime = 0;
+    this.replayTargetIndex = 0;
+    this.replayDirector.reset();
+    if (this.cameraViewMode === 'tv') {
+      this.cameraViewMode = 'chase';
+      this.camera.up.set(0, 1, 0);
+    }
+    if (Math.abs(this.camera.fov - this.replayBaseFov) > 0.01) {
+      this.camera.fov = this.replayBaseFov;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
+  /** Start playback only after the results presentation has finished. */
+  public startRaceReplay(): boolean {
+    if (this.activeMode !== 'race' || !(this.currentModeInstance instanceof RaceMode)) {
+      return false;
+    }
+
+    this.isPaused = false;
+    return this.currentModeInstance.startReplay();
+  }
+
+  /** Return the car currently followed by the replay camera. */
+  public getReplayTargetInfo(): ReplayTargetInfo | null {
+    if (!(this.currentModeInstance instanceof RaceMode)) return null;
+
+    const targets = this.currentModeInstance.getReplayTargets();
+    if (targets.length === 0) return null;
+
+    this.replayTargetIndex = Math.max(
+      0,
+      Math.min(this.replayTargetIndex, targets.length - 1)
+    );
+    const target = targets[this.replayTargetIndex];
+    return {
+      index: this.replayTargetIndex,
+      total: targets.length,
+      name: target.name,
+      isPlayer: target.isPlayer
+    };
+  }
+
+  /** Move the replay camera focus to the previous or next car. */
+  public cycleReplayTarget(direction: -1 | 1): ReplayTargetInfo | null {
+    if (this.cameraViewMode !== 'tv' || !(this.currentModeInstance instanceof RaceMode)) {
+      return null;
+    }
+
+    const targets = this.currentModeInstance.getReplayTargets();
+    if (targets.length === 0) return null;
+
+    this.replayTargetIndex =
+      (this.replayTargetIndex + direction + targets.length) % targets.length;
+    return this.getReplayTargetInfo();
+  }
+
+  /** Download the current completed race as a portable whole-race replay file. */
+  public downloadCurrentRaceReplay(): boolean {
+    if (typeof window === 'undefined' || this.activeMode !== 'race' || !(this.currentModeInstance instanceof RaceMode)) {
+      return false;
+    }
+
+    const replay = this.currentModeInstance.getReplayExport();
+    if (!replay) return false;
+
+    try {
+      const blob = new Blob([JSON.stringify(replay)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeTrackId = replay.trackId.replace(/[^a-z0-9_-]+/gi, '-');
+      const timestamp = new Date().toISOString().replace(/[.:]/g, '-');
+
+      link.href = url;
+      link.download = `cyberdrive-${safeTrackId}-replay-${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   public buildRaceTrack(trackId: string = 'sprint_circuit', options: RaceOptions = {}) {
@@ -531,6 +655,7 @@ export class GameEngine {
     }
     return {
       turnKeyPressed: false,
+      emergencyBrakePressed: false,
       isDrifting: false,
       isGrounded: true,
       carPosY: 0,
@@ -768,7 +893,9 @@ export class GameEngine {
       this.camera.position.set(targetX, targetY, targetZ);
       this.camera.lookAt(0, carHeight * 0.4, 0);
     } else {
-      if (this.cameraViewMode === 'driver') {
+      if (this.cameraViewMode === 'tv') {
+        this.updateTvCamera(deltaTime);
+      } else if (this.cameraViewMode === 'driver') {
         this.vehicle.mesh.updateMatrixWorld(true);
 
         const config = CARS_DATABASE.find(c => c.id === this.currentCarId) || CARS_DATABASE[0];
@@ -825,6 +952,46 @@ export class GameEngine {
       const localUp = new THREE.Vector3(0, 1, 0);
       const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
       this.rearCamera.up.copy(worldUp);
+    }
+  }
+
+  private updateTvCamera(deltaTime: number): void {
+    this.tvCameraTime += deltaTime;
+    this.camera.up.set(0, 1, 0);
+
+    const raceMode = this.currentModeInstance instanceof RaceMode
+      ? this.currentModeInstance
+      : null;
+    const replayTargets = raceMode?.getReplayTargets() ?? [];
+    if (replayTargets.length > 0) {
+      this.replayTargetIndex = Math.max(
+        0,
+        Math.min(this.replayTargetIndex, replayTargets.length - 1)
+      );
+    }
+    const selectedTarget = replayTargets[this.replayTargetIndex];
+    const subject = selectedTarget?.vehicle ?? this.vehicle;
+    const rivals = replayTargets
+      .filter((_, index) => index !== this.replayTargetIndex)
+      .map(target => target.vehicle);
+
+    if (this.replayDirector.update(deltaTime, subject, rivals, this.camera)) {
+      return;
+    }
+
+    // No usable course data (a replay outside a race). Fall back to a slow orbit
+    // rather than leaving the camera wherever it was parked.
+    const orbit = this.tvCameraTime * 0.35;
+    const desiredPosition = subject.pos
+      .clone()
+      .add(new THREE.Vector3(Math.sin(orbit) * 11, 4.2, Math.cos(orbit) * 11));
+    const target = subject.pos.clone();
+    target.y += 0.7;
+    this.camera.position.lerp(desiredPosition, 1 - Math.exp(-4 * Math.max(deltaTime, 0)));
+    this.camera.lookAt(target);
+    if (Math.abs(this.camera.fov - this.replayBaseFov) > 0.01) {
+      this.camera.fov = this.replayBaseFov;
+      this.camera.updateProjectionMatrix();
     }
   }
 

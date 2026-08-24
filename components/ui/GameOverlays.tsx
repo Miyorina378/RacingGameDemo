@@ -1,12 +1,14 @@
 'use client';
 
 import React from 'react';
-import { Coins, Check, RotateCcw } from 'lucide-react';
+import { Coins, Check, RotateCcw, Download } from 'lucide-react';
 
 interface RaceResult {
   pos: number;
   car: string;
   time: number;
+  status?: 'finished' | 'in_progress' | 'lapped';
+  lapsBehind?: number;
   isPlayer?: boolean;
 }
 
@@ -14,11 +16,14 @@ interface GameOverlaysProps {
   gameStatus: 'idle' | 'countdown' | 'playing' | 'success' | 'failed';
   statusMessage: string;
   activeMode: string;
+  racePresentation: 'racing' | 'results' | 'fade_to_replay' | 'replay' | 'exiting';
   raceResults: RaceResult[] | null;
   placement: number;
   activeTrackId: string;
   activeLicenseTestId: string;
   exitToGarage: () => void;
+  saveReplay: () => void;
+  replaySaveMessage: string;
   startLicenseTest: (testId?: string) => void;
   startRace: (trackId?: string) => void;
   startTutorial: () => void;
@@ -35,19 +40,28 @@ export default function GameOverlays({
   gameStatus,
   statusMessage,
   activeMode,
+  racePresentation,
   raceResults,
   placement,
   activeTrackId,
   activeLicenseTestId,
   exitToGarage,
+  saveReplay,
+  replaySaveMessage,
   startLicenseTest,
   startRace,
   startTutorial,
 }: GameOverlaysProps) {
+  const isRaceResults = gameStatus === 'success' && activeMode === 'race' && racePresentation === 'results';
+
   if (gameStatus === 'idle' || gameStatus === 'playing') return null;
+  if (gameStatus === 'success' && activeMode === 'race' && !isRaceResults) return null;
 
   return (
-    <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm z-30 flex items-center justify-center p-6">
+    <div className={`absolute inset-0 z-30 flex items-center justify-center p-6 ${isRaceResults
+      ? 'bg-zinc-950/35 backdrop-blur-[1px]'
+      : 'bg-zinc-950/80 backdrop-blur-sm'
+      }`}>
       {/* Countdown Timer */}
       {gameStatus === 'countdown' && (
         <div className="text-center animate-scaleIn select-none">
@@ -122,7 +136,13 @@ export default function GameOverlays({
                           )}
                         </td>
                         <td className="py-4 px-5 text-right font-mono">
-                          {formatResultTime(result.time)}
+                          {result.isPlayer || result.status === 'finished' || !result.status ? (
+                            formatResultTime(result.time)
+                          ) : result.status === 'lapped' ? (
+                            `+${result.lapsBehind ?? 1} LAP${(result.lapsBehind ?? 1) === 1 ? '' : 'S'}`
+                          ) : (
+                            'IN PROGRESS'
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -140,14 +160,28 @@ export default function GameOverlays({
                 </span>
               </div>
 
-              {/* Action link */}
-              <div className="mt-8 flex justify-center">
-                <button
-                  onClick={exitToGarage}
-                  className="text-zinc-550 hover:text-rose-500 font-mono text-xs tracking-wider uppercase transition-colors duration-200 cursor-pointer bg-transparent border-0 outline-none flex items-center gap-1.5"
-                >
-                  return to garage &gt;
-                </button>
+              {/* Replay and garage actions */}
+              <div className="mt-8 flex flex-col items-center gap-3">
+                <div className="flex flex-wrap justify-center gap-3">
+                  <button
+                    onClick={saveReplay}
+                    className="inline-flex items-center gap-1.5 border border-rose-800/70 bg-rose-950/40 px-3 py-2 text-zinc-300 hover:border-rose-500 hover:text-white font-mono text-xs tracking-wider uppercase transition-colors duration-200 cursor-pointer"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    save replay
+                  </button>
+                  <button
+                    onClick={exitToGarage}
+                    className="text-zinc-550 hover:text-rose-500 font-mono text-xs tracking-wider uppercase transition-colors duration-200 cursor-pointer bg-transparent border-0 outline-none flex items-center gap-1.5"
+                  >
+                    return to garage &gt;
+                  </button>
+                </div>
+                {replaySaveMessage && (
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400">
+                    {replaySaveMessage}
+                  </span>
+                )}
               </div>
             </div>
           </div>

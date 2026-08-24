@@ -96,6 +96,11 @@ export class TutorialMode extends BaseMode {
 
     return {
       turnKeyPressed: !!turnKeyPressed,
+      emergencyBrakePressed: !!(
+        this.keys[' '] ||
+        this.keys.space ||
+        this.keys.spacebar
+      ),
       isDrifting: this.vehicle.isDrifting,
       isGrounded: this.vehicle.isGrounded,
       carPosY: this.vehicle.pos.y,

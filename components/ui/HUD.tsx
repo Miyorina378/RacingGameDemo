@@ -491,8 +491,8 @@ export default function HUD({
             <h3 className="font-extrabold text-sm text-slate-100">
               {tutorialStep === 0 && "Step 1/5: Hold 'W' or 'Up Arrow' to accelerate forward"}
               {tutorialStep === 1 && "Step 2/5: Great job! Now press 'A' or 'D' to steer"}
-              {tutorialStep === 2 && "Step 3/5: Feel the steering! Now speed up and hold Spacebar while turning to drift"}
-              {tutorialStep === 3 && "Step 4/5: Excellent drift! Drive straight over the glowing ramp ahead to jump"}
+              {tutorialStep === 2 && "Step 3/5: Practice emergency braking with Spacebar before lining up the glowing ramp"}
+              {tutorialStep === 3 && "Step 4/5: Excellent braking! Drive straight over the glowing ramp ahead to jump"}
               {tutorialStep === 4 && "Step 5/5: Soft landing! Drive into the golden crystal ahead to finish your training"}
               {tutorialStep === 5 && "Congratulations! You have completed the training. Exit to showroom or try again!"}
             </h3>
