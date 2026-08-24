@@ -754,6 +754,8 @@ export class GameEngine {
         this.tuningTheta = -Math.PI / 4;
         this.tuningPhi = 1.25;
       } else if (!this.isPointerDown && this.tuningState === 'closed') {
+        // Smoothly restore camera elevation angle back to default 0.2
+        this.tuningPhi += (0.2 - this.tuningPhi) * Math.min(1.0, 8.0 * deltaTime);
         // Auto turntable spin when not dragging in main garage
         this.tuningTheta += 0.25 * deltaTime;
       }

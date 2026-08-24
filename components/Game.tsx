@@ -1010,6 +1010,7 @@ export default function Game() {
 
   const [isTransitioningDrive, setIsTransitioningDrive] = useState<boolean>(false);
   const [isBlackOverlay, setIsBlackOverlay] = useState<boolean>(false);
+  const [showGarageLoading, setShowGarageLoading] = useState<boolean>(false);
   const [selectedBrand, setSelectedBrand] = useState<string>('All');
 
   // Keyboard help modal toggle
@@ -1951,6 +1952,7 @@ export default function Game() {
   };
 
   const handleDriveClick = () => {
+    setShowGarageLoading(false);
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
@@ -1968,10 +1970,25 @@ export default function Game() {
   };
 
   const handleBackToGarageClick = () => {
+    setShowGarageLoading(true);
     setIsTransitioningDrive(true);
     setIsBlackOverlay(true);
 
     setTimeout(() => {
+      if (engineRef.current) {
+        (engineRef.current as any).isQuickPlayCarSelect = false;
+        (engineRef.current as any).isQuickPlayCarInteractable = true;
+        if (engineRef.current.vehicle && engineRef.current.vehicle.mesh) {
+          engineRef.current.vehicle.mesh.visible = true;
+        }
+        if (engineRef.current.sky) {
+          engineRef.current.sky.setVisible(true);
+          engineRef.current.sky.updateTimeOfDay('night');
+        }
+        if (engineRef.current.renderer) {
+          engineRef.current.renderer.setClearColor(0x0a0a14, 1);
+        }
+      }
       setActiveGarageTab(null);
     }, 700);
 
@@ -1981,6 +1998,7 @@ export default function Game() {
 
     setTimeout(() => {
       setIsTransitioningDrive(false);
+      setShowGarageLoading(false);
     }, 1050);
   };
 
@@ -3468,11 +3486,41 @@ export default function Game() {
         launchTestDrive={launchTestDrive}
         exitToGarage={exitToGarage}
       />
-      {/* Cinematic Blackout Overlay for Drive transition */}
+      {/* Cinematic Blackout Overlay for Mode transitions with Arcade HUD Loading Screen */}
       <div
-        className={`fixed inset-0 bg-black z-[80] pointer-events-none transition-opacity duration-500 ease-in-out ${isBlackOverlay ? 'opacity-100' : 'opacity-0'
-          }`}
-      />
+        className={`fixed inset-0 bg-[#09090b] z-[80] pointer-events-none transition-opacity duration-500 ease-in-out flex flex-col items-center justify-center ${
+          isBlackOverlay ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        {showGarageLoading && (
+          <div className="relative flex flex-col items-center justify-center gap-4 animate-fadeIn">
+            <div className="relative flex h-24 w-24 items-center justify-center">
+              {/* Outer glowing spinning ring */}
+              <div className="absolute inset-0 rounded-full border-2 border-rose-500/20 border-t-rose-500 border-r-rose-500/40 animate-spin" />
+              {/* Inner reverse spinning ring */}
+              <div className="absolute inset-2 rounded-full border-2 border-cyan-500/20 border-b-cyan-400 border-l-cyan-400/40 animate-spin [animation-duration:1.4s] [animation-direction:reverse]" />
+
+              {/* Game Logo Emblem */}
+              <div
+                className="h-10 w-10 bg-gradient-to-tr from-rose-500 via-rose-400 to-cyan-400 animate-pulse drop-shadow-[0_0_18px_rgba(244,63,94,0.7)]"
+                style={{
+                  maskImage: "url('/icon/logo.svg')",
+                  maskRepeat: "no-repeat",
+                  maskSize: "contain",
+                  maskPosition: "center",
+                  WebkitMaskImage: "url('/icon/logo.svg')",
+                  WebkitMaskRepeat: "no-repeat",
+                  WebkitMaskSize: "contain",
+                  WebkitMaskPosition: "center",
+                }}
+              />
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-[0.35em] text-zinc-400 animate-pulse drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]">
+              INITIALIZING GARAGE...
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

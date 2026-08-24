@@ -29,6 +29,50 @@
   --animate-dealerBlackOut: dealerBlackOut 0.7s ease-out forwards;
   --animate-glowPulseCyan: glowPulseCyan 2s infinite alternate;
   --animate-glowPulseRose: glowPulseRose 2s infinite alternate;
+}
+
+@keyframes circleBubbleExpand {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.85;
+  }
+  12% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes waveSweepLeftToRight {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(0%);
+  }
+}
+
+@keyframes waveSweepRightToLeft {
+  0% {
+    transform: translateX(31.25%);
+  }
+  100% {
+    transform: translateX(-68.75%);
+  }
+}
+
+.wave-sweep-left-to-right {
+  animation: waveSweepLeftToRight 0.85s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.wave-sweep-right-to-left {
+  animation: waveSweepRightToLeft 0.85s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
 
   @keyframes fadeIn {
     from {
@@ -216,7 +260,6 @@
       border-color: rgba(244, 63, 94, 0.85);
     }
   }
-}
 
 @media (prefers-color-scheme: dark) {
   :root {

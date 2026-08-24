@@ -607,8 +607,11 @@ export class GarageMode extends BaseMode {
       });
     } else {
       // DEFAULT MAIN GARAGE MODE
-      this.vehicle.mesh.position.set(0, 0, 0);
-      this.vehicle.mesh.rotation.y = 0;
+      if (this.vehicle && this.vehicle.mesh) {
+        this.vehicle.mesh.visible = true;
+        this.vehicle.mesh.position.set(0, 0, 0);
+        this.vehicle.mesh.rotation.y = 0;
+      }
 
       // Show standard garage components, hide showroom and room
       if (this.showroomGroup) this.showroomGroup.visible = false;
@@ -624,6 +627,7 @@ export class GarageMode extends BaseMode {
       // Restore sky dome and scene background
       if (this.engine.sky) this.engine.sky.setVisible(true);
       if (this.engine.scene) this.engine.scene.background = null;
+      if (this.engine.renderer) this.engine.renderer.setClearColor(0x0a0a14, 1);
 
       // Restore lights and emissive glows
       this.vehicle.mesh.traverse((child) => {

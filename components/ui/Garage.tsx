@@ -779,6 +779,7 @@ const BRAND_STOCK_IMAGES: Record<string, string> = {
   McLaren: 'https://images.unsplash.com/photo-1621135802920-133df287f89c?auto=format&fit=crop&w=1920&q=80'
 };
 const DEFAULT_BRAND_STOCK_IMAGE = 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1920&q=80';
+const CAREER_SHOWCASE_IMAGE = 'https://images.unsplash.com/photo-1563720223185-11003d516935?auto=format&fit=crop&w=1920&q=80';
 
 const getDealerBrandInitials = (brand: string) => {
   if (brand === 'Chevrolet') return 'CH';
@@ -1993,6 +1994,11 @@ export default function Garage({
 
   // Local states for Drive Sub-modes
   const [driveSubMode, setDriveSubMode] = useState<null | 'quickplay' | 'career'>(null);
+  const [hoveredDriveSubMode, setHoveredDriveSubMode] = useState<null | 'quickplay' | 'career'>(null);
+  const [warpDriveMode, setWarpDriveMode] = useState<null | 'quickplay' | 'career'>(null);
+  const [driveFadeFromBlack, setDriveFadeFromBlack] = useState(false);
+  const warpDriveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const blackFadeTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const [quickPlayStep, setQuickPlayStep] = useState<QuickPlayStep>('map');
   const [quickPlayTrackId, setQuickPlayTrackId] = useState<string | null>(() => getDefaultQuickPlayTrackId('city'));
   const [quickPlayLapCount, setQuickPlayLapCount] = useState(3);
@@ -2154,17 +2160,64 @@ export default function Garage({
       if (dealerCityTransitionTimeoutRef.current) clearTimeout(dealerCityTransitionTimeoutRef.current);
       if (dealerExitTimeoutRef.current) clearTimeout(dealerExitTimeoutRef.current);
       if (dealerBrandTransitionTimeoutRef.current) clearTimeout(dealerBrandTransitionTimeoutRef.current);
+      if (warpDriveTimeoutRef.current) clearTimeout(warpDriveTimeoutRef.current);
+      if (blackFadeTimeoutRef.current) clearTimeout(blackFadeTimeoutRef.current);
     };
   }, []);
 
+  const handleLaunchQuickPlayWarp = () => {
+    if (warpDriveMode) return;
+    setWarpDriveMode('quickplay');
+    if (warpDriveTimeoutRef.current) clearTimeout(warpDriveTimeoutRef.current);
+    if (blackFadeTimeoutRef.current) clearTimeout(blackFadeTimeoutRef.current);
+
+    // Wait 1600ms for 6 staggered slices (1.0s sweep + 110ms delay per slice)
+    warpDriveTimeoutRef.current = setTimeout(() => {
+      setDriveSubMode('quickplay');
+      setQuickPlayStep('map');
+      setQuickPlayTrackId(getDefaultQuickPlayTrackId('city'));
+      setQuickPlayLapCount(3);
+      setQuickPlayDifficulty('normal');
+      setDriveFadeFromBlack(true);
+      setWarpDriveMode(null);
+
+      // Fade out black overlay into Quick Play map select (300ms)
+      blackFadeTimeoutRef.current = setTimeout(() => {
+        setDriveFadeFromBlack(false);
+      }, 300);
+    }, 1600);
+  };
+
+  const handleLaunchCareerWarp = () => {
+    if (warpDriveMode) return;
+    setWarpDriveMode('career');
+    if (warpDriveTimeoutRef.current) clearTimeout(warpDriveTimeoutRef.current);
+    if (blackFadeTimeoutRef.current) clearTimeout(blackFadeTimeoutRef.current);
+
+    // Wait 1600ms for 6 staggered slices (1.0s sweep + 110ms delay per slice)
+    warpDriveTimeoutRef.current = setTimeout(() => {
+      setDriveSubMode('career');
+      setDriveFadeFromBlack(true);
+      setWarpDriveMode(null);
+
+      // Fade out black overlay into Career Mode screen (300ms)
+      blackFadeTimeoutRef.current = setTimeout(() => {
+        setDriveFadeFromBlack(false);
+      }, 300);
+    }, 1600);
+  };
+
+  const handleBackFromDriveSubMode = () => {
+    if (warpDriveMode) return;
+    if (warpDriveTimeoutRef.current) clearTimeout(warpDriveTimeoutRef.current);
+    if (blackFadeTimeoutRef.current) clearTimeout(blackFadeTimeoutRef.current);
+    handleBackToGarageClick();
+  };
+
   const handleBackToGarage = () => {
-    setDriveSubMode(null);
-    setQuickPlayStep('map');
-    setQuickPlayTrackId(getDefaultQuickPlayTrackId('city'));
-    setQuickPlayLapCount(3);
-    setQuickPlayDifficulty('normal');
-    setQuickPlaySelectedBrand('All');
-    setQuickPlayOpponentCount(5);
+    if (warpDriveMode) return;
+    if (warpDriveTimeoutRef.current) clearTimeout(warpDriveTimeoutRef.current);
+    if (blackFadeTimeoutRef.current) clearTimeout(blackFadeTimeoutRef.current);
     handleBackToGarageClick();
   };
 
@@ -3453,121 +3506,404 @@ export default function Garage({
       {/* DEDICATED DRIVE MODES INTERFACE */}
       {activeGarageTab === 'drive' && (
         <div
-          className={`absolute inset-0 z-10 flex items-center justify-center pointer-events-auto transition-all duration-700 ${isQuickPlayMapSelect
-            ? (hideGarageBackground ? 'bg-black p-0' : 'bg-transparent p-0')
-            : driveSubMode === null
-              ? 'bg-transparent p-0'
-              : 'bg-zinc-950/40 backdrop-blur-md p-8'
-            } ${isTransitioningDrive ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}
+          className={`absolute inset-0 z-10 flex items-center justify-center pointer-events-auto bg-[#09090b] ${
+            isQuickPlayMapSelect || driveSubMode === null ? 'p-0' : 'p-8'
+          }`}
         >
+          {/* Black fade-out cover into destination mode screen */}
+          {driveFadeFromBlack && (
+            <div className="pointer-events-none absolute inset-0 z-50 bg-black animate-[fadeOut_0.7s_ease-out_forwards]" />
+          )}
+
           <div className={`w-full flex flex-col text-left h-full justify-center ${isQuickPlayMapSelect || driveSubMode === null ? 'max-w-none max-h-none gap-0' : 'max-w-4xl max-h-[620px] gap-6'}`}>
-            {/* 1. Reference-inspired Mode Selection Screen */}
-            {driveSubMode === null && (
-              <section className="relative isolate flex h-full min-h-0 w-full overflow-hidden bg-[#fbfbf8] text-left">
-                {/* White mock-image field. The local vehicle render sits here instead of a remote photo. */}
-                <div className="absolute inset-x-0 top-0 h-[calc(100%-296px)] sm:h-[85%] overflow-hidden bg-[#fbfbf8]">
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_36%,rgba(255,255,255,1),rgba(248,249,247,0.92)_62%,rgba(232,236,235,0.8)_100%)]" />
-                  <div className="absolute left-[12%] top-[18%] h-40 w-40 rounded-full bg-cyan-300/10 blur-3xl" />
-                  <div className="pointer-events-none absolute inset-x-[10%] top-[12%] bottom-[10%] border border-zinc-900/[0.08]" />
-                  <div className="pointer-events-none absolute right-[7%] top-[18%] hidden select-none text-right text-[clamp(5rem,14vw,13rem)] font-black uppercase leading-[0.72] tracking-[-0.08em] text-zinc-950/[0.045] lg:block">DRIVE</div>
-                  <div className="absolute right-[8%] top-[31%] z-20 hidden text-right lg:block">
-                    <p className="text-[9px] font-black uppercase tracking-[0.32em] text-zinc-500">01 / VEHICLE PREVIEW</p>
-                    <p className="mt-3 text-3xl font-black uppercase leading-[0.85] tracking-[-0.04em] text-zinc-900/75">READY<br />TO DRIVE</p>
-                  </div>
-                  <img
-                    src={activeBrandMockupUrl}
-                    alt={`${activeCarConfig.brand} vehicle mockup`}
-                    className="absolute inset-0 z-10 h-full w-full object-cover object-center opacity-90 mix-blend-multiply"
-                    draggable={false}
-                    onError={(event) => {
-                      event.currentTarget.hidden = true;
-                    }}
-                  />
-                  <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-r from-white/35 via-transparent to-white/25" />
-                  <div className="absolute bottom-5 left-6 z-20 border-l-2 border-cyan-400 bg-white/75 px-4 py-2 backdrop-blur-sm sm:left-9">
-                    <p className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500">CURRENT VEHICLE / MOCKUP</p>
-                    <p className="mt-1 text-sm font-black uppercase tracking-wider text-zinc-900">{activeCarConfig.name}</p>
-                  </div>
-                </div>
+            {/* 1. Reference-inspired Mode Selection Screen with Moving Wave & Traveling Rings Transition */}
+            {driveSubMode === null && (() => {
+              const isWarping = warpDriveMode !== null;
+              const effectiveHover = warpDriveMode || hoveredDriveSubMode;
+              const accentColor = warpDriveMode === 'career' ? '#e50055' : '#27d3e3';
 
-                {/* Minimal reference-style controls on the white field. */}
-                <div className="absolute left-6 top-6 z-30 sm:left-9 sm:top-8">
-                  <span className="text-[9px] font-black uppercase italic tracking-[0.36em] text-zinc-500">VELOCITY / DRIVE SYSTEM</span>
-                  <h2 className="mt-2 text-xl font-black uppercase tracking-[0.08em] text-zinc-950 sm:text-2xl">SELECT MODE</h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleBackToGarage}
-                  className="absolute right-5 top-5 z-30 border border-zinc-300 bg-white/75 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-700 backdrop-blur-md transition-colors duration-300 hover:border-zinc-950 hover:text-zinc-950 sm:right-8 sm:top-8"
-                >
-                  BACK TO GARAGE
-                </button>
+              const splitTopX =
+                warpDriveMode === 'quickplay' ? 125 :
+                warpDriveMode === 'career' ? -25 :
+                effectiveHover === 'quickplay' ? 76 :
+                effectiveHover === 'career' ? 44 : 60;
 
-                {/* The reference's bright lower split becomes the two mode actions. */}
-                <div className="absolute inset-x-0 bottom-0 z-auto grid h-auto min-h-[296px] grid-cols-1 overflow-visible rounded-[28px] shadow-[0_18px_50px_rgba(0,0,0,0.22)] sm:h-[15vh] sm:min-h-[104px] sm:max-h-[160px] sm:grid-cols-2">
-                  {/* Quick Play: cyan left block, with a diagonal upper-right edge on larger screens. */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDriveSubMode('quickplay');
-                      setQuickPlayStep('map');
-                      setQuickPlayTrackId(getDefaultQuickPlayTrackId('city'));
-                      setQuickPlayLapCount(3);
-                      setQuickPlayDifficulty('normal');
-                    }}
-                    className="group relative z-40 flex min-h-[148px] flex-1 flex-col justify-between overflow-visible bg-transparent p-4 text-left text-zinc-950 transition-[filter] duration-300 hover:brightness-105 sm:min-h-0 sm:flex-row sm:items-center sm:gap-4 sm:py-3 sm:pl-8 sm:pr-12 lg:pl-12 lg:pr-16"
-                  >
-                    <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-0 overflow-hidden bg-[#27d3e3] sm:-left-[40%] sm:right-auto sm:w-[140%] sm:[clip-path:polygon(0_0,100%_95%_100%,0_100%)]">
-                      <div className="absolute inset-0 bg-gradient-to-br from-white/25 via-transparent to-cyan-900/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-                    </div>
-                    <div className="pointer-events-none absolute -right-4 top-1/2 z-10 -translate-y-1/2 select-none text-[clamp(6rem,12vw,10rem)] font-black leading-none tracking-[-0.12em] text-cyan-950/[0.08]">01</div>
-                    <div className="relative">
-                      <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-950/65">OPEN GRID / 01</p>
-                      <div className="mt-2 flex items-center gap-3">
-                        <Play className="h-5 w-5 shrink-0" fill="currentColor" fillOpacity={0.14} />
-                        <h3 className="text-2xl font-black uppercase tracking-wide sm:text-3xl lg:text-4xl">Quick Play</h3>
+              const splitBottomX =
+                warpDriveMode === 'quickplay' ? 125 :
+                warpDriveMode === 'career' ? -25 :
+                effectiveHover === 'quickplay' ? 56 :
+                effectiveHover === 'career' ? 24 : 40;
+
+              const splitSeamTopX =
+                warpDriveMode === 'quickplay' ? 125 :
+                warpDriveMode === 'career' ? -25 :
+                effectiveHover === 'quickplay' ? 59 :
+                effectiveHover === 'career' ? 27 : 43;
+
+              const splitSeamBottomX = splitBottomX;
+
+              return (
+                <section className={`relative isolate flex h-full min-h-0 w-full overflow-hidden bg-[#09090b] text-left transition-all duration-700 ${isWarping ? 'pointer-events-none' : ''}`}>
+                  {/* 2-Picture Split Showcase Field */}
+                  <div className="pointer-events-none absolute inset-x-0 top-0 bottom-[140px] sm:bottom-[15vh] overflow-hidden bg-[#09090b]">
+                    {/* LEFT PICTURE PANEL: Quick Play (Active Vehicle / Street Racing) */}
+                    <div
+                      className="absolute inset-0 z-10 overflow-hidden transition-all duration-700 ease-in-out"
+                      style={{
+                        clipPath: `polygon(0% 0%, ${splitTopX}% 0%, ${splitSeamTopX}% 100%, 0% 100%)`,
+                      }}
+                    >
+                      <img
+                        src={activeBrandMockupUrl}
+                        alt="Quick Play vehicle preview"
+                        className={`absolute inset-0 h-full w-full object-cover object-[28%_center] transition-all duration-500 ease-out ${
+                          hoveredDriveSubMode === 'quickplay'
+                            ? 'brightness-105 contrast-110'
+                            : hoveredDriveSubMode === 'career'
+                              ? 'brightness-70 contrast-95 opacity-75'
+                              : 'brightness-95 contrast-105'
+                        }`}
+                        draggable={false}
+                        onError={(event) => {
+                          event.currentTarget.src = DEFAULT_BRAND_STOCK_IMAGE;
+                        }}
+                      />
+                      {/* Ambient subtle cyan glow and gradient overlay on left */}
+                      <div className="absolute inset-0 bg-gradient-to-r from-black/45 via-transparent to-cyan-950/20" />
+                      <div className={`absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,rgba(6,182,212,0.18),transparent_70%)] transition-opacity duration-500 ${hoveredDriveSubMode === 'quickplay' || warpDriveMode === 'quickplay' ? 'opacity-100' : 'opacity-60'}`} />
+
+                      {/* Quick Play Left Telemetry Badge */}
+                      <div className={`absolute bottom-5 left-6 z-20 border-l-2 border-cyan-400 bg-zinc-950/85 px-4 py-2 backdrop-blur-md sm:left-9 shadow-lg transition-all duration-500 ${warpDriveMode === 'quickplay' ? 'translate-x-2 shadow-[0_0_20px_rgba(6,182,212,0.6)]' : ''}`}>
+                        <p className="text-[9px] font-black uppercase tracking-[0.3em] text-cyan-400">01 / QUICK PLAY</p>
+                        <p className="mt-0.5 text-sm font-black uppercase tracking-wider text-white">{activeCarConfig.name}</p>
                       </div>
                     </div>
-                    <div className="relative mt-2 max-w-sm sm:mt-0 sm:max-w-[250px] sm:text-right">
-                      <p className="text-[10px] font-semibold leading-tight text-cyan-950/80 sm:text-[11px]">Any car. Any circuit. No restrictions. Choose a map and race immediately.</p>
-                      <span className="mt-2 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] sm:justify-end text-cyan-950 transition-transform duration-300 group-hover:translate-x-1">CHOOSE MAP <span aria-hidden="true">→</span></span>
-                    </div>
-                  </button>
 
-                  {/* Career: rose right block, meeting cyan at the angled divider. */}
-                  <button
-                    type="button"
-                    onClick={() => setDriveSubMode('career')}
-                    className={[
-                      // Base layout and stacking.
-                      'group relative z-10 flex min-h-[148px] flex-1 flex-col justify-between',
-                      // Rose panel appearance and interaction.
-                      'overflow-hidden rounded-[26px] bg-[#e50055] p-4 text-left text-white',
-                      'transition-[filter] duration-300 hover:brightness-110',
-                      // Compact horizontal layout on larger screens.
-                      'sm:min-h-0 sm:flex-row sm:items-center sm:gap-4 sm:py-3',
-                      // Slanted left edge and responsive horizontal padding.
-                      'sm:[clip-path:polygon(0_0,100%_0,100%_100%,-10%_100%)]',
-                      'sm:pl-12 sm:pr-8 lg:pl-16 lg:pr-12',
-                    ].join(' ')}
-                  >
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-rose-950/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-                    <div className="relative">
-                      <div className="mt-2 flex items-center gap-3">
-                        <Trophy className="h-5 w-5 shrink-0 text-rose-100" />
-                        <h3 className="text-2xl font-black uppercase tracking-wide sm:text-3xl lg:text-4xl">Career Mode</h3>
+                    {/* RIGHT PICTURE PANEL: Career Mode (Championship Motorsport / Grand Prix Circuit) */}
+                    <div
+                      className="absolute inset-0 z-10 overflow-hidden transition-all duration-700 ease-in-out"
+                      style={{
+                        clipPath: `polygon(${splitTopX}% 0%, 100% 0%, 100% 100%, ${splitSeamTopX}% 100%)`,
+                      }}
+                    >
+                      <img
+                        src={CAREER_SHOWCASE_IMAGE}
+                        alt="Career Championship preview"
+                        className={`absolute inset-0 h-full w-full object-cover object-[72%_center] transition-all duration-500 ease-out ${
+                          hoveredDriveSubMode === 'career'
+                            ? 'brightness-100 contrast-110'
+                            : hoveredDriveSubMode === 'quickplay'
+                              ? 'brightness-70 contrast-95 opacity-75'
+                              : 'brightness-90 contrast-110'
+                        }`}
+                        draggable={false}
+                      />
+                      {/* Ambient subtle rose glow and gradient overlay on right */}
+                      <div className="absolute inset-0 bg-gradient-to-l from-black/45 via-transparent to-rose-950/20" />
+                      <div className={`absolute inset-0 bg-[radial-gradient(ellipse_at_75%_40%,rgba(244,63,94,0.18),transparent_70%)] transition-opacity duration-500 ${hoveredDriveSubMode === 'career' || warpDriveMode === 'career' ? 'opacity-100' : 'opacity-60'}`} />
+
+                      {/* Career Mode Right Telemetry Badge */}
+                      <div className={`absolute bottom-5 right-6 z-20 border-r-2 border-rose-500 bg-zinc-950/85 px-4 py-2 backdrop-blur-md text-right sm:right-9 shadow-lg transition-all duration-500 ${warpDriveMode === 'career' ? '-translate-x-2 shadow-[0_0_20px_rgba(244,63,94,0.6)]' : ''}`}>
+                        <p className="text-[9px] font-black uppercase tracking-[0.3em] text-rose-400">02 / CAREER MODE</p>
+                        <p className="mt-0.5 text-sm font-black uppercase tracking-wider text-white">GRAND PRIX & LICENSES</p>
                       </div>
                     </div>
-                    <div className="relative mt-2 max-w-sm sm:mt-0 sm:max-w-[250px] sm:text-right">
-                      <p className="text-[10px] font-semibold leading-tight text-rose-50/90 sm:text-[11px]">Earn licenses, build your garage, and climb every circuit with your owned cars.</p>
-                      <span className="mt-2 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] sm:justify-end text-white transition-transform duration-300 group-hover:translate-x-1">ENTER CAREER <span aria-hidden="true">→</span></span>
-                    </div>
-                  </button>
-                </div>
-                <div className="pointer-events-none absolute inset-0 z-30 hidden bg-gradient-to-b from-rose-600 via-violet-500 to-cyan-400 shadow-[0_0_8px_rgba(59,130,246,0.32)] [clip-path:polygon(66.7%_0,67.9%_0,44.6%_100%,43.4%_100%)] sm:block" />
 
-              </section>
-            )}
+                    {/* Subtle top & bottom vignette */}
+                    <div className="absolute inset-0 z-15 bg-gradient-to-b from-black/40 via-transparent to-black/50" />
+                  </div>
+
+                  {/* Reference-style top controls */}
+                  <div className={`absolute left-6 top-6 z-30 sm:left-9 sm:top-8 transition-all duration-500 ${isWarping ? 'opacity-0 -translate-y-4' : 'opacity-100 translate-y-0'}`}>
+                    <span className="text-[9px] font-black uppercase italic tracking-[0.36em] text-cyan-400 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">VELOCITY / DRIVE SYSTEM</span>
+                    <h2 className="mt-1 text-xl font-black uppercase tracking-[0.08em] text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)] sm:text-2xl">SELECT MODE</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleBackToGarage}
+                    className={`absolute right-5 top-5 z-30 border border-white/20 bg-zinc-950/80 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-200 backdrop-blur-md transition-all duration-500 hover:border-white hover:text-white sm:right-8 sm:top-8 cursor-pointer shadow-lg ${isWarping ? 'opacity-0 -translate-y-4' : 'opacity-100 translate-y-0'}`}
+                  >
+                    BACK TO GARAGE
+                  </button>
+
+                  {/* Two interlocking half-screen parallelograms with responsive dynamic hover shift */}
+                  <div className="absolute inset-x-0 bottom-0 z-20 h-[140px] sm:h-[15vh] sm:min-h-[110px] sm:max-h-[155px] w-full overflow-hidden bg-[#09090b] shadow-[0_-12px_36px_rgba(0,0,0,0.22)]">
+                    {/* Left Parallelogram: Quick Play */}
+                    <button
+                      type="button"
+                      onClick={handleLaunchQuickPlayWarp}
+                      onMouseEnter={() => setHoveredDriveSubMode('quickplay')}
+                      onMouseLeave={() => setHoveredDriveSubMode(null)}
+                      className={`group absolute inset-y-0 left-0 w-full text-left cursor-pointer transition-all duration-700 ease-in-out z-10 ${
+                        warpDriveMode === 'quickplay'
+                          ? 'brightness-125 shadow-[0_0_40px_rgba(39,211,227,0.8)]'
+                          : warpDriveMode === 'career'
+                            ? 'opacity-0 pointer-events-none'
+                            : 'hover:brightness-105'
+                      }`}
+                      style={{
+                        clipPath: `polygon(0% 0%, ${splitSeamTopX}% 0%, ${splitSeamBottomX}% 100%, -3% 100%)`,
+                        backgroundColor: '#27d3e3',
+                      }}
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/25 via-transparent to-cyan-950/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+                      <div
+                        className="relative h-full flex items-center justify-between px-4 sm:px-7 lg:px-10 transition-all duration-700 ease-in-out overflow-hidden"
+                        style={{ width: `calc(${splitSeamTopX}% - 10px)` }}
+                      >
+                        <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none text-[clamp(4rem,7.5vw,6.5rem)] font-black leading-none tracking-[-0.12em] text-cyan-950/[0.08]">
+                          01
+                        </div>
+
+                        <div className="relative z-10 shrink-0">
+                          <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.28em] text-cyan-950/70">
+                            OPEN GRID / 01
+                          </p>
+                          <div className="mt-1.5 flex items-center gap-2.5 sm:gap-3">
+                            <div className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg bg-cyan-950/10 text-cyan-950 transition-transform duration-300 group-hover:scale-110">
+                              <Play className="h-4 w-4 sm:h-5 sm:w-5 fill-current" />
+                            </div>
+                            <h3 className="text-xl sm:text-2xl lg:text-3xl font-black uppercase tracking-wide text-zinc-950">
+                              Quick Play
+                            </h3>
+                          </div>
+                        </div>
+
+                        <div className={`relative z-10 hidden sm:flex flex-col items-end text-right max-w-[150px] lg:max-w-[210px] transition-opacity duration-300 ${hoveredDriveSubMode === 'career' || warpDriveMode === 'career' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                          <p className="text-[10px] lg:text-[11px] font-semibold leading-snug text-cyan-950/80">
+                            Any car. Any circuit. No restrictions. Choose a map and race.
+                          </p>
+                          <span className="mt-1.5 inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-cyan-950 transition-transform duration-300 group-hover:translate-x-1">
+                            CHOOSE MAP <span aria-hidden="true">→</span>
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Right Parallelogram: Career Mode */}
+                    <button
+                      type="button"
+                      onClick={handleLaunchCareerWarp}
+                      onMouseEnter={() => setHoveredDriveSubMode('career')}
+                      onMouseLeave={() => setHoveredDriveSubMode(null)}
+                      className={`group absolute inset-y-0 left-0 w-full text-left cursor-pointer transition-all duration-700 ease-in-out z-10 ${
+                        warpDriveMode === 'career'
+                          ? 'brightness-125 shadow-[0_0_40px_rgba(229,0,85,0.8)]'
+                          : warpDriveMode === 'quickplay'
+                            ? 'opacity-0 pointer-events-none'
+                            : 'hover:brightness-110'
+                      }`}
+                      style={{
+                        clipPath: `polygon(${splitSeamTopX}% 0%, 103% 0%, 100% 100%, ${splitSeamBottomX}% 100%)`,
+                        backgroundColor: '#e50055',
+                      }}
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-rose-950/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+                      <div
+                        className="absolute inset-y-0 right-0 flex items-center justify-between px-5 sm:px-9 lg:px-14 transition-all duration-700 ease-in-out overflow-hidden"
+                        style={{ left: `${splitSeamTopX}%` }}
+                      >
+                        <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 select-none text-[clamp(4.5rem,8.5vw,7.5rem)] font-black leading-none tracking-[-0.12em] text-rose-950/[0.12]">
+                          02
+                        </div>
+
+                        <div className="relative z-10 shrink-0">
+                          <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.28em] text-rose-200/80">
+                            CHAMPIONSHIP / 02
+                          </p>
+                          <div className="mt-1.5 flex items-center gap-2.5 sm:gap-3">
+                            <div className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg bg-white/15 text-white transition-transform duration-300 group-hover:scale-110">
+                              <Trophy className="h-4 w-4 sm:h-5 sm:w-5" />
+                            </div>
+                            <h3 className="text-xl sm:text-2xl lg:text-3xl font-black uppercase tracking-wide text-white">
+                              Career Mode
+                            </h3>
+                          </div>
+                        </div>
+
+                        <div className={`relative z-10 hidden sm:flex flex-col items-end text-right max-w-[180px] lg:max-w-[250px] transition-opacity duration-300 ${hoveredDriveSubMode === 'quickplay' || warpDriveMode === 'quickplay' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                          <p className="text-[10px] lg:text-[11px] font-semibold leading-snug text-rose-100/90">
+                            Earn licenses, build your garage, and climb circuits with owned cars.
+                          </p>
+                          <span className="mt-1.5 inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-white transition-transform duration-300 group-hover:translate-x-1">
+                            ENTER CAREER <span aria-hidden="true">→</span>
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Clean slanted seam line */}
+                    <div
+                      className="pointer-events-none absolute inset-0 z-20 transition-all duration-700 ease-in-out"
+                      style={{
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.2) 100%)',
+                        clipPath: `polygon(calc(${splitSeamTopX}% - 1.5px) 0%, calc(${splitSeamTopX}% + 1.5px) 0%, calc(${splitSeamBottomX}% + 1.5px) 100%, calc(${splitSeamBottomX}% - 1.5px) 100%)`,
+                      }}
+                    />
+                  </div>
+
+                  {/* Full-screen angled speed divider with exact matching angle across whole screen */}
+                  <div
+                    className="pointer-events-none absolute inset-0 z-30 hidden sm:block overflow-hidden transition-all duration-700 ease-in-out"
+                    style={{
+                      filter: isWarping
+                        ? `drop-shadow(0 0 16px ${accentColor}) drop-shadow(0 0 32px ${accentColor})`
+                        : 'drop-shadow(0 0 10px rgba(6, 182, 212, 0.45)) drop-shadow(0 0 18px rgba(244, 63, 94, 0.45))',
+                    }}
+                  >
+                    <div
+                      className="w-full h-full transition-all duration-700 ease-in-out"
+                      style={{
+                        backgroundColor: isWarping ? accentColor : undefined,
+                        backgroundImage: isWarping ? undefined : 'linear-gradient(to bottom, #f43f5e, #8b5cf6, #22d3ee)',
+                        clipPath: `polygon(calc(${splitTopX}% - ${isWarping ? '3px' : '1.5px'}) 0%, calc(${splitTopX}% + ${isWarping ? '3px' : '1.5px'}) 0%, calc(${splitBottomX}% + ${isWarping ? '3px' : '1.5px'}) 100%, calc(${splitBottomX}% - ${isWarping ? '3px' : '1.5px'}) 100%)`,
+                      }}
+                    />
+                  </div>
+
+                  {/* QUICK PLAY: 6 Staggered Slices Sweeping Left to Right with Extra-Long Color Line */}
+                  {warpDriveMode === 'quickplay' && (
+                    <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="absolute left-0 right-0 overflow-hidden"
+                          style={{
+                            top: `${(i * 100) / 6}%`,
+                            height: `calc(100% / 6 + 1px)`,
+                          }}
+                        >
+                          <div
+                            className="flex h-full w-[320%]"
+                            style={{
+                              transform: 'translateX(-100%)',
+                              animation: `waveSweepLeftToRight 1.0s cubic-bezier(0.65, 0, 0.35, 1) ${i * 110}ms forwards`,
+                            }}
+                          >
+                            {/* Left 50% (Trailing Body): Solid Black covering and going past screen */}
+                            <div className="relative h-full w-1/2 bg-black shrink-0">
+                              {/* Laser Seam dividing Black and Cyan */}
+                              <div
+                                className="absolute inset-y-0 right-0 w-[4px] bg-cyan-300"
+                                style={{
+                                  boxShadow: '0 0 15px #27d3e3, 0 0 35px #27d3e3',
+                                }}
+                              />
+                            </div>
+
+                            {/* Right 50% (Leading Front): Extra-Long Radiant Electric Cyan (160vw long!) */}
+                            <div
+                              className="relative h-full w-1/2 shrink-0"
+                              style={{ backgroundColor: '#27d3e3' }}
+                            >
+                              {/* Leading laser beam edge on the far right */}
+                              <div
+                                className="absolute inset-y-0 right-0 w-[6px] bg-white"
+                                style={{
+                                  boxShadow: '0 0 25px #ffffff, 0 0 50px #27d3e3, 0 0 100px #27d3e3',
+                                }}
+                              />
+                              {/* Ambient glow gradient */}
+                              <div className="absolute inset-0 bg-gradient-to-r from-cyan-400/40 via-transparent to-white/30" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Sleek Minimalist HUD Loading Indicator */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 animate-[fadeIn_0.3s_ease-out_1.0s_forwards]">
+                        <div className="relative flex items-center justify-center">
+                          <div
+                            className="h-10 w-10 rounded-full border-2 border-t-transparent animate-spin"
+                            style={{
+                              borderColor: '#27d3e3',
+                              borderTopColor: 'transparent',
+                              boxShadow: '0 0 20px #27d3e3',
+                            }}
+                          />
+                          <div className="absolute h-4 w-4 rounded-full bg-cyan-400 opacity-70 animate-ping" />
+                        </div>
+                        <p className="mt-3 text-[9px] font-black uppercase tracking-[0.35em] text-cyan-300/90 drop-shadow-[0_0_10px_rgba(39,211,227,0.8)]">
+                          INITIALIZING / QUICK PLAY
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CAREER MODE: 6 Staggered Slices Sweeping Right to Left with Extra-Long Color Line */}
+                  {warpDriveMode === 'career' && (
+                    <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="absolute left-0 right-0 overflow-hidden"
+                          style={{
+                            top: `${(i * 100) / 6}%`,
+                            height: `calc(100% / 6 + 1px)`,
+                          }}
+                        >
+                          <div
+                            className="flex h-full w-[320%]"
+                            style={{
+                              transform: 'translateX(31.25%)',
+                              animation: `waveSweepRightToLeft 1.0s cubic-bezier(0.65, 0, 0.35, 1) ${i * 110}ms forwards`,
+                            }}
+                          >
+                            {/* Left 50% (Leading Front): Extra-Long Radiant Hot Rose (160vw long!) */}
+                            <div
+                              className="relative h-full w-1/2 shrink-0"
+                              style={{ backgroundColor: '#e50055' }}
+                            >
+                              {/* Leading laser beam edge on the far left */}
+                              <div
+                                className="absolute inset-y-0 left-0 w-[6px] bg-white"
+                                style={{
+                                  boxShadow: '0 0 25px #ffffff, 0 0 50px #e50055, 0 0 100px #e50055',
+                                }}
+                              />
+                              {/* Ambient glow gradient */}
+                              <div className="absolute inset-0 bg-gradient-to-l from-rose-400/40 via-transparent to-white/30" />
+                            </div>
+
+                            {/* Right 50% (Trailing Body): Solid Black covering and going past screen */}
+                            <div className="relative h-full w-1/2 bg-black shrink-0">
+                              {/* Laser Seam dividing Rose and Black */}
+                              <div
+                                className="absolute inset-y-0 left-0 w-[4px] bg-rose-300"
+                                style={{
+                                  boxShadow: '0 0 15px #e50055, 0 0 35px #e50055',
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Sleek Minimalist HUD Loading Indicator */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 animate-[fadeIn_0.3s_ease-out_1.0s_forwards]">
+                        <div className="relative flex items-center justify-center">
+                          <div
+                            className="h-10 w-10 rounded-full border-2 border-t-transparent animate-spin"
+                            style={{
+                              borderColor: '#e50055',
+                              borderTopColor: 'transparent',
+                              boxShadow: '0 0 20px #e50055',
+                            }}
+                          />
+                          <div className="absolute h-4 w-4 rounded-full bg-rose-400 opacity-70 animate-ping" />
+                        </div>
+                        <p className="mt-3 text-[9px] font-black uppercase tracking-[0.35em] text-rose-300/90 drop-shadow-[0_0_10px_rgba(229,0,85,0.8)]">
+                          INITIALIZING / CAREER MODE
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                </section>
+              );
+            })()}
 
             {/* 2. Quick Play Mode */}
             {driveSubMode === 'quickplay' && (() => {
@@ -3581,7 +3917,7 @@ export default function Garage({
               const currentBrandName = (quickPlaySelectedBrand && quickPlaySelectedBrand !== 'All') ? quickPlaySelectedBrand : activeCarConfig.brand;
 
               return (
-                <div className={`relative w-full h-full min-h-[520px] overflow-hidden ${hideGarageBackground ? 'bg-black' : 'bg-transparent'} text-left animate-fadeIn`}>
+                <div className="relative w-full h-full min-h-[520px] overflow-hidden bg-[#09090b] text-left animate-fadeIn">
 
                   {/* Map Background (slides down to bottom) */}
                   <div
@@ -3798,7 +4134,7 @@ export default function Garage({
                     {/* Back Button (goes right) */}
                     <button
                       type="button"
-                      onClick={() => setDriveSubMode(null)}
+                      onClick={handleBackFromDriveSubMode}
                       className={`absolute right-5 top-5 z-20 border border-white/10 bg-black/45 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-400 backdrop-blur-md transition-all hover:border-white/25 hover:text-white cursor-pointer sm:right-8 sm:top-8 transition-transform duration-700 ease-in-out ${isCarStep ? 'translate-x-[200%]' : 'translate-x-0'
                         }`}
                     >
@@ -4373,7 +4709,7 @@ export default function Garage({
                     </h2>
                   </div>
                   <button
-                    onClick={() => setDriveSubMode(null)}
+                    onClick={handleBackFromDriveSubMode}
                     className="px-5 py-2.5 border border-zinc-850 hover:border-zinc-750 bg-zinc-900 hover:bg-zinc-850 text-xs font-black tracking-widest text-rose-500 rounded-xl transition-all cursor-pointer"
                   >
                     BACK
