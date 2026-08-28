@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { TrackConfig, TrackNode, TrackScenery } from '../config/TrackDatabase';
+import { TrackConfig, TrackNode, TrackScenery, TrackSpur } from '../config/TrackDatabase';
 import { buildCenterline } from './centerline';
-import { CURB_WIDTH, resolveTrackNodes } from './trackNodes';
+import { CURB_WIDTH, getSpurJunctions, resolveTrackNodes } from './trackNodes';
 import {
   InstanceVariation,
   emissiveStrengthFor,
@@ -22,7 +22,45 @@ import {
 } from './terrain';
 import { GameEngine } from '../gameEngine';
 import { Vehicle } from '../objects/Vehicle';
+import {
+  GRASS_LEAF_COLORS,
+  createGrassBladeGeometry,
+  createGrassBladeMaterial,
+  grassPatchRadius
+} from '../objects/Grass';
 import { ParticleSystem } from '../objects/ParticleSystem';
+
+/** How long a freshly placed patch of grass takes to come up. */
+const GRASS_GROW_SECONDS = 0.75;
+
+interface SpurBarrier {
+  center: THREE.Vector3;
+  normal: THREE.Vector3;
+  tangent: THREE.Vector3;
+  halfWidth: number;
+  halfDepth: number;
+  height: number;
+}
+
+interface SpurRoadInfo {
+  dist: number;
+  sideSign: 1 | -1;
+  closestPt: THREE.Vector3;
+  normal: THREE.Vector3;
+  tangent: THREE.Vector3;
+  halfWidth: number;
+  haveCurb: boolean;
+  curbWidth: number;
+  haveGrass: boolean;
+  grassWidth: number;
+  fence: boolean;
+  trackBoundary: number;
+  onAsphalt: boolean;
+  onCurb: boolean;
+  onGrass: boolean;
+  baseHeight: number;
+  spurIndex: number;
+}
 
 export interface GameMode {
   init(): void;
@@ -79,6 +117,53 @@ export abstract class BaseMode implements GameMode {
   protected haveCurb: boolean = false;
   protected trackBoundary: number = 0;
   protected grassUniforms = { uTime: { value: 0 } };
+  /**
+   * Drivable surface of each blocked branch. Kept apart from roadSample* on purpose:
+   * the racing line, the lap count and the wrong-way check must only ever know about
+   * the circuit, but a car that turns off onto a branch still needs ground under it.
+   */
+  protected spurSurfaces: {
+    samples: THREE.Vector3[];
+    normals: THREE.Vector3[];
+    tangents: THREE.Vector3[];
+    /** Samples where the flare visually removes curb, grass, and fence. */
+    openSamples: boolean[];
+    /** Asphalt half-width can widen through a junction flare. */
+    leftWidths: number[];
+    rightWidths: number[];
+    left: {
+      haveCurb: boolean;
+      curbWidth: number;
+      grassWidth: number;
+      fence: boolean;
+    };
+    right: {
+      haveCurb: boolean;
+      curbWidth: number;
+      grassWidth: number;
+      fence: boolean;
+    };
+    maxReach: number;
+    blocked: boolean;
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+    barriers: SpurBarrier[];
+  }[] = [];
+  /** Patches still sprouting, ticked by updateGrass and dropped once grown. */
+  private grassGrowth: { grow: { value: number }; mat: THREE.MeshStandardMaterial }[] = [];
+  /**
+   * Whether new grass sprouts in or is simply there. The editor wants to watch it
+   * come up as it is painted; a race wants the grass already grown.
+   */
+  protected grassGrowsIn = false;
+  /**
+   * Patch positions that have already sprouted this session. Static because the
+   * editor throws the whole mode away and rebuilds it on every edit, and grass that
+   * already came up must not come up again each time.
+   */
+  private static sproutedGrass = new Set<string>();
   protected roadUniforms = { uTime: { value: 0 }, uTimeOfDayVal: { value: 1.0 } };
 
   // Settings for concrete block dimensions (used by Silverstone catch fence)
@@ -104,9 +189,13 @@ export abstract class BaseMode implements GameMode {
     // Assign ground height and boundary callbacks to the player vehicle
     this.vehicle.getGroundHeight = (x: number, z: number, yHint?: number) =>
       this.getGroundHeight(x, z, yHint);
-    this.vehicle.getSlopeHeight = (x: number, z: number) => this.getSlopeHeight(x, z);
+    this.vehicle.getSlopeHeight = (x: number, z: number, yHint?: number) =>
+      this.getSlopeHeight(x, z, yHint);
     this.vehicle.getTrackInfo = (x: number, z: number, yHint?: number) =>
       this.getTrackInfo(x, z, yHint);
+    this.vehicle.getSpurInfo = (x: number, z: number, yHint?: number) =>
+      this.getSpurInfo(x, z, yHint);
+    this.vehicle.getSpurBarriers = () => this.getSpurBarriers();
     this.vehicle.onFenceCollision = (contactPt: THREE.Vector3) => {
       this.particles.emitSparks(2, contactPt, 0xffaa00);
     };
@@ -184,9 +273,24 @@ export abstract class BaseMode implements GameMode {
     if (this.engine && this.engine.sky) {
       this.roadUniforms.uTimeOfDayVal.value = this.engine.sky.getTimeOfDayVal();
     }
+
+    // Sprout freshly placed grass. Entries drop out once fully grown, so this costs
+    // nothing on a map whose grass has already come up.
+    if (this.grassGrowth.length > 0) {
+      const step = deltaTime / GRASS_GROW_SECONDS;
+      this.grassGrowth = this.grassGrowth.filter((entry) => {
+        entry.grow.value = Math.min(1, entry.grow.value + step);
+        // The ground mat leads slightly, so blades rise out of green, not out of dirt.
+        entry.mat.opacity = Math.min(1, entry.grow.value * 1.8);
+        return entry.grow.value < 1;
+      });
+    }
   }
 
   protected clearEnvironment() {
+    // The materials these point at are about to be thrown away with the scene.
+    this.grassGrowth = [];
+    this.spurSurfaces = [];
     while (this.environmentGroup.children.length > 0) {
       const obj = this.environmentGroup.children[0];
       this.environmentGroup.remove(obj);
@@ -369,14 +473,8 @@ export abstract class BaseMode implements GameMode {
     // Sync values to the player vehicle
     this.vehicle.haveFence = this.haveFence;
     this.vehicle.trackBoundary = this.trackBoundary;
-    this.vehicle.isOnGrass = (x: number, z: number) => {
-      const info = this.getTrackInfo(x, z);
-      const grassWidth = info.grassWidth ?? 0;
-      if (grassWidth <= 0) return false;
-      const grassStart = info.width / 2 + (info.curb ? this.curbWidth : 0);
-      const grassEnd = grassStart + grassWidth;
-      return info.dist >= grassStart && info.dist < grassEnd;
-    };
+    this.vehicle.isOnGrass = (x: number, z: number, yHint?: number) =>
+      this.isPointOnGrass(x, z, yHint);
 
     // 1. Use actual node y height
     const roadPoints = pathNodes.map(p => new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z));
@@ -442,6 +540,19 @@ export abstract class BaseMode implements GameMode {
         sampleLeftFences.push(nearestNode.leftFence);
         sampleRightFences.push(nearestNode.rightFence);
     }
+
+    // Cut the way out for any branch before anything is built from these arrays: the
+    // curb, grass and fence meshes, the self-intersection scaling and getTrackInfo all
+    // read them, so the opening is consistent everywhere at once.
+    this.openSamplesForSpurs(config, samplePoints, {
+      leftCurbs: sampleLeftCurbs,
+      rightCurbs: sampleRightCurbs,
+      leftGrass: sampleLeftGrassWidths,
+      rightGrass: sampleRightGrassWidths,
+      leftFences: sampleLeftFences,
+      rightFences: sampleRightFences
+    });
+
     this.roadSampleWidths = sampleWidths;
     this.roadSampleBankings = sampleBankings;
     this.roadSampleLeftCurbs = sampleLeftCurbs;
@@ -733,12 +844,12 @@ export abstract class BaseMode implements GameMode {
            vec2 gridPos = abs(fract(vWorldPos.xz * 0.15 - 0.5) - 0.5) / fwidth(vWorldPos.xz * 0.15);
            float gridLine = min(gridPos.x, gridPos.y);
            float gridVal = 1.0 - min(gridLine, 1.0);
-           
+
            float pulseWave = sin(vWorldPos.z * 0.04 - uTime * 3.5) * 0.5 + 0.5;
            pulseWave = pow(pulseWave, 16.0);
-           
+
            vec3 gridColor = mix(vec3(0.0, 1.0, 1.0), vec3(1.0, 0.0, 0.6), sin(vWorldPos.z * 0.005) * 0.5 + 0.5);
-           
+
            vec3 neonGlow = gridColor * gridVal * (0.35 + pulseWave * 1.5) * nightWeight;
            gl_FragColor.rgb += neonGlow;
          }`
@@ -1197,85 +1308,11 @@ export abstract class BaseMode implements GameMode {
       grassMesh.receiveShadow = true;
       this.environmentGroup.add(grassMesh);
 
-      // Create 3D Grass Leaves/Blades growing out of the sloped ground
-      const bladeGeom = new THREE.BufferGeometry();
-      const bladeVertices = new Float32Array([
-        -0.07, 0, 0,   // bottom left
-        0.07, 0, 0,   // bottom right
-        0.0, 0.55, 0  // top tip
-      ]);
-      bladeGeom.setAttribute('position', new THREE.BufferAttribute(bladeVertices, 3));
-      bladeGeom.computeVertexNormals();
-
-      const leavesMat = new THREE.MeshStandardMaterial({
-        roughness: 0.9,
-        metalness: 0.1,
-        side: THREE.DoubleSide
-      });
-
-      leavesMat.customProgramCacheKey = () => 'grass_leaves';
-      leavesMat.onBeforeCompile = (shader) => {
-        shader.uniforms.uTime = uniforms.uTime;
-        
-        // Pass height to fragment shader for tip bleaching and ambient occlusion
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <common>',
-          `#include <common>
-           uniform float uTime;
-           varying float vHeight;`
-        );
-        
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          `
-          #include <begin_vertex>
-          vHeight = position.y; // 0.0 at base to 0.55 at tip
-
-          // Multi-octave wind + gust model
-          float instX = instanceMatrix[3].x;
-          float instZ = instanceMatrix[3].z;
-          float timeScale = uTime * 2.8;
-
-          // Low-frequency gusts
-          float gust = sin(instX * 0.08 + instZ * 0.05 + timeScale * 0.5) * 0.35;
-          // High-frequency turbulence
-          float turb = sin(instX * 0.4 + instZ * 0.3 + timeScale * 2.2) * 0.12;
-          float wind = gust + turb;
-
-          // Quadratic bending factor
-          float bend = position.y * position.y * 3.0;
-
-          // Apply displacement to vertices
-          transformed.x += wind * bend * 1.5;
-          transformed.z += wind * bend * 0.9;
-          `
-        );
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <common>',
-          `#include <common>
-           varying float vHeight;`
-        );
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <dithering_fragment>',
-          `#include <dithering_fragment>
-           // 1. Tip bleaching (sun-bleached tips)
-           float hNormalized = clamp(vHeight / 0.55, 0.0, 1.0);
-           vec3 bleachedTip = vec3(0.75, 0.88, 0.32); // Lime gold
-           gl_FragColor.rgb = mix(gl_FragColor.rgb, bleachedTip, hNormalized * 0.32);
-
-           // 2. Ambient occlusion at the base (darkening at base)
-           float ao = mix(0.42, 1.0, hNormalized);
-           gl_FragColor.rgb *= ao;
-
-           // 3. Distance fade to sage green ground color (0x7bb369) to reduce aliasing shimmering
-           float distToCam = length(vViewPosition);
-           float fadeFactor = smoothstep(110.0, 240.0, distToCam);
-           vec3 groundColor = vec3(0.482, 0.702, 0.412); // sage green
-           gl_FragColor.rgb = mix(gl_FragColor.rgb, groundColor, fadeFactor * 0.85);`
-        );
-      };
+      // Create 3D Grass Leaves/Blades growing out of the sloped ground. The blade
+      // and its wind shader are shared with free-standing grass patches, so both
+      // bend to the same gust instead of drifting apart as two copies.
+      const bladeGeom = createGrassBladeGeometry();
+      const leavesMat = createGrassBladeMaterial(uniforms);
 
       let bladesPerSegment = 150;
       const quality = this.engine.postProcessing ? this.engine.postProcessing.getQuality() : 'high';
@@ -1290,14 +1327,7 @@ export abstract class BaseMode implements GameMode {
         const grassBladesMesh = new THREE.InstancedMesh(bladeGeom, leavesMat, totalInstances);
         grassBladesMesh.receiveShadow = true;
 
-        const leafColors = [
-          new THREE.Color(0x2ecc71), // fresh spring green
-          new THREE.Color(0x27ae60), // rich green
-          new THREE.Color(0xa3e635), // fresh lime green
-          new THREE.Color(0x4ade80), // bright neon light green
-          new THREE.Color(0x10b981), // vibrant emerald
-          new THREE.Color(0x7bb369)  // user-requested fresh green
-        ];
+        const leafColors = GRASS_LEAF_COLORS.map((hex) => new THREE.Color(hex));
 
         let bladeIndex = 0;
         const dummy = new THREE.Object3D();
@@ -2050,6 +2080,1396 @@ export abstract class BaseMode implements GameMode {
     };
   }
 
+  /**
+   * Cuts the gap a branch needs through the circuit's own side dressing.
+   *
+   * Per road sample, not per node. The side flags come from the nearest node and the
+   * grass width is interpolated between nodes, so clearing a node's side opened a hole
+   * running halfway to each neighbour — tens of metres of missing fence for a branch
+   * six metres wide — and shrank that node's `reach`, which moves the corner fillet
+   * and with it the racing line.
+   *
+   * Here the gap is as long as the branch is wide plus room to turn in, the grass
+   * tapers back in either side of it instead of stopping dead, and because
+   * getTrackInfo reads the same arrays, the fence is only absent exactly where the
+   * car is meant to drive out.
+   */
+  private openSamplesForSpurs(
+    config: TrackConfig,
+    samplePoints: THREE.Vector3[],
+    samples: {
+      leftCurbs: boolean[];
+      rightCurbs: boolean[];
+      leftGrass: number[];
+      rightGrass: number[];
+      leftFences: boolean[];
+      rightFences: boolean[];
+    }
+  ) {
+    const junctions = getSpurJunctions(config);
+    if (junctions.length === 0 || samplePoints.length < 4) return;
+
+    const count = samplePoints.length;
+
+    for (const junctionInfo of junctions) {
+      // The junction is wherever the ribbon actually passes closest to that node,
+      // which is not always the sample the node index would suggest once a corner
+      // fillet has moved the centreline.
+      let junction = 0;
+      let bestDistSq = Infinity;
+      for (let i = 0; i < count; i++) {
+        const dx = samplePoints[i].x - junctionInfo.position.x;
+        const dz = samplePoints[i].z - junctionInfo.position.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < bestDistSq) {
+          bestDistSq = distSq;
+          junction = i;
+        }
+      }
+
+      const ahead = samplePoints[(junction + 1) % count];
+      const behind = samplePoints[(junction - 1 + count) % count];
+      const tangent = new THREE.Vector3(ahead.x - behind.x, 0, ahead.z - behind.z);
+      if (tangent.lengthSq() < 1e-8) continue;
+      tangent.normalize();
+      const normal = new THREE.Vector3(0, 1, 0).cross(tangent).normalize();
+      // The side is taken from the sample's own normal, so a fillet that shifted the
+      // ribbon cannot open the wrong side of the road.
+      const leftSide = junctionInfo.outward.dot(normal) >= 0;
+
+      // A branch turning off at a shallow angle lies across the verge for much longer
+      // than a perpendicular one, so the gap is stretched by how oblique the join is.
+      const obliqueness = 1 / Math.max(0.35, junctionInfo.squareness);
+      const gapHalf = Math.max(6, (junctionInfo.width / 2 + 3) * obliqueness);
+      const featherHalf = gapHalf + Math.max(8, gapHalf);
+
+      const curbs = leftSide ? samples.leftCurbs : samples.rightCurbs;
+      const fences = leftSide ? samples.leftFences : samples.rightFences;
+      const grass = leftSide ? samples.leftGrass : samples.rightGrass;
+
+      const openAt = (index: number, distance: number) => {
+        if (distance <= gapHalf) {
+          curbs[index] = false;
+          fences[index] = false;
+          grass[index] = 0;
+          return;
+        }
+        // Outside the gap the verge grows back over a short run, so the grass does
+        // not end in a straight edge across the track.
+        const t = THREE.MathUtils.clamp(
+          (distance - gapHalf) / Math.max(1, featherHalf - gapHalf),
+          0,
+          1
+        );
+        grass[index] *= t;
+        if (t < 0.4) curbs[index] = false;
+      };
+
+      openAt(junction, 0);
+      for (const direction of [-1, 1]) {
+        let index = junction;
+        let distance = 0;
+        while (distance <= featherHalf) {
+          const step = ((index + direction) % count + count) % count;
+          distance += samplePoints[index].distanceTo(samplePoints[step]);
+          if (distance > featherHalf || step === junction) break;
+          openAt(step, distance);
+          index = step;
+        }
+      }
+    }
+  }
+
+  /**
+   * Builds the blocked-off branches: tarmac that leaves the circuit, runs a little
+   * way, and stops at a barrier.
+   *
+   * Deliberately kept out of `roadSamplePoints` and friends. Those arrays are what
+   * `getTrackInfo`, `getGroundHeight`, `isOnGrass`, the AI line and the lap logic all
+   * read, and a branch in there would give every one of them two answers for the same
+   * patch of ground.
+   *
+   * Must run after createRacetrackRoad, because the surface height at the junction
+   * comes from the road that is already built.
+   */
+  protected createSpurRoads(
+    spurs: TrackSpur[] | undefined,
+    config: TrackConfig,
+    time: TimeOfDay = 'afternoon'
+  ) {
+    this.spurSurfaces = [];
+    if (!spurs || spurs.length === 0) return;
+
+    // 1. Identical asphalt material matching main track roadMat
+    const asphaltMat = new THREE.MeshStandardMaterial({
+      color: 0x1f1f23, // Exactly matching main track dark grey asphalt
+      roughness: 0.85,
+      metalness: 0.1,
+      side: THREE.DoubleSide
+    });
+
+    const roadUniforms = this.roadUniforms;
+    asphaltMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = roadUniforms.uTime;
+      shader.uniforms.uTimeOfDayVal = roadUniforms.uTimeOfDayVal;
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+         varying vec3 vWorldPos;`
+      );
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+         vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+         uniform float uTime;
+         uniform float uTimeOfDayVal;
+         varying vec3 vWorldPos;
+
+         float hash2D(vec2 p) {
+           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+         }
+
+         float noise2D(vec2 p) {
+           vec2 i = floor(p);
+           vec2 f = fract(p);
+           vec2 u = f * f * (3.0 - 2.0 * f);
+           return mix(mix(hash2D(i + vec2(0.0,0.0)), hash2D(i + vec2(1.0,0.0)), u.x),
+                      mix(hash2D(i + vec2(0.0,1.0)), hash2D(i + vec2(1.0,1.0)), u.x), u.y);
+         }`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+         float grain = noise2D(vWorldPos.xz * 12.0) * 0.15;
+         float microGrain = noise2D(vWorldPos.xz * 120.0) * 0.08;
+         roughnessFactor = clamp(roughnessFactor + grain + microGrain, 0.0, 1.0);`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         float nightWeight = smoothstep(0.4, 0.9, uTimeOfDayVal);
+         if (nightWeight > 0.01) {
+           vec2 gridPos = abs(fract(vWorldPos.xz * 0.15 - 0.5) - 0.5) / fwidth(vWorldPos.xz * 0.15);
+           float gridLine = min(gridPos.x, gridPos.y);
+           float gridVal = 1.0 - min(gridLine, 1.0);
+
+           float pulseWave = sin(vWorldPos.z * 0.04 - uTime * 3.5) * 0.5 + 0.5;
+           pulseWave = pow(pulseWave, 16.0);
+
+           vec3 gridColor = mix(vec3(0.0, 1.0, 1.0), vec3(1.0, 0.0, 0.6), sin(vWorldPos.z * 0.005) * 0.5 + 0.5);
+
+           vec3 neonGlow = gridColor * gridVal * (0.35 + pulseWave * 1.5) * nightWeight;
+           gl_FragColor.rgb += neonGlow;
+         }`
+      );
+    };
+
+    // Shared marking & barrier materials
+    const lineMat = new THREE.MeshStandardMaterial({
+      color: 0xeeeeee,
+      roughness: 0.7,
+      metalness: 0.1,
+      side: THREE.DoubleSide
+    });
+
+    const yellowMat = new THREE.MeshStandardMaterial({
+      color: 0xffcc00,
+      roughness: 0.6,
+      side: THREE.DoubleSide
+    });
+
+    const concreteMat = new THREE.MeshStandardMaterial({
+      color: gradeColor(0x9fa19b, time),
+      roughness: 0.88,
+      metalness: 0.08
+    });
+
+    const chevronRedMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0xef4444,
+      emissiveIntensity: 0.35,
+      roughness: 0.5
+    });
+
+    const chevronWhiteMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      emissive: 0xf8fafc,
+      emissiveIntensity: 0.2,
+      roughness: 0.4
+    });
+
+    const tireRubberMat = new THREE.MeshStandardMaterial({
+      color: 0x18181b,
+      roughness: 0.95,
+      metalness: 0.05
+    });
+
+    const tireWrapMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      roughness: 0.4
+    });
+
+    const steelMat = new THREE.MeshStandardMaterial({
+      color: gradeColor(0xa1a1aa, time),
+      metalness: 0.85,
+      roughness: 0.35
+    });
+
+    const beaconMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.8,
+      roughness: 0.2
+    });
+    beaconMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = roadUniforms.uTime;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+         uniform float uTime;`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         float strobe = pow(sin(uTime * 6.0) * 0.5 + 0.5, 4.0);
+         gl_FragColor.rgb += vec3(1.0, 0.6, 0.0) * strobe * 1.5;`
+      );
+    };
+
+    const coneOrangeMat = new THREE.MeshStandardMaterial({
+      color: 0xf97316,
+      roughness: 0.5
+    });
+
+    const coneStripeMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.3
+    });
+
+    const redCurbMat = new THREE.MeshStandardMaterial({
+      color: gradeColor(0xd94444, time),
+      roughness: 0.7,
+      metalness: 0.1
+    });
+
+    const whiteCurbMat = new THREE.MeshStandardMaterial({
+      color: gradeColor(0xefefef, time),
+      roughness: 0.7,
+      metalness: 0.1
+    });
+
+    type TrackMouth = {
+      point: THREE.Vector3;
+      halfWidth: number;
+      flareLength: number;
+    };
+
+    /**
+     * Finds where the branch centreline crosses the actual outside edge of the main
+     * road. Starting there instead of at the node centre removes the thin strip laid
+     * over the carriageway; the projected width also gives shallow joins a broad,
+     * clamped apron instead of a pinched triangle.
+     */
+    const resolveTrackMouth = (
+      nodeIndex: number | undefined,
+      toward: THREE.Vector3,
+      branchHalfWidth: number
+    ): TrackMouth | undefined => {
+      if (
+        nodeIndex === undefined ||
+        !config.path[nodeIndex] ||
+        this.roadSamplePoints.length < 2
+      ) {
+        return undefined;
+      }
+
+      const rawNode = config.path[nodeIndex];
+      const node = 'pos' in rawNode ? rawNode.pos : rawNode;
+      let nearest = 0;
+      let bestDistance = Infinity;
+      for (let i = 0; i < this.roadSamplePoints.length; i++) {
+        const point = this.roadSamplePoints[i];
+        const distance = (point.x - node.x) ** 2 + (point.z - node.z) ** 2;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          nearest = i;
+        }
+      }
+
+      const center = this.roadSamplePoints[nearest];
+      const direction = new THREE.Vector3(toward.x - center.x, 0, toward.z - center.z);
+      if (direction.lengthSq() < 1e-8) direction.set(1, 0, 0);
+      else direction.normalize();
+
+      const leftEdge = this.roadSampleLeftPoints[nearest];
+      const rightEdge = this.roadSampleRightPoints[nearest];
+      if (!leftEdge || !rightEdge) return undefined;
+      const leftOffset = new THREE.Vector3(
+        leftEdge.x - center.x,
+        0,
+        leftEdge.z - center.z
+      );
+      const rightOffset = new THREE.Vector3(
+        rightEdge.x - center.x,
+        0,
+        rightEdge.z - center.z
+      );
+      // Pick by geometry rather than by the label. The road's internal winding can
+      // flip its normal, but the edge with the larger projection is always the edge
+      // the branch is actually heading toward.
+      const edgeOffset =
+        leftOffset.dot(direction) >= rightOffset.dot(direction) ? leftOffset : rightOffset;
+      const edgeDistance = edgeOffset.length();
+      if (edgeDistance < 1e-6) return undefined;
+      const edgeOutward = edgeOffset.clone().multiplyScalar(1 / edgeDistance);
+      const signedSquare = Math.max(0.2, direction.dot(edgeOutward));
+      const travel = edgeDistance / signedSquare;
+      // Pull the apron slightly into the main deck so raster precision can never
+      // expose a hairline crack between the two independently built meshes.
+      const point = center.clone().addScaledVector(direction, Math.max(0, travel - 0.75));
+      point.y = this.getGroundHeight(point.x, point.z);
+
+      const squareness = Math.max(0.35, signedSquare);
+      const projected = branchHalfWidth / squareness + 1.25;
+      const mouthHalfWidth = THREE.MathUtils.clamp(
+        projected,
+        branchHalfWidth + 1.25,
+        branchHalfWidth * 2.5
+      );
+      return {
+        point,
+        halfWidth: mouthHalfWidth,
+        flareLength: Math.max(12, branchHalfWidth * 2.5, mouthHalfWidth * 1.5)
+      };
+    };
+
+    spurs.forEach((spur, spurIndex) => {
+      if (spur.path.length === 0) return;
+
+      const halfWidth = (spur.width ?? config.roadWidth * 0.8) / 2;
+      const startTrackMouth = resolveTrackMouth(spur.nodeIndex, spur.path[0], halfWidth);
+      const endTrackMouth = resolveTrackMouth(
+        spur.endNodeIndex,
+        spur.path[spur.path.length - 1],
+        halfWidth
+      );
+
+      // Resolve non-track attachments with their old endpoint fallback. They still
+      // receive an opening zone; main-track attachments additionally get the exact
+      // edge intersection and angle-aware flare above.
+      let mouth = startTrackMouth?.point.clone();
+      if (!mouth && spur.startSpurIndex !== undefined && spurs[spur.startSpurIndex]?.path.length) {
+        const target = spurs[spur.startSpurIndex].path;
+        const point = target[target.length - 1];
+        mouth = new THREE.Vector3(point.x, this.getGroundHeight(point.x, point.z), point.z);
+      }
+
+      let endMouth = endTrackMouth?.point.clone();
+      if (!endMouth && spur.endSpurIndex !== undefined && spurs[spur.endSpurIndex]?.path.length) {
+        const point = spurs[spur.endSpurIndex].path[0];
+        endMouth = new THREE.Vector3(point.x, this.getGroundHeight(point.x, point.z), point.z);
+      }
+
+      const pathPoints: THREE.Vector3[] = [];
+      if (mouth) pathPoints.push(mouth);
+      pathPoints.push(...spur.path.map((point) => point.clone()));
+      if (endMouth) pathPoints.push(endMouth);
+      if (pathPoints.length < 2) return;
+
+      const curve = new THREE.CatmullRomCurve3(pathPoints, false, 'catmullrom', 0.15);
+      const totalLen = curve.getLength();
+      const stepCount = Math.max(8, Math.round(totalLen / 3.0));
+      const samples = curve.getPoints(stepCount);
+
+      const surface: THREE.Vector3[] = [];
+      const normals: THREE.Vector3[] = [];
+      const tangents: THREE.Vector3[] = [];
+      const authoredElevation = spur.elevationMode === 'authored';
+
+      for (let i = 0; i < samples.length; i++) {
+        const point = samples[i];
+        const y = authoredElevation
+          ? point.y + 0.05
+          : this.getGroundHeight(point.x, point.z) + 0.05;
+        surface.push(new THREE.Vector3(point.x, y, point.z));
+      }
+      // Junction endpoints belong to the surface they meet, regardless of spline
+      // overshoot or the authored profile farther down the branch.
+      if (mouth) surface[0].y = mouth.y + 0.05;
+      if (endMouth) surface[surface.length - 1].y = endMouth.y + 0.05;
+
+      for (let i = 0; i < surface.length; i++) {
+        const previous = surface[Math.max(0, i - 1)];
+        const next = surface[Math.min(surface.length - 1, i + 1)];
+        const tangent = new THREE.Vector3().subVectors(next, previous);
+        tangent.y = 0;
+        if (tangent.lengthSq() < 1e-6) tangent.set(0, 0, 1);
+        else tangent.normalize();
+        tangents.push(tangent);
+        normals.push(new THREE.Vector3(tangent.z, 0, -tangent.x));
+      }
+
+      const distanceFromStart: number[] = [0];
+      for (let i = 1; i < surface.length; i++) {
+        distanceFromStart.push(
+          distanceFromStart[i - 1] + surface[i].distanceTo(surface[i - 1])
+        );
+      }
+      const fullLength = distanceFromStart[distanceFromStart.length - 1] ?? 0;
+      const startOpeningLength = mouth
+        ? startTrackMouth?.flareLength ?? Math.max(8, halfWidth * 1.75)
+        : 0;
+      const endOpeningLength = endMouth
+        ? endTrackMouth?.flareLength ?? Math.max(8, halfWidth * 1.75)
+        : 0;
+      const smooth = (value: number) => {
+        const t = THREE.MathUtils.clamp(value, 0, 1);
+        return t * t * (3 - 2 * t);
+      };
+      const flareWidth = (
+        distance: number,
+        attachment: TrackMouth | undefined,
+        openingLength: number
+      ) => {
+        if (!attachment || openingLength <= 0 || distance >= openingLength) return halfWidth;
+        return THREE.MathUtils.lerp(
+          attachment.halfWidth,
+          halfWidth,
+          smooth(distance / openingLength)
+        );
+      };
+      const leftWidths = surface.map((_, index) =>
+        Math.max(
+          flareWidth(distanceFromStart[index], startTrackMouth, startOpeningLength),
+          flareWidth(fullLength - distanceFromStart[index], endTrackMouth, endOpeningLength)
+        )
+      );
+      const rightWidths = [...leftWidths];
+      const junctionOpenAt = (index: number) =>
+        (startOpeningLength > 0 && distanceFromStart[index] < startOpeningLength) ||
+        (endOpeningLength > 0 && fullLength - distanceFromStart[index] < endOpeningLength);
+
+      const leftPositions: THREE.Vector3[] = [];
+      const rightPositions: THREE.Vector3[] = [];
+      for (let i = 0; i < surface.length; i++) {
+        leftPositions.push(surface[i].clone().addScaledVector(normals[i], leftWidths[i]));
+        rightPositions.push(surface[i].clone().addScaledVector(normals[i], -rightWidths[i]));
+      }
+
+      // 2. Build Tarmac Mesh (2 vertices per sample quad ribbon)
+      const ribbonPositions: number[] = [];
+      const ribbonIndices: number[] = [];
+
+      for (let i = 0; i < surface.length; i++) {
+        const left = leftPositions[i];
+        const right = rightPositions[i];
+        ribbonPositions.push(left.x, left.y, left.z);
+        ribbonPositions.push(right.x, right.y, right.z);
+      }
+
+      for (let i = 0; i < surface.length - 1; i++) {
+        const currL = 2 * i;
+        const currR = 2 * i + 1;
+        const nextL = 2 * (i + 1);
+        const nextR = 2 * (i + 1) + 1;
+
+        ribbonIndices.push(currL, currR, nextL);
+        ribbonIndices.push(currR, nextR, nextL);
+      }
+
+      const ribbonGeom = new THREE.BufferGeometry();
+      ribbonGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ribbonPositions), 3));
+      ribbonGeom.setIndex(ribbonIndices);
+      ribbonGeom.computeVertexNormals();
+
+      const ribbonMesh = new THREE.Mesh(ribbonGeom, asphaltMat);
+      ribbonMesh.receiveShadow = true;
+      ribbonMesh.userData = { isSpur: true, spurIndex };
+      this.environmentGroup.add(ribbonMesh);
+
+      // 3. Crisp Road Markings (Edge lines & dashed centerline)
+      const edgeLinePositions: number[] = [];
+      const edgeLineIndices: number[] = [];
+      let edgeVertIdx = 0;
+      const lineWidth = 0.16;
+
+      for (let i = 0; i < surface.length - 1; i++) {
+        if (junctionOpenAt(i) || junctionOpenAt(i + 1)) continue;
+        const p0 = surface[i];
+        const p1 = surface[i + 1];
+        const n0 = normals[i];
+        const n1 = normals[i + 1];
+        const leftWidth0 = leftWidths[i];
+        const leftWidth1 = leftWidths[i + 1];
+        const rightWidth0 = rightWidths[i];
+        const rightWidth1 = rightWidths[i + 1];
+
+        // Left white edge line
+        const l0_out = new THREE.Vector3().copy(p0).addScaledVector(n0, leftWidth0 - 0.05);
+        const l0_in = new THREE.Vector3().copy(p0).addScaledVector(n0, leftWidth0 - 0.05 - lineWidth);
+        const l1_out = new THREE.Vector3().copy(p1).addScaledVector(n1, leftWidth1 - 0.05);
+        const l1_in = new THREE.Vector3().copy(p1).addScaledVector(n1, leftWidth1 - 0.05 - lineWidth);
+
+        edgeLinePositions.push(
+          l0_out.x, l0_out.y + 0.008, l0_out.z,
+          l0_in.x, l0_in.y + 0.008, l0_in.z,
+          l1_out.x, l1_out.y + 0.008, l1_out.z,
+          l1_in.x, l1_in.y + 0.008, l1_in.z
+        );
+        edgeLineIndices.push(
+          edgeVertIdx, edgeVertIdx + 1, edgeVertIdx + 2,
+          edgeVertIdx + 1, edgeVertIdx + 3, edgeVertIdx + 2
+        );
+        edgeVertIdx += 4;
+
+        // Right white edge line
+        const r0_out = new THREE.Vector3().copy(p0).addScaledVector(n0, -rightWidth0 + 0.05);
+        const r0_in = new THREE.Vector3().copy(p0).addScaledVector(n0, -rightWidth0 + 0.05 + lineWidth);
+        const r1_out = new THREE.Vector3().copy(p1).addScaledVector(n1, -rightWidth1 + 0.05);
+        const r1_in = new THREE.Vector3().copy(p1).addScaledVector(n1, -rightWidth1 + 0.05 + lineWidth);
+
+        edgeLinePositions.push(
+          r0_out.x, r0_out.y + 0.008, r0_out.z,
+          r0_in.x, r0_in.y + 0.008, r0_in.z,
+          r1_out.x, r1_out.y + 0.008, r1_out.z,
+          r1_in.x, r1_in.y + 0.008, r1_in.z
+        );
+        edgeLineIndices.push(
+          edgeVertIdx, edgeVertIdx + 1, edgeVertIdx + 2,
+          edgeVertIdx + 1, edgeVertIdx + 3, edgeVertIdx + 2
+        );
+        edgeVertIdx += 4;
+      }
+
+      if (edgeLinePositions.length > 0) {
+        const edgeGeom = new THREE.BufferGeometry();
+        edgeGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(edgeLinePositions), 3));
+        edgeGeom.setIndex(edgeLineIndices);
+        edgeGeom.computeVertexNormals();
+        const edgeMesh = new THREE.Mesh(edgeGeom, lineMat);
+        edgeMesh.receiveShadow = true;
+        this.environmentGroup.add(edgeMesh);
+      }
+
+      // Dashed yellow centerline for spurs with width >= 9.5m
+      if (halfWidth >= 4.75) {
+        const yellowPositions: number[] = [];
+        const yellowIndices: number[] = [];
+        let yVertIdx = 0;
+
+        for (let i = 0; i < surface.length - 1; i += 2) {
+          if (junctionOpenAt(i) || junctionOpenAt(i + 1)) continue;
+          const p0 = surface[i];
+          const p1 = surface[i + 1];
+          const n0 = normals[i];
+          const n1 = normals[i + 1];
+
+          const c0_l = new THREE.Vector3().copy(p0).addScaledVector(n0, 0.08);
+          const c0_r = new THREE.Vector3().copy(p0).addScaledVector(n0, -0.08);
+          const c1_l = new THREE.Vector3().copy(p1).addScaledVector(n1, 0.08);
+          const c1_r = new THREE.Vector3().copy(p1).addScaledVector(n1, -0.08);
+
+          yellowPositions.push(
+            c0_l.x, c0_l.y + 0.008, c0_l.z,
+            c0_r.x, c0_r.y + 0.008, c0_r.z,
+            c1_l.x, c1_l.y + 0.008, c1_l.z,
+            c1_r.x, c1_r.y + 0.008, c1_r.z
+          );
+          yellowIndices.push(
+            yVertIdx, yVertIdx + 1, yVertIdx + 2,
+            yVertIdx + 1, yVertIdx + 3, yVertIdx + 2
+          );
+          yVertIdx += 4;
+        }
+
+        if (yellowPositions.length > 0) {
+          const yellowGeom = new THREE.BufferGeometry();
+          yellowGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(yellowPositions), 3));
+          yellowGeom.setIndex(yellowIndices);
+          yellowGeom.computeVertexNormals();
+          const yellowMesh = new THREE.Mesh(yellowGeom, yellowMat);
+          yellowMesh.receiveShadow = true;
+          this.environmentGroup.add(yellowMesh);
+        }
+      }
+
+      // 4. Side Curbs & Grass Verges. Missing values intentionally inherit the
+      // old track-wide settings, so loading an existing save changes nothing.
+      const inheritedCurb = config.HaveCrub ?? this.haveCurb;
+      const inheritedGrassWidth = (config.HaveGrass ?? this.haveGrass)
+        ? config.GrassWidth ?? this.grassWidth
+        : 0;
+      const inheritedFence = config.HaveFence ?? this.haveFence;
+      const leftStyle = {
+        haveCurb: spur.leftCurb ?? inheritedCurb,
+        curbWidth: this.curbWidth,
+        grassWidth: Math.max(0, spur.leftGrassWidth ?? inheritedGrassWidth),
+        fence: spur.leftFence ?? inheritedFence
+      };
+      const rightStyle = {
+        haveCurb: spur.rightCurb ?? inheritedCurb,
+        curbWidth: this.curbWidth,
+        grassWidth: Math.max(0, spur.rightGrassWidth ?? inheritedGrassWidth),
+        fence: spur.rightFence ?? inheritedFence
+      };
+      const spurHaveCurb = leftStyle.haveCurb || rightStyle.haveCurb;
+      if (spurHaveCurb) {
+        const redCurbPos: number[] = [];
+        const redCurbIdx: number[] = [];
+        let redVert = 0;
+
+        const whiteCurbPos: number[] = [];
+        const whiteCurbIdx: number[] = [];
+        let whiteVert = 0;
+
+        const addCurbQuad = (
+          posArray: number[],
+          idxArray: number[],
+          vertIdx: number,
+          p0: THREE.Vector3,
+          p1: THREE.Vector3,
+          n0: THREE.Vector3,
+          n1: THREE.Vector3,
+          sideSign: number,
+          width0: number,
+          width1: number
+        ) => {
+          const inB0 = new THREE.Vector3().copy(p0).addScaledVector(n0, sideSign * width0);
+          const inT0 = new THREE.Vector3(inB0.x, inB0.y + this.curbHeight, inB0.z);
+          const outT0 = new THREE.Vector3().copy(inT0).addScaledVector(n0, sideSign * this.curbWidth);
+
+          const inB1 = new THREE.Vector3().copy(p1).addScaledVector(n1, sideSign * width1);
+          const inT1 = new THREE.Vector3(inB1.x, inB1.y + this.curbHeight, inB1.z);
+          const outT1 = new THREE.Vector3().copy(inT1).addScaledVector(n1, sideSign * this.curbWidth);
+
+          posArray.push(
+            inB0.x, inB0.y, inB0.z,
+            inT0.x, inT0.y, inT0.z,
+            inB1.x, inB1.y, inB1.z,
+            inT1.x, inT1.y, inT1.z,
+            inT0.x, inT0.y, inT0.z,
+            outT0.x, outT0.y, outT0.z,
+            inT1.x, inT1.y, inT1.z,
+            outT1.x, outT1.y, outT1.z
+          );
+
+          idxArray.push(
+            vertIdx, vertIdx + 1, vertIdx + 2,
+            vertIdx + 1, vertIdx + 3, vertIdx + 2,
+            vertIdx + 4, vertIdx + 5, vertIdx + 6,
+            vertIdx + 5, vertIdx + 7, vertIdx + 6
+          );
+
+          return vertIdx + 8;
+        };
+
+        for (let i = 0; i < surface.length - 1; i++) {
+          if (junctionOpenAt(i) || junctionOpenAt(i + 1)) continue;
+          const isRed = i % 2 === 0;
+          const p0 = surface[i];
+          const p1 = surface[i + 1];
+          const n0 = normals[i];
+          const n1 = normals[i + 1];
+          const positions = isRed ? redCurbPos : whiteCurbPos;
+          const indices = isRed ? redCurbIdx : whiteCurbIdx;
+
+          if (leftStyle.haveCurb) {
+            if (isRed) {
+              redVert = addCurbQuad(
+                positions, indices, redVert, p0, p1, n0, n1, 1, leftWidths[i], leftWidths[i + 1]
+              );
+            } else {
+              whiteVert = addCurbQuad(
+                positions, indices, whiteVert, p0, p1, n0, n1, 1, leftWidths[i], leftWidths[i + 1]
+              );
+            }
+          }
+          if (rightStyle.haveCurb) {
+            if (isRed) {
+              redVert = addCurbQuad(
+                positions, indices, redVert, p0, p1, n0, n1, -1, rightWidths[i], rightWidths[i + 1]
+              );
+            } else {
+              whiteVert = addCurbQuad(
+                positions, indices, whiteVert, p0, p1, n0, n1, -1, rightWidths[i], rightWidths[i + 1]
+              );
+            }
+          }
+        }
+
+        if (redCurbPos.length > 0) {
+          const redGeom = new THREE.BufferGeometry();
+          redGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(redCurbPos), 3));
+          redGeom.setIndex(redCurbIdx);
+          redGeom.computeVertexNormals();
+          const redMesh = new THREE.Mesh(redGeom, redCurbMat);
+          redMesh.receiveShadow = true;
+          this.environmentGroup.add(redMesh);
+        }
+
+        if (whiteCurbPos.length > 0) {
+          const whiteGeom = new THREE.BufferGeometry();
+          whiteGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(whiteCurbPos), 3));
+          whiteGeom.setIndex(whiteCurbIdx);
+          whiteGeom.computeVertexNormals();
+          const whiteMesh = new THREE.Mesh(whiteGeom, whiteCurbMat);
+          whiteMesh.receiveShadow = true;
+          this.environmentGroup.add(whiteMesh);
+        }
+      }
+
+      const spurHaveGrass = leftStyle.grassWidth > 0.05 || rightStyle.grassWidth > 0.05;
+      if (spurHaveGrass) {
+        const grassPositions: number[] = [];
+        const grassIndices: number[] = [];
+        let grassVertex = 0;
+
+        const addGrassSegment = (
+          index: number,
+          sideSign: 1 | -1,
+          style: typeof leftStyle,
+          widths: number[]
+        ) => {
+          if (style.grassWidth <= 0.05) return;
+          const next = index + 1;
+          const inner0 = widths[index] + (style.haveCurb ? this.curbWidth : 0);
+          const inner1 = widths[next] + (style.haveCurb ? this.curbWidth : 0);
+          const outer0 = inner0 + style.grassWidth;
+          const outer1 = inner1 + style.grassWidth;
+          const innerY0 = surface[index].y + (style.haveCurb ? this.curbHeight : 0);
+          const innerY1 = surface[next].y + (style.haveCurb ? this.curbHeight : 0);
+          const outerY0 = Math.max(surface[index].y - 0.03, innerY0 - 0.24);
+          const outerY1 = Math.max(surface[next].y - 0.03, innerY1 - 0.24);
+          const innerPoint0 = new THREE.Vector3(
+            surface[index].x,
+            innerY0,
+            surface[index].z
+          ).addScaledVector(normals[index], sideSign * inner0);
+          const outerPoint0 = new THREE.Vector3(
+            surface[index].x,
+            outerY0,
+            surface[index].z
+          ).addScaledVector(normals[index], sideSign * outer0);
+          const innerPoint1 = new THREE.Vector3(
+            surface[next].x,
+            innerY1,
+            surface[next].z
+          ).addScaledVector(normals[next], sideSign * inner1);
+          const outerPoint1 = new THREE.Vector3(
+            surface[next].x,
+            outerY1,
+            surface[next].z
+          ).addScaledVector(normals[next], sideSign * outer1);
+
+          grassPositions.push(
+            innerPoint0.x, innerPoint0.y, innerPoint0.z,
+            outerPoint0.x, outerPoint0.y, outerPoint0.z,
+            innerPoint1.x, innerPoint1.y, innerPoint1.z,
+            outerPoint1.x, outerPoint1.y, outerPoint1.z
+          );
+          if (sideSign > 0) {
+            grassIndices.push(
+              grassVertex, grassVertex + 1, grassVertex + 2,
+              grassVertex + 1, grassVertex + 3, grassVertex + 2
+            );
+          } else {
+            grassIndices.push(
+              grassVertex, grassVertex + 2, grassVertex + 1,
+              grassVertex + 1, grassVertex + 2, grassVertex + 3
+            );
+          }
+          grassVertex += 4;
+        };
+
+        for (let i = 0; i < surface.length - 1; i++) {
+          if (junctionOpenAt(i) || junctionOpenAt(i + 1)) continue;
+          addGrassSegment(i, 1, leftStyle, leftWidths);
+          addGrassSegment(i, -1, rightStyle, rightWidths);
+        }
+
+        if (grassPositions.length > 0) {
+          const grassGeometry = new THREE.BufferGeometry();
+          grassGeometry.setAttribute(
+            'position',
+            new THREE.BufferAttribute(new Float32Array(grassPositions), 3)
+          );
+          grassGeometry.setIndex(grassIndices);
+          grassGeometry.computeVertexNormals();
+          const grassMaterial = new THREE.MeshStandardMaterial({
+            color: 0x7bb369,
+            roughness: 0.9,
+            metalness: 0.1,
+            side: THREE.DoubleSide
+          });
+          const grassMesh = new THREE.Mesh(grassGeometry, grassMaterial);
+          grassMesh.receiveShadow = true;
+          grassMesh.userData = { isSpurGrass: true, spurIndex };
+          this.environmentGroup.add(grassMesh);
+        }
+      }
+
+      const spurHaveFence = leftStyle.fence || rightStyle.fence;
+
+      // 5. Spur Fences / Steel Guardrails along left and right sides
+      if (spurHaveFence) {
+        const fenceRailPositions: number[] = [];
+        const fenceRailIndices: number[] = [];
+        let fVertIdx = 0;
+
+        const postGeom = new THREE.BoxGeometry(0.14, 1.25, 0.14);
+        const postMat = steelMat;
+
+        for (let i = 0; i < surface.length - 1; i++) {
+          if (junctionOpenAt(i) || junctionOpenAt(i + 1)) continue;
+          const p0 = surface[i];
+          const p1 = surface[i + 1];
+          const n0 = normals[i];
+          const n1 = normals[i + 1];
+
+          ([
+            { sideSign: 1, style: leftStyle, widths: leftWidths },
+            { sideSign: -1, style: rightStyle, widths: rightWidths }
+          ] as const).forEach(({ sideSign, style, widths }) => {
+            if (!style.fence) return;
+            const offset0 =
+              widths[i] + (style.haveCurb ? this.curbWidth : 0) + style.grassWidth;
+            const offset1 =
+              widths[i + 1] + (style.haveCurb ? this.curbWidth : 0) + style.grassWidth;
+            const roadHeight0 = p0.y + (style.haveCurb ? this.curbHeight : 0);
+            const roadHeight1 = p1.y + (style.haveCurb ? this.curbHeight : 0);
+            const baseHeight0 = style.grassWidth > 0.05
+              ? Math.max(p0.y - 0.03, roadHeight0 - 0.24)
+              : roadHeight0;
+            const baseHeight1 = style.grassWidth > 0.05
+              ? Math.max(p1.y - 0.03, roadHeight1 - 0.24)
+              : roadHeight1;
+            const b0 = new THREE.Vector3(p0.x, baseHeight0, p0.z).addScaledVector(
+              n0,
+              sideSign * offset0
+            );
+            const b1 = new THREE.Vector3(p1.x, baseHeight1, p1.z).addScaledVector(
+              n1,
+              sideSign * offset1
+            );
+
+            const r0_bot = new THREE.Vector3(b0.x, b0.y + 0.35, b0.z);
+            const r0_top = new THREE.Vector3(b0.x, b0.y + 0.85, b0.z);
+            const r1_bot = new THREE.Vector3(b1.x, b1.y + 0.35, b1.z);
+            const r1_top = new THREE.Vector3(b1.x, b1.y + 0.85, b1.z);
+
+            fenceRailPositions.push(
+              r0_bot.x, r0_bot.y, r0_bot.z,
+              r0_top.x, r0_top.y, r0_top.z,
+              r1_bot.x, r1_bot.y, r1_bot.z,
+              r1_top.x, r1_top.y, r1_top.z
+            );
+
+            fenceRailIndices.push(
+              fVertIdx, fVertIdx + 1, fVertIdx + 2,
+              fVertIdx + 1, fVertIdx + 3, fVertIdx + 2,
+              fVertIdx + 2, fVertIdx + 1, fVertIdx,
+              fVertIdx + 2, fVertIdx + 3, fVertIdx + 1
+            );
+            fVertIdx += 4;
+
+            if (i % 2 === 0 || i === surface.length - 2) {
+              const post = new THREE.Mesh(postGeom, postMat);
+              post.position.set(b0.x, b0.y + 0.6, b0.z);
+              post.castShadow = true;
+              this.environmentGroup.add(post);
+            }
+          });
+        }
+
+        if (fenceRailPositions.length > 0) {
+          const fenceGeom = new THREE.BufferGeometry();
+          fenceGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(fenceRailPositions), 3));
+          fenceGeom.setIndex(fenceRailIndices);
+          fenceGeom.computeVertexNormals();
+          const fenceMesh = new THREE.Mesh(fenceGeom, steelMat);
+          fenceMesh.castShadow = true;
+          this.environmentGroup.add(fenceMesh);
+        }
+      }
+
+      const barriers: SpurBarrier[] = [];
+
+      /**
+       * Explicit endpoint closures are intentionally simpler than the legacy GT
+       * dead-end set piece. They close a junction without adding cones and tyres
+       * across the live road beside it, while sharing the same collision contract.
+       */
+      const addEndpointClosure = (sampleIndex: number, inward: THREE.Vector3) => {
+        const point = surface[sampleIndex];
+        const crossRoad = normals[sampleIndex];
+        const endpointHalfWidth = Math.max(
+          leftWidths[sampleIndex],
+          rightWidths[sampleIndex]
+        );
+        const barrierWidth = endpointHalfWidth * 2 + 1.8;
+        const group = new THREE.Group();
+
+        const base = new THREE.Mesh(
+          new THREE.BoxGeometry(barrierWidth, 0.42, 0.78),
+          concreteMat
+        );
+        base.position.y = 0.21;
+        base.castShadow = true;
+        base.receiveShadow = true;
+        group.add(base);
+
+        const wall = new THREE.Mesh(
+          new THREE.BoxGeometry(barrierWidth, 0.7, 0.48),
+          concreteMat
+        );
+        wall.position.y = 0.72;
+        wall.castShadow = true;
+        wall.receiveShadow = true;
+        group.add(wall);
+
+        const panelCount = Math.max(4, Math.ceil(barrierWidth / 1.8));
+        const panelWidth = barrierWidth / panelCount;
+        for (let panelIndex = 0; panelIndex < panelCount; panelIndex++) {
+          const panel = new THREE.Mesh(
+            new THREE.BoxGeometry(panelWidth * 0.92, 0.34, 0.05),
+            panelIndex % 2 === 0 ? chevronRedMat : chevronWhiteMat
+          );
+          panel.position.set(
+            -barrierWidth / 2 + panelWidth * (panelIndex + 0.5),
+            0.76,
+            0.27
+          );
+          panel.rotation.z = panelIndex % 2 === 0 ? -0.35 : 0.35;
+          panel.castShadow = true;
+          group.add(panel);
+        }
+
+        group.position.copy(point);
+        group.rotation.y = Math.atan2(inward.x, inward.z);
+        group.userData = { isSpur: true, spurIndex };
+        this.environmentGroup.add(group);
+
+        barriers.push({
+          center: point.clone().addScaledVector(inward, 0.3),
+          normal: inward.clone(),
+          tangent: crossRoad.clone(),
+          halfWidth: endpointHalfWidth + 1.2,
+          halfDepth: 1.6,
+          height: 1.3
+        });
+      };
+
+      const lastIdx = surface.length - 1;
+      if (spur.blockedStart === true) {
+        addEndpointClosure(0, tangents[0].clone());
+      }
+      if (spur.blockedEnd === true) {
+        addEndpointClosure(lastIdx, tangents[lastIdx].clone().negate());
+      }
+
+      // 6. Gran Turismo Style Dead-End Barricade
+      // Preserve the old default at an unattached end. An explicit blockedEnd uses
+      // the simpler closure above, so the two systems can never overlap.
+      const isLoopClosed = endMouth !== undefined;
+      const legacyEndBlocked = !isLoopClosed && (spur.blocked ?? true);
+
+      if (legacyEndBlocked && spur.blockedEnd !== true) {
+        const endPoint = surface[lastIdx];
+        const endNormal = normals[lastIdx];
+        const endTangent = tangents[lastIdx];
+        const barrierWidth = halfWidth * 2 + 1.8;
+        const group = new THREE.Group();
+
+        // 6a. Profiled Concrete Jersey Barrier (Base + Body + Top)
+        const baseBlock = new THREE.Mesh(new THREE.BoxGeometry(barrierWidth, 0.38, 0.76), concreteMat);
+        baseBlock.position.set(0, 0.19, 0);
+        baseBlock.castShadow = true;
+        baseBlock.receiveShadow = true;
+        group.add(baseBlock);
+
+        const midBody = new THREE.Mesh(new THREE.BoxGeometry(barrierWidth, 0.62, 0.48), concreteMat);
+        midBody.position.set(0, 0.62, 0);
+        midBody.castShadow = true;
+        midBody.receiveShadow = true;
+        group.add(midBody);
+
+        const topCrown = new THREE.Mesh(new THREE.BoxGeometry(barrierWidth, 0.18, 0.36), concreteMat);
+        topCrown.position.set(0, 0.98, 0);
+        topCrown.castShadow = true;
+        topCrown.receiveShadow = true;
+        group.add(topCrown);
+
+        // 6b. GT Chevron Arrow Hazard Panels (Red & White alternating)
+        const chevronCount = Math.max(3, Math.floor(barrierWidth / 2.2));
+        const chevronSpacing = barrierWidth / (chevronCount + 1);
+        for (let c = 0; c < chevronCount; c++) {
+          const cx = -barrierWidth / 2 + chevronSpacing * (c + 1);
+          const isLeft = cx < 0;
+
+          // Backplate
+          const plate = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.48, 0.04), chevronRedMat);
+          plate.position.set(cx, 0.65, 0.26);
+          plate.castShadow = true;
+          group.add(plate);
+
+          // Arrow chevron stripe
+          const arrow = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.36, 0.06), chevronWhiteMat);
+          arrow.position.set(cx, 0.65, 0.27);
+          arrow.rotation.z = isLeft ? -0.785 : 0.785;
+          group.add(arrow);
+        }
+
+        // Top hazard warning strip
+        const topStripe = new THREE.Mesh(new THREE.BoxGeometry(barrierWidth, 0.16, 0.38), chevronRedMat);
+        topStripe.position.set(0, 1.08, 0);
+        topStripe.castShadow = true;
+        group.add(topStripe);
+
+        // 6c. Crash Cushion Tire Stacks (Rubber cylinders with yellow wrap bands)
+        const tireStacks = Math.max(3, Math.min(6, Math.floor(barrierWidth / 2.0)));
+        const tireSpacing = (barrierWidth - 1.2) / (tireStacks - 1 || 1);
+        const tireGeom = new THREE.CylinderGeometry(0.44, 0.44, 0.32, 16);
+        const wrapGeom = new THREE.CylinderGeometry(0.448, 0.448, 0.1, 16);
+
+        for (let t = 0; t < tireStacks; t++) {
+          const tx = -barrierWidth / 2 + 0.6 + t * tireSpacing;
+          const tz = 0.58;
+
+          // 2-tier tire stack
+          const tireBottom = new THREE.Mesh(tireGeom, tireRubberMat);
+          tireBottom.position.set(tx, 0.16, tz);
+          tireBottom.castShadow = true;
+          tireBottom.receiveShadow = true;
+          group.add(tireBottom);
+
+          const wrapBottom = new THREE.Mesh(wrapGeom, tireWrapMat);
+          wrapBottom.position.set(tx, 0.16, tz);
+          group.add(wrapBottom);
+
+          const tireTop = new THREE.Mesh(tireGeom, tireRubberMat);
+          tireTop.position.set(tx, 0.48, tz);
+          tireTop.castShadow = true;
+          tireTop.receiveShadow = true;
+          group.add(tireTop);
+
+          const wrapTop = new THREE.Mesh(wrapGeom, tireWrapMat);
+          wrapTop.position.set(tx, 0.48, tz);
+          group.add(wrapTop);
+        }
+
+        // 6d. Pulsating Amber Strobe Hazard Beacons
+        const beaconPostGeom = new THREE.CylinderGeometry(0.04, 0.04, 0.45, 8);
+        const beaconDomeGeom = new THREE.CylinderGeometry(0.12, 0.14, 0.22, 12);
+
+        [-barrierWidth / 2 + 0.35, barrierWidth / 2 - 0.35].forEach((bx) => {
+          const post = new THREE.Mesh(beaconPostGeom, steelMat);
+          post.position.set(bx, 1.25, 0);
+          post.castShadow = true;
+          group.add(post);
+
+          const dome = new THREE.Mesh(beaconDomeGeom, beaconMat);
+          dome.position.set(bx, 1.48, 0);
+          dome.castShadow = true;
+          group.add(dome);
+        });
+
+        // 6e. Traffic Warning Cones in front of barrier
+        const coneGeom = new THREE.ConeGeometry(0.22, 0.65, 12);
+        const coneBandGeom = new THREE.CylinderGeometry(0.14, 0.17, 0.18, 12);
+        const conePositions = [-halfWidth * 0.6, 0, halfWidth * 0.6];
+        conePositions.forEach((cx, idx) => {
+          const cz = 1.25 + (idx % 2 === 0 ? 0.2 : 0);
+          const cone = new THREE.Mesh(coneGeom, coneOrangeMat);
+          cone.position.set(cx, 0.32, cz);
+          cone.castShadow = true;
+          group.add(cone);
+
+          const band = new THREE.Mesh(coneBandGeom, coneStripeMat);
+          band.position.set(cx, 0.28, cz);
+          group.add(band);
+        });
+
+        // 6f. Steel Guardrail Backing behind concrete wall
+        const backRail = new THREE.Mesh(new THREE.BoxGeometry(barrierWidth + 1.2, 0.35, 0.08), steelMat);
+        backRail.position.set(0, 0.75, -0.45);
+        backRail.castShadow = true;
+        group.add(backRail);
+
+        const fencePostGeom = new THREE.BoxGeometry(0.12, 1.5, 0.12);
+        [-barrierWidth / 2 - 0.2, 0, barrierWidth / 2 + 0.2].forEach((px) => {
+          const p = new THREE.Mesh(fencePostGeom, steelMat);
+          p.position.set(px, 0.75, -0.48);
+          p.castShadow = true;
+          group.add(p);
+        });
+
+        group.position.copy(endPoint);
+        // Correct barrier orientation: faces oncoming cars back along spur (-endTangent)
+        group.rotation.y = Math.atan2(-endTangent.x, -endTangent.z);
+        group.userData = { isSpur: true, spurIndex };
+        this.environmentGroup.add(group);
+
+        barriers.push({
+          center: endPoint.clone().addScaledVector(endTangent, -0.3),
+          normal: endTangent.clone().negate(),
+          tangent: endNormal.clone(),
+          halfWidth: halfWidth + 1.2,
+          halfDepth: 1.6,
+          height: 1.8
+        });
+      }
+
+      const maxReach = Math.max(
+        ...leftWidths.map(
+          (width) => width + (leftStyle.haveCurb ? this.curbWidth : 0) + leftStyle.grassWidth
+        ),
+        ...rightWidths.map(
+          (width) => width + (rightStyle.haveCurb ? this.curbWidth : 0) + rightStyle.grassWidth
+        )
+      );
+
+      // Register the exact flare widths and side styles used by the meshes, so
+      // driving height, grass grip and fence collision agree with what is visible.
+      this.spurSurfaces.push({
+        samples: surface,
+        normals,
+        tangents,
+        openSamples: surface.map((_, index) => junctionOpenAt(index)),
+        leftWidths,
+        rightWidths,
+        left: leftStyle,
+        right: rightStyle,
+        maxReach,
+        blocked: barriers.length > 0,
+        minX: Math.min(...surface.map((p) => p.x)) - maxReach - 8,
+        maxX: Math.max(...surface.map((p) => p.x)) + maxReach + 8,
+        minZ: Math.min(...surface.map((p) => p.z)) - maxReach - 8,
+        maxZ: Math.max(...surface.map((p) => p.z)) + maxReach + 8,
+        barriers
+      });
+    });
+  }
+
+  /**
+   * One free-standing patch of grass: a ground mat that follows the sculpted
+   * terrain plus a scatter of instanced blades.
+   *
+   * Unlike the verge ribbon, which is welded to the road edge, this can sit
+   * anywhere. It is decoration only — it is not part of the grass band that costs
+   * grip, so a field beside the circuit does not turn that ground into a penalty
+   * zone. Built here rather than inline in createScenery so the editor's grass
+   * brush can drop a real patch mid-stroke instead of waiting for a full rebuild.
+   */
+  public buildGrassPatch(
+    item: TrackScenery,
+    idx: number,
+    time: TimeOfDay = 'afternoon'
+  ): THREE.Group {
+    const scale = item.scale || 1.0;
+    const radius = grassPatchRadius(scale);
+    const centerX = item.position.x;
+    const centerZ = item.position.z;
+    const centerY = this.terrain.sampleAt(centerX, centerZ) + item.position.y;
+    // Local height at an offset, so both the mat and the blades bed into the
+    // ground instead of floating as one flat plate across a slope.
+    const localY = (dx: number, dz: number) =>
+      this.terrain.sampleAt(centerX + dx, centerZ + dz) + item.position.y - centerY;
+
+    const patchGroup = new THREE.Group();
+
+    // Ground mat: a disc that follows the terrain. Also the thing the editor
+    // clicks on, since single blades are far too thin to hit.
+    const rings = 4;
+    const segments = 28;
+
+    /**
+     * How far the patch reaches on each bearing.
+     *
+     * Two reasons this is not just `radius`. A perfect circle of grass reads as a
+     * green dinner plate dropped on the map, and a circle that overlaps the circuit
+     * lays grass straight over the tarmac. So the outline wobbles, and every bearing
+     * stops short of the road.
+     */
+    const reach: number[] = [];
+    const wobbleSeed = (Math.abs(centerX) * 0.017 + Math.abs(centerZ) * 0.023) % (Math.PI * 2);
+    for (let seg = 0; seg < segments; seg++) {
+      const angle = (seg / segments) * Math.PI * 2;
+      const wobble =
+        0.78 +
+        0.13 * Math.sin(angle * 3 + wobbleSeed) +
+        0.09 * Math.sin(angle * 5 - wobbleSeed * 1.7);
+      let limit = radius * wobble;
+
+      if (this.roadSamplePoints.length > 1) {
+        const step = Math.max(1.5, radius / 12);
+        for (let r = step; r <= limit; r += step) {
+          const px = centerX + Math.cos(angle) * r;
+          const pz = centerZ + Math.sin(angle) * r;
+          const info = this.getTrackInfo(px, pz);
+          if (info.dist < info.width / 2 + 0.8 || this.isPointOnSpur(px, pz)) {
+            limit = Math.max(0, r - step);
+            break;
+          }
+        }
+      }
+      reach.push(limit);
+    }
+    // One smoothing pass, so a bearing clipped by the road does not leave a spike
+    // next to its neighbours.
+    const smoothedReach = reach.map((value, seg) => {
+      const prev = reach[(seg - 1 + segments) % segments];
+      const next = reach[(seg + 1) % segments];
+      return value * 0.5 + prev * 0.25 + next * 0.25;
+    });
+
+    const matPositions: number[] = [0, localY(0, 0) + 0.05, 0];
+    const matIndices: number[] = [];
+    for (let ring = 1; ring <= rings; ring++) {
+      const ringFraction = ring / rings;
+      for (let seg = 0; seg < segments; seg++) {
+        const angle = (seg / segments) * Math.PI * 2;
+        const ringRadius = ringFraction * smoothedReach[seg];
+        const dx = Math.cos(angle) * ringRadius;
+        const dz = Math.sin(angle) * ringRadius;
+        // The rim settles into the ground so the patch has no standing lip.
+        const lift = 0.05 - ringFraction * 0.05;
+        matPositions.push(dx, localY(dx, dz) + lift, dz);
+      }
+    }
+    const ringStart = (ring: number) => 1 + (ring - 1) * segments;
+    for (let seg = 0; seg < segments; seg++) {
+      const next = (seg + 1) % segments;
+      matIndices.push(0, ringStart(1) + next, ringStart(1) + seg);
+    }
+    for (let ring = 1; ring < rings; ring++) {
+      for (let seg = 0; seg < segments; seg++) {
+        const next = (seg + 1) % segments;
+        const inner = ringStart(ring);
+        const outer = ringStart(ring + 1);
+        matIndices.push(inner + seg, outer + next, outer + seg);
+        matIndices.push(inner + seg, inner + next, outer + next);
+      }
+    }
+    const matGeom = new THREE.BufferGeometry();
+    matGeom.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(matPositions), 3)
+    );
+    matGeom.setIndex(matIndices);
+    matGeom.computeVertexNormals();
+    // Grass that was just placed comes up over about half a second; grass that was
+    // already on the map is simply there. The key is the patch position, so editing
+    // something else and rebuilding the world does not make every field sprout again.
+    const growthKey = `${Math.round(centerX)}:${Math.round(centerZ)}`;
+    const alreadyGrown = !this.grassGrowsIn || BaseMode.sproutedGrass.has(growthKey);
+    BaseMode.sproutedGrass.add(growthKey);
+    const grow = { value: alreadyGrown ? 1 : 0 };
+
+    const groundMatMaterial = new THREE.MeshStandardMaterial({
+      color: gradeColor(0x7bb369, time),
+      roughness: 0.9,
+      metalness: 0.1,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: alreadyGrown ? 1 : 0,
+      // Painted patches overlap, and two coplanar mats flicker against each
+      // other. A per-patch depth bias picks a stable winner instead.
+      polygonOffset: true,
+      polygonOffsetFactor: -1 - (idx % 4),
+      polygonOffsetUnits: -1
+    });
+    if (!alreadyGrown) {
+      this.grassGrowth.push({ grow, mat: groundMatMaterial });
+    }
+
+    const groundMat = new THREE.Mesh(matGeom, groundMatMaterial);
+    groundMat.receiveShadow = true;
+    patchGroup.add(groundMat);
+
+    // Deterministic scatter: the editor rebuilds the world on every edit, and
+    // Math.random would reshuffle every blade each time.
+    let seed = Math.floor(Math.abs(centerX) * 73856093 + Math.abs(centerZ) * 19349663) >>> 0;
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) >>> 0;
+      let t = seed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    const quality = this.engine?.postProcessing
+      ? this.engine.postProcessing.getQuality()
+      : 'high';
+    // Even on low, a patch has to show blades: it is grass the user placed by hand,
+    // so silently rendering a bare green disc reads as the feature not working.
+    const bladesPerSquareMetre = quality === 'low' ? 0.12 : quality === 'medium' ? 0.28 : 0.55;
+    const bladeCount = Math.min(
+      3000,
+      Math.round(Math.PI * radius * radius * bladesPerSquareMetre)
+    );
+
+    if (bladeCount > 0) {
+      const bladeGeom = createGrassBladeGeometry();
+      const bladeMat = createGrassBladeMaterial(this.grassUniforms, grow);
+      const blades = new THREE.InstancedMesh(bladeGeom, bladeMat, bladeCount);
+      blades.receiveShadow = true;
+      const dummy = new THREE.Object3D();
+      const leafColor = new THREE.Color();
+      let placed = 0;
+
+      for (let i = 0; i < bladeCount; i++) {
+        // Blades live inside the same wobbly, road-clipped outline as the mat, so
+        // they never stand on tarmac or out past the green.
+        const bladeSeg = Math.min(segments - 1, Math.floor(random() * segments));
+        const bladeAngle = ((bladeSeg + random()) / segments) * Math.PI * 2;
+        // sqrt keeps the scatter even across the area instead of bunching up
+        // in the middle.
+        const bladeRadius = Math.sqrt(random()) * smoothedReach[bladeSeg];
+        const dx = Math.cos(bladeAngle) * bladeRadius;
+        const dz = Math.sin(bladeAngle) * bladeRadius;
+
+        // Nothing grows through the tarmac.
+        if (this.roadSamplePoints.length > 1) {
+          const info = this.getTrackInfo(centerX + dx, centerZ + dz);
+          if (info.dist < info.width / 2 + 0.6 || this.isPointOnSpur(centerX + dx, centerZ + dz)) continue;
+        }
+
+        dummy.position.set(dx, localY(dx, dz) + 0.02, dz);
+        dummy.rotation.set(0, random() * Math.PI * 2, 0);
+        const heightScale = 0.7 + random() * 0.6;
+        const widthScale = 0.8 + random() * 0.4;
+        dummy.scale.set(widthScale, heightScale * (item.heightScale ?? 1), widthScale);
+        dummy.updateMatrix();
+        blades.setMatrixAt(placed, dummy.matrix);
+        leafColor.setHex(GRASS_LEAF_COLORS[Math.floor(random() * GRASS_LEAF_COLORS.length)]);
+        blades.setColorAt(placed, leafColor);
+        placed++;
+      }
+
+      // Unused instances would otherwise render stacked at the origin.
+      blades.count = placed;
+      if (blades.instanceColor) blades.instanceColor.needsUpdate = true;
+      blades.instanceMatrix.needsUpdate = true;
+      patchGroup.add(blades);
+    }
+
+    patchGroup.position.set(centerX, centerY, centerZ);
+    patchGroup.rotation.y = item.rotation ?? 0;
+    // isGrassPatch lets the editor's clear-grass brush hide what a stroke removed
+    // before the world is rebuilt.
+    patchGroup.userData = { isScenery: true, sceneryIndex: idx, isGrassPatch: true };
+    return patchGroup;
+  }
+
   protected createScenery(scenery: TrackScenery[] | undefined, time: TimeOfDay = 'afternoon') {
     if (!scenery || scenery.length === 0) return;
 
@@ -2273,6 +3693,8 @@ export abstract class BaseMode implements GameMode {
         placeProp(rock);
         rock.scale.multiply(new THREE.Vector3(1.2, 0.8, 1.0));
         rock.rotation.x += 0.1;
+      } else if (item.type === 'grass_patch') {
+        this.environmentGroup.add(this.buildGrassPatch(item, idx, time));
       } else if (item.type === 'mountain') {
         const mountainGroup = new THREE.Group();
         
@@ -2727,17 +4149,42 @@ export abstract class BaseMode implements GameMode {
    * wheel clips a kerb, and the resulting gravity kick reads as the car shaking.
    * Which way is downhill has to come from something continuous.
    */
-  public getSlopeHeight(x: number, z: number): number {
-    if (this.roadSamplePoints.length < 2) return this.terrain.sampleAt(x, z);
-
-    const info = this.getTrackInfo(x, z);
-    const reach = info.width / 2 + (info.grassWidth ?? 0) + this.curbWidth;
+  public getSlopeHeight(x: number, z: number, yHint?: number): number {
     const terrainHeight = this.terrain.sampleAt(x, z);
+    const spurInfo = this.getSpurInfo(x, z, yHint);
+    const spurHeight =
+      spurInfo && (spurInfo.onAsphalt || spurInfo.onCurb || spurInfo.onGrass)
+        ? spurInfo.baseHeight
+        : null;
+
+    if (this.roadSamplePoints.length < 2) {
+      if (spurHeight === null) return terrainHeight;
+      if (yHint === undefined) return spurHeight;
+      return Math.abs(spurHeight - yHint) <= Math.abs(terrainHeight - yHint)
+        ? spurHeight
+        : terrainHeight;
+    }
+
+    const info = this.getTrackInfo(x, z, yHint);
+    const reach = info.width / 2 + (info.grassWidth ?? 0) + this.curbWidth;
     // Same embankment rule as getGroundHeight, so which way the car thinks is
     // downhill agrees with what is holding it up.
     const shoulder = Math.max(12, Math.abs(info.closestPt.y - terrainHeight) * 1.5);
     const blend = THREE.MathUtils.clamp((info.dist - reach) / shoulder, 0, 1);
-    return THREE.MathUtils.lerp(info.closestPt.y, terrainHeight, blend);
+    const mainHeight = THREE.MathUtils.lerp(info.closestPt.y, terrainHeight, blend);
+
+    if (spurHeight === null) return mainHeight;
+    if (yHint !== undefined) {
+      // getGroundHeight performs deck selection against the actual banked ribbon.
+      // Once that source is known, return this method's smooth version of it.
+      const selectedSupport = this.getGroundHeight(x, z, yHint);
+      return Math.abs(selectedSupport - spurHeight) < 0.3
+        ? spurHeight
+        : mainHeight;
+    }
+
+    // Legacy callers have no deck hint, so retain the old XZ rule.
+    return info.dist > info.width / 2 ? spurHeight : mainHeight;
   }
 
   /**
@@ -2762,13 +4209,168 @@ export abstract class BaseMode implements GameMode {
     return from + (to - from) * info.frac;
   }
 
-  public getGroundHeight(x: number, z: number, yHint?: number): number {
-    if (this.roadSamplePoints.length < 2 || this.roadSampleLeftPoints.length === 0 || this.roadSampleRightPoints.length === 0) {
-      return this.terrain.sampleAt(x, z);
+  /**
+   * Detailed info about how a world point relates to any active spur road.
+   */
+  public getSpurInfo(x: number, z: number, yHint?: number): SpurRoadInfo | null {
+    if (this.spurSurfaces.length === 0) return null;
+
+    let bestScore = Infinity;
+    let bestInfo: SpurRoadInfo | null = null;
+
+    for (let spurIndex = 0; spurIndex < this.spurSurfaces.length; spurIndex++) {
+      const spur = this.spurSurfaces[spurIndex];
+      if (x < spur.minX || x > spur.maxX || z < spur.minZ || z > spur.maxZ) {
+        continue;
+      }
+
+      for (let i = 0; i < spur.samples.length - 1; i++) {
+        const from = spur.samples[i];
+        const to = spur.samples[i + 1];
+        const dx = to.x - from.x;
+        const dz = to.z - from.z;
+        const lengthSq = dx * dx + dz * dz;
+        if (lengthSq < 1e-8) continue;
+
+        const t = THREE.MathUtils.clamp(
+          ((x - from.x) * dx + (z - from.z) * dz) / lengthSq,
+          0,
+          1
+        );
+        const ptX = from.x + dx * t;
+        const ptZ = from.z + dz * t;
+        const offX = x - ptX;
+        const offZ = z - ptZ;
+        const dist = Math.hypot(offX, offZ);
+
+        const normFrom = spur.normals[i] ?? new THREE.Vector3(1, 0, 0);
+        const normTo = spur.normals[i + 1] ?? normFrom;
+        const normal = new THREE.Vector3().lerpVectors(normFrom, normTo, t).normalize();
+        const tangFrom = spur.tangents[i] ?? new THREE.Vector3(0, 0, 1);
+        const tangTo = spur.tangents[i + 1] ?? tangFrom;
+        const tangent = new THREE.Vector3().lerpVectors(tangFrom, tangTo, t).normalize();
+        const sideSign: 1 | -1 = offX * normal.x + offZ * normal.z >= 0 ? 1 : -1;
+        const baseStyle = sideSign > 0 ? spur.left : spur.right;
+        const opening = spur.openSamples[i] || spur.openSamples[i + 1];
+        const style = opening
+          ? { ...baseStyle, haveCurb: false, grassWidth: 0, fence: false }
+          : baseStyle;
+        const widths = sideSign > 0 ? spur.leftWidths : spur.rightWidths;
+        const halfWidth = THREE.MathUtils.lerp(widths[i], widths[i + 1], t);
+        const curbEnd = halfWidth + (style.haveCurb ? style.curbWidth : 0);
+        const grassEnd = curbEnd + style.grassWidth;
+        // Keep a generous fence-only capture margin so one fast frame cannot jump
+        // clean over the rail. Ground height below still rejects this outer zone.
+        const queryReach = grassEnd + (style.fence ? 8 : 0.5);
+        if (dist > queryReach) continue;
+
+        const baseHeight = THREE.MathUtils.lerp(from.y, to.y, t) - 0.05;
+        const score =
+          yHint === undefined ? dist : Math.abs(baseHeight - yHint) * 10 + dist;
+        if (score >= bestScore) continue;
+
+        bestScore = score;
+        bestInfo = {
+          dist,
+          sideSign,
+          closestPt: new THREE.Vector3(ptX, baseHeight, ptZ),
+          normal,
+          tangent,
+          halfWidth,
+          haveCurb: style.haveCurb,
+          curbWidth: style.curbWidth,
+          haveGrass: style.grassWidth > 0.05,
+          grassWidth: style.grassWidth,
+          fence: style.fence,
+          trackBoundary: grassEnd,
+          onAsphalt: dist <= halfWidth + 0.5,
+          onCurb: style.haveCurb && dist > halfWidth && dist <= curbEnd + 0.1,
+          onGrass: style.grassWidth > 0.05 && dist > curbEnd && dist < grassEnd,
+          baseHeight,
+          spurIndex
+        };
+      }
+    }
+
+    return bestInfo;
+  }
+
+  public getSpurBarriers(): SpurBarrier[] {
+    return this.spurSurfaces.flatMap((spur) => spur.barriers);
+  }
+
+  /** Grip classification on the same elevation-aware surface that supports the car. */
+  public isPointOnGrass(x: number, z: number, yHint?: number): boolean {
+    const supportHeight = this.getGroundHeight(x, z, yHint);
+    const spurInfo = this.getSpurInfo(x, z, yHint);
+    const spurHeight = this.getSpurHeight(x, z, yHint);
+    if (
+      spurInfo &&
+      spurHeight !== null &&
+      Math.abs(spurHeight - supportHeight) < 0.3 &&
+      spurInfo.dist <= spurInfo.trackBoundary + 0.5
+    ) {
+      if (spurInfo.onAsphalt || spurInfo.onCurb) return false;
+      if (spurInfo.onGrass) return true;
     }
 
     const info = this.getTrackInfo(x, z, yHint);
+    const grassWidth = info.grassWidth ?? 0;
+    if (grassWidth <= 0) return false;
+    const grassStart = info.width / 2 + (info.curb ? this.curbWidth : 0);
+    return info.dist >= grassStart && info.dist < grassStart + grassWidth;
+  }
+
+  public isPointOnSpur(x: number, z: number): boolean {
+    const info = this.getSpurInfo(x, z);
+    return info !== null && (info.onAsphalt || info.onCurb);
+  }
+
+  /**
+   * Height of the branch tarmac under a point, or null when the point is not on one.
+   */
+  public getSpurHeight(x: number, z: number, yHint?: number): number | null {
+    const info = this.getSpurInfo(x, z, yHint);
+    if (!info) return null;
+
+    if (info.onAsphalt) {
+      return info.baseHeight;
+    }
+
+    if (info.onCurb) {
+      return info.baseHeight + this.curbHeight;
+    }
+
+    if (info.onGrass) {
+      const grassStart = info.halfWidth + (info.haveCurb ? info.curbWidth : 0);
+      const t = (info.dist - grassStart) / (info.grassWidth || 1);
+      const innerHeight = info.baseHeight + (info.haveCurb ? this.curbHeight : 0);
+      const outerHeight = Math.max(info.closestPt.y + 0.02, innerHeight - 0.24);
+      return THREE.MathUtils.lerp(innerHeight, outerHeight, t);
+    }
+
+    return null;
+  }
+
+  public getGroundHeight(x: number, z: number, yHint?: number): number {
+    const terrainHeight = this.terrain.sampleAt(x, z);
+    if (this.roadSamplePoints.length < 2 || this.roadSampleLeftPoints.length === 0 || this.roadSampleRightPoints.length === 0) {
+      const spurHeight = this.getSpurHeight(x, z, yHint);
+      if (spurHeight === null) return terrainHeight;
+      if (yHint === undefined) return spurHeight;
+      return Math.abs(spurHeight - yHint) <= Math.abs(terrainHeight - yHint)
+        ? spurHeight
+        : terrainHeight;
+    }
+
+    const spurInfo = this.getSpurInfo(x, z, yHint);
+    const spurHeight = this.getSpurHeight(x, z, yHint);
+    const info = this.getTrackInfo(x, z, yHint);
     const halfWidth = info.width / 2;
+
+    // Build the actual banked main-road candidate before choosing between decks.
+    // Centreline Y is not enough here: at strong banking the driven edge can sit
+    // metres above or below it.
 
     // The two road edges either end of the segment the car is over. Interpolating
     // along the segment as well as across it makes this the actual mesh quad, so
@@ -2782,7 +4384,11 @@ export abstract class BaseMode implements GameMode {
     const rightEnd = this.roadSampleRightPoints[nextIdx];
 
     if (!leftStart || !leftEnd || !rightStart || !rightEnd) {
-      return this.terrain.sampleAt(x, z);
+      if (spurHeight === null) return terrainHeight;
+      if (yHint === undefined) return spurHeight;
+      return Math.abs(spurHeight - yHint) <= Math.abs(terrainHeight - yHint)
+        ? spurHeight
+        : terrainHeight;
     }
 
     const left = new THREE.Vector3().lerpVectors(leftStart, leftEnd, info.frac);
@@ -2800,43 +4406,47 @@ export abstract class BaseMode implements GameMode {
     // Calculate the base road height at the car's current offset
     const baseRoadHeight = THREE.MathUtils.lerp(right.y, left.y, u);
 
-    // 1. If on the asphalt road
-    if (info.dist < halfWidth) {
-      return baseRoadHeight - 0.05; // Subtract the visual raise offset to get actual road height
-    }
-
-    // 2. If on the curb
     const curbStart = halfWidth;
     const curbEnd = halfWidth + (info.curb ? this.curbWidth : 0);
-    if (info.curb && info.dist >= curbStart && info.dist <= curbEnd) {
-      return baseRoadHeight - 0.05 + this.curbHeight;
-    }
-
-    // 3. If on the grass
     const grassStart = curbEnd;
     const localGrassWidth = info.grassWidth ?? 0;
     const grassEnd = grassStart + localGrassWidth;
-    if (localGrassWidth > 0 && info.dist >= grassStart && info.dist < grassEnd) {
+
+    let mainHeight: number;
+    if (info.dist < halfWidth) {
+      // Subtract the visual raise offset to get the physical asphalt height.
+      mainHeight = baseRoadHeight - 0.05;
+    } else if (info.curb && info.dist >= curbStart && info.dist <= curbEnd) {
+      mainHeight = baseRoadHeight - 0.05 + this.curbHeight;
+    } else if (localGrassWidth > 0 && info.dist >= grassStart && info.dist < grassEnd) {
       const t = (info.dist - grassStart) / (localGrassWidth || 1);
       const innerHeight = baseRoadHeight + (info.curb ? this.curbHeight : 0);
       const outerHeight = Math.max(info.closestPt.y + 0.02, innerHeight - 0.24);
-      return THREE.MathUtils.lerp(innerHeight, outerHeight, t);
+      mainHeight = THREE.MathUtils.lerp(innerHeight, outerHeight, t);
+    } else {
+      // Past the verge the ground is whatever the terrain says, reached down an
+      // embankment rather than a step.
+      const vergeHeight =
+        localGrassWidth > 0
+          ? Math.max(info.closestPt.y + 0.02, baseRoadHeight - 0.24)
+          : baseRoadHeight;
+      const shoulder = Math.max(6, Math.abs(vergeHeight - terrainHeight) * 1.5);
+      const blend = THREE.MathUtils.clamp((info.dist - grassEnd) / shoulder, 0, 1);
+      mainHeight = THREE.MathUtils.lerp(vergeHeight, terrainHeight, blend);
     }
 
-    // Past the verge the ground is whatever the terrain says, reached down an
-    // embankment rather than a step.
-    const terrainHeight = this.terrain.sampleAt(x, z);
-    const vergeHeight =
-      localGrassWidth > 0
-        ? Math.max(info.closestPt.y + 0.02, baseRoadHeight - 0.24)
-        : baseRoadHeight;
-    // The embankment is sized by how far it has to fall, not by a fixed 6m. A road
-    // 30m up used to reach the ground over those same 6m, which is a wall at 79°:
-    // a wheel a metre off the edge read as 5m underground and dragged the whole car
-    // down with it. Capping the shoulder at about 1:1.5 keeps a raised road
-    // something the car sits on top of instead of something it slides off.
-    const shoulder = Math.max(6, Math.abs(vergeHeight - terrainHeight) * 1.5);
-    const blend = THREE.MathUtils.clamp((info.dist - grassEnd) / shoulder, 0, 1);
-    return THREE.MathUtils.lerp(vergeHeight, terrainHeight, blend);
+    if (spurHeight === null) return mainHeight;
+    if (yHint !== undefined) {
+      // Compare against the physical banked mesh height, not the centreline.
+      return Math.abs(spurHeight - yHint) + 0.01 < Math.abs(mainHeight - yHint)
+        ? spurHeight
+        : mainHeight;
+    }
+
+    // Preserve legacy no-hint behavior for non-vehicle callers.
+    return info.dist > halfWidth ||
+      (spurInfo?.onAsphalt && spurInfo.dist < info.dist)
+      ? spurHeight
+      : mainHeight;
   }
 }

@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import { BaseMode } from './BaseMode';
 import { Checkpoint } from '../objects/Checkpoint';
 import { Obstacle } from '../objects/Obstacle';
-import { TRACKS_DATABASE, TrackNode } from '../config/TrackDatabase';
+import { TRACKS_DATABASE, TrackConfig, TrackNode } from '../config/TrackDatabase';
 import { Vehicle } from '../objects/Vehicle';
 import { RacingAI } from '../objects/RacingAI';
 import { CARS_DATABASE } from '../config/CarDatabase';
 import { GameEngine } from '../gameEngine';
 import { ParticleSystem } from '../objects/ParticleSystem';
 import { buildCenterline } from './centerline';
-import { resolveTrackNodes } from './trackNodes';
+import { resolveTrackLayout, resolveTrackNodes } from './trackNodes';
 import type { ReplayCameraTrack } from '../engine/ReplayCameraDirector';
 import type { DrivingMode } from '../option';
 
@@ -23,6 +23,8 @@ export interface RaceOptions {
   difficulty?: RaceDifficulty;
   drivingMode?: DrivingMode;
   opponentCount?: number;
+  /** Which variation of the course to race. Omit for the track as authored. */
+  layoutId?: string;
 }
 
 export interface ReplayTarget {
@@ -68,6 +70,8 @@ export interface RaceReplayExport {
   format: 'cyberdrive-race-replay';
   version: 1;
   trackId: string;
+  /** Which layout was raced. Omitted for a track with a single layout. */
+  layoutId?: string;
   carId: string;
   totalLaps: number;
   sampleInterval: number;
@@ -86,6 +90,15 @@ export class RaceMode extends BaseMode {
   public activeCheckpointIndex = 0;
   private obstacles: Obstacle[] = [];
   private trackId: string;
+  private layoutId?: string;
+  /**
+   * The course this race is actually run on: the track from the database with the
+   * chosen layout applied. Resolved once in init and reused, because the update
+   * loop used to re-read the raw database every frame — with a layout in play that
+   * would have driven the lap logic from a different path than the road was built
+   * from.
+   */
+  private trackConfig!: TrackConfig;
   private difficulty: RaceDifficulty;
   private drivingMode: DrivingMode;
   private opponentCount = 5;
@@ -138,6 +151,14 @@ export class RaceMode extends BaseMode {
     this.difficulty = options.difficulty ?? 'normal';
     this.drivingMode = options.drivingMode ?? 'simulation';
     this.opponentCount = THREE.MathUtils.clamp(Math.round(options.opponentCount ?? 5), 0, 12);
+    this.layoutId = options.layoutId;
+    this.trackConfig = this.resolveTrackConfig();
+  }
+
+  /** The database entry for this race, with the chosen layout applied. */
+  private resolveTrackConfig(): TrackConfig {
+    const raw = TRACKS_DATABASE.find((t) => t.id === this.trackId) || TRACKS_DATABASE[1];
+    return resolveTrackLayout(raw, this.layoutId);
   }
 
   public resetVehicle() {
@@ -207,8 +228,11 @@ export class RaceMode extends BaseMode {
     this.aiCars = [];
     this.replayOpponents = [];
 
-    // Find track configuration in database
-    const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
+    // Find track configuration in database. The editor can rewrite the 'custom'
+    // entry between races, so this is re-resolved here rather than trusted from the
+    // constructor.
+    this.trackConfig = this.resolveTrackConfig();
+    const trackConfig = this.trackConfig;
     const path = trackConfig.path;
 
     const pathVectors = path.map(p => (isTrackVector(p) ? p : p.pos));
@@ -230,6 +254,8 @@ export class RaceMode extends BaseMode {
     this.createGridFloor();
     this.createTerrain(trackConfig, trackConfig.time);
     this.createRacetrackRoad(trackConfig);
+    // After the road: a spur's height at the junction is read off the road deck.
+    this.createSpurRoads(trackConfig.spurs, trackConfig, trackConfig.time);
     this.createScenery(trackConfig.scenery, trackConfig.time);
 
     // Generate dense path for AI tracking. This has to use the same centreline
@@ -306,7 +332,8 @@ export class RaceMode extends BaseMode {
     this.aiCars.forEach(ai => {
       ai.vehicle.getGroundHeight = (x: number, z: number, yHint?: number) =>
         this.getGroundHeight(x, z, yHint);
-      ai.vehicle.getSlopeHeight = (x: number, z: number) => this.getSlopeHeight(x, z);
+      ai.vehicle.getSlopeHeight = (x: number, z: number, yHint?: number) =>
+        this.getSlopeHeight(x, z, yHint);
     });
 
     // Position AI opponents on grid spots 0, 1, 2, 3, 4 (staggered pole position)
@@ -354,15 +381,13 @@ export class RaceMode extends BaseMode {
     this.checkpoints.push(finishCheckpoint);
 
     // Sync guardrail, track info, and grass callbacks for all AI vehicles and their AI controllers
-    const grassCallback = (x: number, z: number) => {
-      const info = this.getTrackInfo(x, z);
-      const grassWidth = info.grassWidth ?? 0;
-      if (grassWidth <= 0) return false;
-      const grassStart = info.width / 2 + (info.curb ? this.curbWidth : 0);
-      return info.dist >= grassStart && info.dist < grassStart + grassWidth;
-    };
+    const grassCallback = (x: number, z: number, yHint?: number) =>
+      this.isPointOnGrass(x, z, yHint);
     const trackInfoCallback = (x: number, z: number, yHint?: number) =>
       this.getTrackInfo(x, z, yHint);
+    const spurInfoCallback = (x: number, z: number, yHint?: number) =>
+      this.getSpurInfo(x, z, yHint);
+    const spurBarriersCallback = () => this.getSpurBarriers();
 
     // Keep one live array object so controllers receive the obstacles spawned below.
     this.obstacles = [];
@@ -370,6 +395,8 @@ export class RaceMode extends BaseMode {
       aiCar.vehicle.haveFence = this.haveFence;
       aiCar.vehicle.trackBoundary = this.trackBoundary;
       aiCar.vehicle.getTrackInfo = trackInfoCallback;
+      aiCar.vehicle.getSpurInfo = spurInfoCallback;
+      aiCar.vehicle.getSpurBarriers = spurBarriersCallback;
       aiCar.vehicle.isOnGrass = grassCallback;
       aiCar.vehicle.onFenceCollision = (contactPt: THREE.Vector3) => {
         this.particles.emitSparks(1, contactPt, 0xffaa00);
@@ -479,7 +506,7 @@ export class RaceMode extends BaseMode {
       }
 
       // If playing or finished:
-      const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
+      const trackConfig = this.trackConfig;
       const path = trackConfig.path.map(p => ('isVector3' in p ? p : p.pos) as THREE.Vector3);
 
       // Has this AI finished?
@@ -589,7 +616,7 @@ export class RaceMode extends BaseMode {
 
     // Track player progress along track and check lap completion
     if (isPlaying) {
-      const trackConfig = TRACKS_DATABASE.find(t => t.id === this.trackId) || TRACKS_DATABASE[1];
+      const trackConfig = this.trackConfig;
       const path = trackConfig.path.map(p => ('isVector3' in p ? p : p.pos) as THREE.Vector3);
 
       // Find player's closest node index on sparse path (for lap qualification & placement)
@@ -847,6 +874,7 @@ export class RaceMode extends BaseMode {
       format: 'cyberdrive-race-replay',
       version: 1,
       trackId: this.trackId,
+      layoutId: this.layoutId,
       carId: this.vehicle.carId,
       totalLaps: this.totalLaps,
       sampleInterval: this.replayFrameInterval,

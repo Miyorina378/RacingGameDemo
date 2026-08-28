@@ -92,7 +92,7 @@ export class Vehicle {
   public steeringAssistFraction = 0;
   public getGroundHeight?: (x: number, z: number, yHint?: number) => number;
   /** Smooth support surface without curb or verge steps, used only for slope. */
-  public getSlopeHeight?: (x: number, z: number) => number;
+  public getSlopeHeight?: (x: number, z: number, yHint?: number) => number;
   public getTrackInfo?: (x: number, z: number, yHint?: number) => {
     dist: number;
     closestPt: THREE.Vector3;
@@ -111,7 +111,34 @@ export class Vehicle {
   public haveFence = false;
   public trackBoundary = 0;
   public grassInstability = 0; // Progressive instability factor on grass (0.0 to 1.0)
-  public isOnGrass?: (x: number, z: number) => boolean;
+  public isOnGrass?: (x: number, z: number, yHint?: number) => boolean;
+  public getSpurInfo?: (x: number, z: number, yHint?: number) => {
+    dist: number;
+    sideSign: 1 | -1;
+    closestPt: THREE.Vector3;
+    normal: THREE.Vector3;
+    tangent: THREE.Vector3;
+    halfWidth: number;
+    haveCurb: boolean;
+    curbWidth: number;
+    haveGrass: boolean;
+    grassWidth: number;
+    fence: boolean;
+    trackBoundary: number;
+    onAsphalt: boolean;
+    onCurb: boolean;
+    onGrass: boolean;
+    baseHeight: number;
+    spurIndex: number;
+  } | null;
+  public getSpurBarriers?: () => {
+    center: THREE.Vector3;
+    normal: THREE.Vector3;
+    tangent: THREE.Vector3;
+    halfWidth: number;
+    halfDepth: number;
+    height: number;
+  }[];
 
   // --- 2D VELOCITY-BASED PHYSICS ---
   public velocityX = 0;   // World-space X velocity (m/s)
@@ -2493,7 +2520,7 @@ export class Vehicle {
     const slopeSample = (forwardOffset: number, rightOffset: number): number => {
       const x = this.pos.x + sinYaw * forwardOffset + cosYaw * rightOffset;
       const z = this.pos.z + cosYaw * forwardOffset - sinYaw * rightOffset;
-      if (this.getSlopeHeight) return this.getSlopeHeight(x, z);
+      if (this.getSlopeHeight) return this.getSlopeHeight(x, z, this.pos.y);
       return this.getGroundHeight ? this.getGroundHeight(x, z, this.pos.y) : 0;
     };
 

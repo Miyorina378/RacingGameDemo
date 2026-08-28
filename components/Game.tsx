@@ -5,8 +5,20 @@ import * as THREE from 'three';
 import { GameEngine } from './gameEngine';
 import type { ReplayTargetInfo } from './gameEngine';
 import type { SuggestedGearAdvice } from './engine/SuggestedGearAdvisor';
-import type { EditorNode, EditorScenery, SceneryType, TimeOfDay } from './engine/types';
+import {
+  removeEditorSpurPointAt,
+  remapEditorSpursForRemovedNode
+} from './engine/types';
+import type {
+  EditorBrush,
+  EditorNode,
+  EditorScenery,
+  EditorSpur,
+  SceneryType,
+  TimeOfDay
+} from './engine/types';
 import { DEFAULT_TERRAIN_BRUSH_RADIUS } from './modes/terrain';
+import { EDITOR_LAYOUTS } from './modes/trackNodes';
 import {
   SavedTrack,
   TrackLibrary,
@@ -520,6 +532,8 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
 
 const RACE_RESULTS_HOLD_MS = 4500;
 const RACE_REPLAY_BLACKOUT_MS = 550;
+/** How many editor undo steps to keep. Snapshots are small, but not free. */
+const EDITOR_HISTORY_LIMIT = 60;
 type RacePresentation = 'racing' | 'results' | 'fade_to_replay' | 'replay' | 'exiting';
 
 export default function Game() {
@@ -547,6 +561,14 @@ export default function Game() {
   const [activeLicenseTestId, setActiveLicenseTestId] = useState<string>(DEFAULT_LICENSE_TEST_ID);
   const [purchasedCars, setPurchasedCars] = useState<string[]>(['starter']);
   const [activeTrackId, setActiveTrackId] = useState<string>('sprint_circuit');
+  /** Course variation in play, so the HUD draws the layout actually being raced. */
+  const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null);
+  /**
+   * Hides every panel and gauge so the 3D view is on its own. Modal things — the
+   * countdown, the results, the pause menu — stay, because losing those would leave
+   * the player stuck with no way back.
+   */
+  const [uiHidden, setUiHidden] = useState<boolean>(false);
 
   // Customization
   const [selectedColor, setSelectedColor] = useState<string>('#f43f5e');
@@ -1046,7 +1068,11 @@ export default function Game() {
   const [livePreview, setLivePreview] = useState<boolean>(false);
   const [editorNodes, setEditorNodes] = useState<EditorNode[]>([]);
   const [editorScenery, setEditorScenery] = useState<EditorScenery[]>([]);
-  const [editorTool, setEditorTool] = useState<'node' | SceneryType>('node');
+  // Blocked-off branches. Visual only, so they live beside the lap rather than in it.
+  const [editorSpurs, setEditorSpurs] = useState<EditorSpur[]>([]);
+  const [activeSpurIndex, setActiveSpurIndex] = useState<number | null>(null);
+  const [selectedSpurPoint, setSelectedSpurPoint] = useState<{ spur: number; point: number } | null>(null);
+  const [editorTool, setEditorTool] = useState<'node' | 'spur' | SceneryType>('node');
   const [editorTimeOfDay, setEditorTimeOfDay] = useState<TimeOfDay>('afternoon');
   // Horizon distance for the track's fog: null follows the time-of-day default,
   // 0 switches fog off, anything else is an explicit distance.
@@ -1069,9 +1095,13 @@ export default function Game() {
   // Decoration is placed by eye, so it defaults to ignoring the track grid.
   const [sceneryFreeMove, setSceneryFreeMove] = useState<boolean>(true);
   const [editLayer, setEditLayer] = useState<'track' | 'decorate' | 'terrain'>('track');
-  const [terrainBrush, setTerrainBrush] = useState<'raise' | 'lower' | 'smooth' | 'flatten'>('raise');
+  /** Variation the editor viewport shows. null draws every node. */
+  const [editorPreviewLayoutId, setEditorPreviewLayoutId] = useState<string | null>(null);
+  const [terrainBrush, setTerrainBrush] = useState<EditorBrush>('raise');
   const [terrainBrushRadius, setTerrainBrushRadius] = useState<number>(DEFAULT_TERRAIN_BRUSH_RADIUS);
-  const [terrainBrushStrength, setTerrainBrushStrength] = useState<number>(1.5);
+  // Starts at the gentlest setting: a stroke should nudge the ground, and anyone
+  // who wants a mountain can turn it up.
+  const [terrainBrushStrength, setTerrainBrushStrength] = useState<number>(0.1);
   // Serialized heightmap. Held here only so it can be persisted; the engine owns
   // the live Heightmap that sculpting mutates.
   const [editorTerrain, setEditorTerrain] = useState<number[]>([]);
@@ -1082,6 +1112,118 @@ export default function Game() {
   const [draggedNodeIndex, setDraggedNodeIndex] = useState<number | null>(null);
   const [draggedSceneryIndex, setDraggedSceneryIndex] = useState<number | null>(null);
   const [editorGridLimit, setEditorGridLimit] = useState<number>(250);
+
+  // Editor undo history. Snapshots are JSON so comparing "did anything change" is a
+  // string compare, and so a restore cannot alias the arrays still held in state.
+  const editorHistoryRef = useRef<{ stack: string[]; index: number }>({ stack: [], index: -1 });
+  const [editorHistory, setEditorHistory] = useState<{ canUndo: boolean; canRedo: boolean }>({
+    canUndo: false,
+    canRedo: false
+  });
+
+  const publishEditorHistory = React.useCallback(() => {
+    const history = editorHistoryRef.current;
+    setEditorHistory({
+      canUndo: history.index > 0,
+      canRedo: history.index >= 0 && history.index < history.stack.length - 1
+    });
+  }, []);
+
+  /** Starts history fresh, so undo can never reach back into a different track. */
+  const resetEditorHistory = React.useCallback(
+    (nodes: EditorNode[], scenery: EditorScenery[], spurs: EditorSpur[] = []) => {
+      editorHistoryRef.current = {
+        stack: [JSON.stringify({ nodes, scenery, spurs })],
+        index: 0
+      };
+      publishEditorHistory();
+    },
+    [publishEditorHistory]
+  );
+
+  const applyEditorSnapshot = React.useCallback((raw: string) => {
+    try {
+      const parsed = JSON.parse(raw) as {
+        nodes?: EditorNode[];
+        scenery?: EditorScenery[];
+        spurs?: EditorSpur[];
+      };
+      setEditorNodes(parsed.nodes ?? []);
+      setEditorScenery(parsed.scenery ?? []);
+      setEditorSpurs(parsed.spurs ?? []);
+      setSelectedNodeIndex(null);
+      setSelectedSceneryIndex(null);
+      setSelectedSpurPoint(null);
+    } catch {
+      /* a corrupt entry is skipped rather than wiping the track */
+    }
+  }, [
+    setEditorNodes,
+    setEditorScenery,
+    setEditorSpurs,
+    setSelectedNodeIndex,
+    setSelectedSceneryIndex,
+    setSelectedSpurPoint
+  ]);
+
+  const undoEditorChange = React.useCallback(() => {
+    const history = editorHistoryRef.current;
+    if (history.index <= 0) return;
+    history.index -= 1;
+    applyEditorSnapshot(history.stack[history.index]);
+    publishEditorHistory();
+  }, [applyEditorSnapshot, publishEditorHistory]);
+
+  const redoEditorChange = React.useCallback(() => {
+    const history = editorHistoryRef.current;
+    if (history.index < 0 || history.index >= history.stack.length - 1) return;
+    history.index += 1;
+    applyEditorSnapshot(history.stack[history.index]);
+    publishEditorHistory();
+  }, [applyEditorSnapshot, publishEditorHistory]);
+
+  const focusEditorSelection = React.useCallback(() => {
+    engineRef.current?.focusEditorSelection();
+  }, []);
+
+  const resetEditorView = React.useCallback(() => {
+    engineRef.current?.resetEditorView();
+  }, []);
+
+  const deleteEditorSelection = React.useCallback(() => {
+    if (selectedSpurPoint) {
+      const { spur, point } = selectedSpurPoint;
+      const nextSpurs = removeEditorSpurPointAt(editorSpurs, spur, point);
+      setEditorSpurs(nextSpurs);
+      if (nextSpurs.length < editorSpurs.length) {
+        setActiveSpurIndex(null);
+      }
+      setSelectedSpurPoint(null);
+      return;
+    }
+    if (selectedNodeIndex !== null) {
+      setEditorNodes((prev) => prev.filter((_, idx) => idx !== selectedNodeIndex));
+      setEditorSpurs((prev) => remapEditorSpursForRemovedNode(prev, selectedNodeIndex));
+      setSelectedNodeIndex(null);
+      return;
+    }
+    if (selectedSceneryIndex !== null) {
+      setEditorScenery((prev) => prev.filter((_, idx) => idx !== selectedSceneryIndex));
+      setSelectedSceneryIndex(null);
+    }
+  }, [
+    selectedSpurPoint,
+    selectedNodeIndex,
+    selectedSceneryIndex,
+    editorSpurs,
+    setEditorNodes,
+    setEditorScenery,
+    setEditorSpurs,
+    setActiveSpurIndex,
+    setSelectedSpurPoint,
+    setSelectedNodeIndex,
+    setSelectedSceneryIndex
+  ]);
 
   // Load persistent user data from localStorage on mount
   useEffect(() => {
@@ -1142,6 +1284,7 @@ export default function Game() {
           if (parsed.time) setEditorTimeOfDay(parsed.time);
           if (parsed.fogDistance !== undefined) setEditorFogDistance(parsed.fogDistance);
           if (Array.isArray(parsed.terrain)) setEditorTerrain(parsed.terrain);
+          if (Array.isArray(parsed.spurs)) setEditorSpurs(parsed.spurs);
           if (parsed.HaveFence !== undefined) setEditorHaveFence(parsed.HaveFence);
           if (parsed.scenery) setEditorScenery(parsed.scenery);
         } catch (e) {
@@ -1904,7 +2047,7 @@ export default function Game() {
     }, 1050);
   };
 
-  const startRace = (trackId: string = 'sprint_circuit') => {
+  const startRace = (trackId: string = 'sprint_circuit', layoutId?: string) => {
     const track = TRACKS_DATABASE.find(t => t.id === trackId);
     if (!track) return;
     if (track.requiresLicense && !hasLicense) return; // Prevent unauthorized entry
@@ -1918,6 +2061,7 @@ export default function Game() {
 
     setTimeout(() => {
       setActiveTrackId(trackId);
+      setActiveLayoutId(layoutId ?? null);
       setPlacement(1);
       setPrevPlacement(1);
       setPlacementShift(null);
@@ -1927,7 +2071,7 @@ export default function Game() {
         engineRef.current.isPaused = false;
         engineRef.current.isQuickPlayRace = false;
         setIsPaused(false);
-        engineRef.current.buildRaceTrack(trackId, { drivingMode });
+        engineRef.current.buildRaceTrack(trackId, { drivingMode, layoutId });
         setActiveMode('race');
       }
     }, 700);
@@ -1941,7 +2085,7 @@ export default function Game() {
     }, 1050);
   };
 
-  const startQuickPlayRace = (carId: string, trackId: string, lapCount: number = 3, difficulty: RaceDifficulty = 'normal', quickPlayDrivingMode: DrivingMode = 'simulation', opponentCount: number = 5) => {
+  const startQuickPlayRace = (carId: string, trackId: string, lapCount: number = 3, difficulty: RaceDifficulty = 'normal', quickPlayDrivingMode: DrivingMode = 'simulation', opponentCount: number = 5, layoutId?: string) => {
     const track = TRACKS_DATABASE.find(t => t.id === trackId);
     if (!track) return;
 
@@ -1956,6 +2100,7 @@ export default function Game() {
       quickPlayOriginalCarRef.current = activeCarId;
 
       setActiveTrackId(trackId);
+      setActiveLayoutId(layoutId ?? null);
       setPlacement(1);
       setPrevPlacement(1);
       setPlacementShift(null);
@@ -1974,7 +2119,8 @@ export default function Game() {
           totalLaps: lapCount,
           difficulty,
           drivingMode: quickPlayDrivingMode,
-          opponentCount
+          opponentCount,
+          layoutId
         });
         setActiveMode('race');
       }
@@ -2338,7 +2484,8 @@ export default function Game() {
     grassWidth: number = editorGrassWidth,
     scenery: EditorScenery[] = editorScenery,
     haveCurb: boolean = editorHaveCurb,
-    haveFence: boolean = editorHaveFence
+    haveFence: boolean = editorHaveFence,
+    spurs: EditorSpur[] = editorSpurs
   ) => {
     if (typeof window !== 'undefined') {
       const trackData = {
@@ -2347,6 +2494,7 @@ export default function Game() {
         timeLimit: time,
         hasObstacles: obstacles,
         nodes,
+        spurs,
         gridLimit,
         HaveGrass: grass,
         GrassWidth: grassWidth,
@@ -2399,7 +2547,22 @@ export default function Game() {
         const gridL = detectLimit(nodes);
         setEditorGridLimit(gridL);
         setEditorNodes(nodes);
-        saveCustomTrack(nodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, gridL);
+        setEditorSpurs([]);
+        setActiveSpurIndex(null);
+        saveCustomTrack(
+          nodes,
+          editorTrackName,
+          editorRoadWidth,
+          editorTimeLimit,
+          editorHasObstacles,
+          gridL,
+          editorHaveGrass,
+          editorGrassWidth,
+          editorScenery,
+          editorHaveCurb,
+          editorHaveFence,
+          []
+        );
         alert(`Successfully imported ${nodes.length} track nodes!`);
       } else {
         try {
@@ -2424,7 +2587,22 @@ export default function Game() {
               const gridL = detectLimit(jsonNodes);
               setEditorGridLimit(gridL);
               setEditorNodes(jsonNodes);
-              saveCustomTrack(jsonNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, gridL);
+              setEditorSpurs([]);
+              setActiveSpurIndex(null);
+              saveCustomTrack(
+                jsonNodes,
+                editorTrackName,
+                editorRoadWidth,
+                editorTimeLimit,
+                editorHasObstacles,
+                gridL,
+                editorHaveGrass,
+                editorGrassWidth,
+                editorScenery,
+                editorHaveCurb,
+                editorHaveFence,
+                []
+              );
               alert(`Successfully imported ${jsonNodes.length} nodes from JSON!`);
               return;
             }
@@ -2447,7 +2625,8 @@ export default function Game() {
     grassW = editorGrassWidth,
     scenery = editorScenery,
     haveCurb = editorHaveCurb,
-    haveFence = editorHaveFence
+    haveFence = editorHaveFence,
+    spurs = editorSpurs
   ) => {
     const customTrack: TrackConfig = {
       id: 'custom',
@@ -2472,8 +2651,41 @@ export default function Game() {
         leftGrassWidth: n.leftGrassWidth,
         rightGrassWidth: n.rightGrassWidth,
         sharp: n.sharp,
-        cornerRadius: n.cornerRadius
+        cornerRadius: n.cornerRadius,
+        layouts: n.layouts
       })),
+      // Only advertise variations once the track actually has a node that belongs
+      // to just one of them; otherwise the course stays single-layout.
+      // Variations exist once a node is tagged for one, or once a branch is raced in
+      // one: either is enough to give the track a long and a short course.
+      layouts:
+        nodes.some((n) => n.layouts && n.layouts.length > 0) ||
+        spurs.some((s) => s.raceLayouts && s.raceLayouts.length > 0)
+          ? EDITOR_LAYOUTS
+          : undefined,
+      // Dead-end branches. The junction comes from the node, so one outward point is
+      // already enough to draw a run of road.
+      spurs: spurs
+        .filter((spur) => spur.nodes.length >= 1)
+        .map((spur) => ({
+          nodeIndex: spur.nodeIndex,
+          endNodeIndex: spur.endNodeIndex,
+          startSpurIndex: spur.startSpurIndex,
+          endSpurIndex: spur.endSpurIndex,
+          raceLayouts: spur.raceLayouts,
+          path: spur.nodes.map((p) => new THREE.Vector3(p.x, p.y ?? 0, p.z)),
+          width: spur.width,
+          leftCurb: spur.leftCurb,
+          rightCurb: spur.rightCurb,
+          leftFence: spur.leftFence,
+          rightFence: spur.rightFence,
+          leftGrassWidth: spur.leftGrassWidth,
+          rightGrassWidth: spur.rightGrassWidth,
+          elevationMode: spur.elevationMode,
+          blocked: spur.blocked,
+          blockedStart: spur.blockedStart,
+          blockedEnd: spur.blockedEnd
+        })),
       scenery: scenery.map(s => ({
         type: s.type,
         position: new THREE.Vector3(s.x, s.y ?? 0, s.z),
@@ -2528,18 +2740,50 @@ export default function Game() {
       editorGrassWidth,
       editorScenery,
       editorHaveCurb,
-      editorHaveFence
+      editorHaveFence,
+      editorSpurs
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     editorNodes,
     editorScenery,
+    editorSpurs,
     editorTimeOfDay,
     editorFogDistance,
     editorTerrain,
     activeMode,
     draggedNodeIndex,
     draggedSceneryIndex
+  ]);
+
+  // Record an undo step whenever the track settles. Mid-drag frames are skipped for
+  // the same reason autosave skips them: one entry per drag, not one per mouse move.
+  useEffect(() => {
+    if (activeMode !== 'editor') return;
+    if (draggedNodeIndex !== null || draggedSceneryIndex !== null) return;
+
+    const snapshot = JSON.stringify({
+      nodes: editorNodes,
+      scenery: editorScenery,
+      spurs: editorSpurs
+    });
+    const history = editorHistoryRef.current;
+    if (history.stack[history.index] === snapshot) return;
+
+    const trimmed = history.stack.slice(0, history.index + 1);
+    trimmed.push(snapshot);
+    const overflow = Math.max(0, trimmed.length - EDITOR_HISTORY_LIMIT);
+    history.stack = trimmed.slice(overflow);
+    history.index = history.stack.length - 1;
+    publishEditorHistory();
+  }, [
+    editorNodes,
+    editorScenery,
+    editorSpurs,
+    activeMode,
+    draggedNodeIndex,
+    draggedSceneryIndex,
+    publishEditorHistory
   ]);
 
   // A sculpt stroke must not trigger a full track rebuild: the terrain mesh has
@@ -2563,7 +2807,7 @@ export default function Game() {
     if (!mode?.terrain || editorNodes.length === 0) return;
     const draped = editorNodes.map((n) => ({
       ...n,
-      y: Math.max(0, Math.round(mode.terrain!.sampleAt(n.x, n.z) * 10) / 10)
+      y: Math.round(mode.terrain!.sampleAt(n.x, n.z) * 10) / 10
     }));
     setEditorNodes(draped);
     saveCustomTrack(draped, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery, editorHaveCurb, editorHaveFence);
@@ -2603,6 +2847,75 @@ export default function Game() {
     saveCustomTrack(lifted, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery, editorHaveCurb, editorHaveFence);
   };
 
+  /**
+   * Writes terrain-derived heights into only the active spur. Old spurs keep their
+   * legacy live-terrain behavior until one of these buttons is used.
+   */
+  const setActiveSpurElevation = (lift: boolean, clearance = 0.4) => {
+    const mode = engineRef.current?.currentModeInstance as
+      | { terrain?: { sampleAt: (x: number, z: number) => number } }
+      | undefined;
+    if (!mode?.terrain || activeSpurIndex === null) return;
+    const active = editorSpurs[activeSpurIndex];
+    if (!active || active.nodes.length === 0) return;
+
+    const trackGrass = editorHaveGrass ? editorGrassWidth : 0;
+    const halfWidth = (active.width ?? editorRoadWidth * 0.8) / 2;
+    const sideReach = (side: 'left' | 'right') => {
+      const curb = side === 'left' ? active.leftCurb : active.rightCurb;
+      const grass = side === 'left' ? active.leftGrassWidth : active.rightGrassWidth;
+      return (
+        halfWidth +
+        ((curb ?? editorHaveCurb) ? 1 : 0) +
+        (grass ?? trackGrass) +
+        2
+      );
+    };
+    const reach = Math.max(sideReach('left'), sideReach('right'));
+
+    const nodes = active.nodes.map((point) => {
+      let terrainHeight = mode.terrain!.sampleAt(point.x, point.z);
+      if (lift) {
+        for (const radius of [reach * 0.5, reach]) {
+          for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            terrainHeight = Math.max(
+              terrainHeight,
+              mode.terrain!.sampleAt(
+                point.x + Math.cos(angle) * radius,
+                point.z + Math.sin(angle) * radius
+              )
+            );
+          }
+        }
+      }
+      const y = lift ? terrainHeight + clearance : terrainHeight;
+      return { ...point, y: Math.round(y * 10) / 10 };
+    });
+
+    const nextSpurs = editorSpurs.map((spur, index) =>
+      index === activeSpurIndex ? { ...spur, nodes, elevationMode: 'authored' as const } : spur
+    );
+    setEditorSpurs(nextSpurs);
+    saveCustomTrack(
+      editorNodes,
+      editorTrackName,
+      editorRoadWidth,
+      editorTimeLimit,
+      editorHasObstacles,
+      editorGridLimit,
+      editorHaveGrass,
+      editorGrassWidth,
+      editorScenery,
+      editorHaveCurb,
+      editorHaveFence,
+      nextSpurs
+    );
+  };
+
+  const drapeSpurToTerrain = () => setActiveSpurElevation(false);
+  const raiseSpurAboveTerrain = () => setActiveSpurElevation(true);
+
   const clearTerrain = () => {
     const mode = engineRef.current?.currentModeInstance as
       | { terrain?: { clear: () => void }; refreshTerrainRegion?: () => void }
@@ -2614,8 +2927,12 @@ export default function Game() {
 
   /** Pours a saved track into every piece of editor state. */
   const applySavedTrack = (track: SavedTrack) => {
+    resetEditorHistory(track.nodes, track.scenery, track.spurs);
     setEditorNodes(track.nodes);
     setEditorScenery(track.scenery);
+    setEditorSpurs(track.spurs ?? []);
+    setActiveSpurIndex(null);
+    setSelectedSpurPoint(null);
     setEditorTerrain(track.terrain);
     setEditorTrackName(track.name);
     setEditorRoadWidth(track.roadWidth);
@@ -2637,6 +2954,7 @@ export default function Game() {
     name: editorTrackName,
     nodes: editorNodes,
     scenery: editorScenery,
+    spurs: editorSpurs,
     terrain: editorTerrain,
     roadWidth: editorRoadWidth,
     timeLimit: editorTimeLimit,
@@ -2696,14 +3014,32 @@ export default function Game() {
   const launchTestDrive = () => {
     if (editorNodes.length < 3) return;
     syncCustomTrackToDatabase();
-    startRace('custom');
+    // Drive what the viewport is showing, so testing a short layout does not
+    // silently put you on the long one.
+    startRace('custom', editorPreviewLayoutId ?? undefined);
   };
 
   const handleClearAll = () => {
     if (confirm("Are you sure you want to clear all nodes and scenery?")) {
       setEditorNodes([]);
       setEditorScenery([]);
-      saveCustomTrack([], editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, []);
+      setEditorSpurs([]);
+      setActiveSpurIndex(null);
+      setSelectedSpurPoint(null);
+      saveCustomTrack(
+        [],
+        editorTrackName,
+        editorRoadWidth,
+        editorTimeLimit,
+        editorHasObstacles,
+        editorGridLimit,
+        editorHaveGrass,
+        editorGrassWidth,
+        [],
+        editorHaveCurb,
+        editorHaveFence,
+        []
+      );
     }
   };
 
@@ -2747,11 +3083,28 @@ export default function Game() {
       ];
     }
     setEditorNodes(nodes);
-    saveCustomTrack(nodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit);
+    setEditorSpurs([]);
+    setActiveSpurIndex(null);
+    setSelectedSpurPoint(null);
+    saveCustomTrack(
+      nodes,
+      editorTrackName,
+      editorRoadWidth,
+      editorTimeLimit,
+      editorHasObstacles,
+      editorGridLimit,
+      editorHaveGrass,
+      editorGrassWidth,
+      editorScenery,
+      editorHaveCurb,
+      editorHaveFence,
+      []
+    );
   };
 
   const getDefaultScale = (tool: string) => {
     if (tool.startsWith('tree')) return 2;
+    if (tool === 'grass_patch') return 4;
     if (tool === 'hill') return 8;
     if (tool === 'mountain') return 1.0;
     if (tool === 'podium') return 1.0;
@@ -2779,11 +3132,60 @@ export default function Game() {
       syncCustomTrackToDatabase();
       engineRef.current.buildPreviewTrack('custom');
     }
-  }, [editorNodes, editorScenery, livePreview, activeMode, draggedNodeIndex, draggedSceneryIndex, editorRoadWidth, editorHaveGrass, editorGrassWidth, editorHasObstacles, editorHaveCurb, editorHaveFence, editorTimeOfDay, editorFogDistance]);
+  }, [editorNodes, editorScenery, editorSpurs, livePreview, activeMode, draggedNodeIndex, draggedSceneryIndex, editorRoadWidth, editorHaveGrass, editorGrassWidth, editorHasObstacles, editorHaveCurb, editorHaveFence, editorTimeOfDay, editorFogDistance, editorPreviewLayoutId]);
 
   // Escape key handler to toggle pause overlay
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Editor shortcuts. Skipped while a text field has focus, so typing a track
+      // name cannot delete the selected node or trigger an undo.
+      const typingTarget = (() => {
+        const el = e.target as HTMLElement | null;
+        if (!el || typeof el.tagName !== 'string') return false;
+        const tag = el.tagName.toLowerCase();
+        return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+      })();
+
+      // H clears the screen down to the 3D view, in any mode.
+      if (!typingTarget && e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setUiHidden((prev) => !prev);
+        return;
+      }
+
+      if (activeMode === 'editor' && !typingTarget) {
+        const key = e.key.toLowerCase();
+        const modifier = e.ctrlKey || e.metaKey;
+
+        if (modifier && key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          undoEditorChange();
+          return;
+        }
+        if (modifier && ((key === 'z' && e.shiftKey) || key === 'y')) {
+          e.preventDefault();
+          redoEditorChange();
+          return;
+        }
+        if (!modifier && (e.key === 'Delete' || e.key === 'Backspace')) {
+          e.preventDefault();
+          deleteEditorSelection();
+          return;
+        }
+        if (!modifier && e.key === 'Escape') {
+          e.preventDefault();
+          setSelectedNodeIndex(null);
+          setSelectedSceneryIndex(null);
+          setSelectedSpurPoint(null);
+          return;
+        }
+        if (!modifier && key === 'f') {
+          e.preventDefault();
+          focusEditorSelection();
+          return;
+        }
+      }
+
       if (
         activeMode === 'race' &&
         racePresentation === 'replay' &&
@@ -2827,7 +3229,19 @@ export default function Game() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeMode, gameStatus, isPaused, pauseSettingsOpen, racePresentation, isTransitioningDrive, cycleReplayTarget]);
+  }, [
+    activeMode,
+    gameStatus,
+    isPaused,
+    pauseSettingsOpen,
+    racePresentation,
+    isTransitioningDrive,
+    cycleReplayTarget,
+    undoEditorChange,
+    redoEditorChange,
+    deleteEditorSelection,
+    focusEditorSelection
+  ]);
 
   useEffect(() => {
     if (!isPaused) {
@@ -2847,13 +3261,30 @@ export default function Game() {
       engineRef.current.editorState.onUpdateScenery = (scenery) => {
         setEditorScenery(scenery);
       };
+      engineRef.current.editorState.onUpdateSpurs = (spurs) => {
+        if (spurs.length < editorSpurs.length) {
+          setActiveSpurIndex(null);
+          setSelectedSpurPoint(null);
+        }
+        setEditorSpurs(spurs);
+      };
+      engineRef.current.editorState.onSelectSpurPoint = (selection) => {
+        setSelectedSpurPoint(selection);
+        if (selection) {
+          setActiveSpurIndex(selection.spur);
+          setSelectedNodeIndex(null);
+          setSelectedSceneryIndex(null);
+        }
+      };
       engineRef.current.editorState.onSelectNode = (idx) => {
         setSelectedNodeIndex(idx);
         setSelectedSceneryIndex(null);
+        setSelectedSpurPoint(null);
       };
       engineRef.current.editorState.onSelectScenery = (idx) => {
         setSelectedSceneryIndex(idx);
         setSelectedNodeIndex(null);
+        setSelectedSpurPoint(null);
       };
       engineRef.current.editorState.onDragNodeStart = (idx) => {
         setDraggedNodeIndex(idx);
@@ -2868,18 +3299,22 @@ export default function Game() {
         setDraggedSceneryIndex(null);
       };
     }
-  }, [activeMode]);
+  }, [activeMode, editorSpurs.length]);
 
   // Sync React states to engine.editorState
   useEffect(() => {
     if (engineRef.current) {
       engineRef.current.editorState.nodes = editorNodes;
       engineRef.current.editorState.scenery = editorScenery;
+      engineRef.current.editorState.spurs = editorSpurs;
+      engineRef.current.editorState.activeSpurIndex = activeSpurIndex;
+      engineRef.current.editorState.selectedSpurPoint = selectedSpurPoint;
       engineRef.current.editorState.tool = editorTool;
       engineRef.current.editorState.snapToGrid = snapToGrid;
       engineRef.current.editorState.gridLimit = editorGridLimit;
       engineRef.current.editorState.sceneryFreeMove = sceneryFreeMove;
       engineRef.current.editorState.editLayer = editLayer;
+      engineRef.current.editorState.previewLayoutId = editorPreviewLayoutId;
       engineRef.current.editorState.terrainBrush = terrainBrush;
       engineRef.current.editorState.terrainBrushRadius = terrainBrushRadius;
       engineRef.current.editorState.terrainBrushStrength = terrainBrushStrength;
@@ -2889,7 +3324,7 @@ export default function Game() {
       engineRef.current.editorState.roadWidth = editorRoadWidth;
       engineRef.current.editorState.activeMode = activeMode;
     }
-  }, [editorNodes, editorScenery, editorTool, snapToGrid, sceneryFreeMove, editLayer, terrainBrush, terrainBrushRadius, terrainBrushStrength, editorCornerHeight, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, activeMode]);
+  }, [editorNodes, editorScenery, editorSpurs, activeSpurIndex, selectedSpurPoint, editorTool, snapToGrid, sceneryFreeMove, editLayer, editorPreviewLayoutId, terrainBrush, terrainBrushRadius, terrainBrushStrength, editorCornerHeight, selectedNodeIndex, selectedSceneryIndex, editorRoadWidth, activeMode]);
 
   // Sculpting mutates the engine's Heightmap directly, so React only finds out
   // when the stroke ends. Pulling the serialized form here is what gets terrain
@@ -3033,6 +3468,10 @@ export default function Game() {
             width: '100%',
             height: '100%',
             display: 'block',
+            // Sculpting: the brush ring on the ground IS the cursor, so the arrow
+            // sitting on top of it only hid the middle of the footprint.
+            cursor:
+              activeMode === 'editor' && editLayer === 'terrain' ? 'none' : undefined,
           }}
         />
       </div>
@@ -3041,7 +3480,7 @@ export default function Game() {
       <HelpModal showHelp={showHelp} setShowHelp={setShowHelp} />
 
       {/* HUD LAYOUT CUSTOMIZER OVERLAY */}
-      {!(activeMode === 'race' && gameStatus === 'success') && (
+      {!uiHidden && !(activeMode === 'race' && gameStatus === 'success') && (
         <HUDCustomizer
         showHUDCustomizer={showHUDCustomizer}
         setShowHUDCustomizer={setShowHUDCustomizer}
@@ -3061,6 +3500,7 @@ export default function Game() {
         raceResults={raceResults}
         placement={placement}
         activeTrackId={activeTrackId}
+        activeLayoutId={activeLayoutId}
         activeLicenseTestId={activeLicenseTestId}
         exitToGarage={exitToGarage}
         saveReplay={saveReplay}
@@ -3070,7 +3510,7 @@ export default function Game() {
         startTutorial={startTutorial}
       />
 
-      {activeMode === 'race' && racePresentation === 'replay' && replayTarget && (
+      {!uiHidden && activeMode === 'race' && racePresentation === 'replay' && replayTarget && (
         <div className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-start px-6 md:px-9">
           <div className="pointer-events-auto min-w-[250px] border-l-2 border-rose-500 bg-zinc-950/75 px-4 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur-md">
             <div className="flex items-center justify-between gap-5 text-[9px] font-bold uppercase tracking-[0.24em] text-zinc-500">
@@ -3106,8 +3546,31 @@ export default function Game() {
         </div>
       )}
 
+      {/* TOP-RIGHT DEFLATE / INFLATE UI BUTTON */}
+      <div className="absolute top-5 right-5 z-40 pointer-events-auto select-none">
+        <button
+          type="button"
+          onClick={() => setUiHidden((prev) => !prev)}
+          title={uiHidden ? 'Inflate Full UI (H)' : 'Deflate / Minimize UI (H)'}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-purple-500/40 bg-slate-950/85 hover:bg-slate-900 text-purple-200 hover:text-white shadow-[0_0_20px_rgba(0,0,0,0.6)] backdrop-blur-md text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer hover:border-purple-400 active:scale-95"
+        >
+          <span className="text-xs font-mono">{uiHidden ? '🗖' : '🗕'}</span>
+          <span>{uiHidden ? 'Inflate UI' : 'Deflate UI'}</span>
+          <span className="text-[9px] font-mono text-purple-400/80 bg-purple-950/60 border border-purple-500/30 px-1 py-0.5 rounded">H</span>
+        </button>
+      </div>
+
+      {/* UI hidden indicator */}
+      {uiHidden && (
+        <div className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 z-30 border border-white/15 bg-zinc-950/70 px-3 py-1.5 backdrop-blur-md rounded-lg">
+          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-400">
+            UI Deflated · Press H or click top-right button
+          </span>
+        </div>
+      )}
+
       {/* DRIVING HUD: Speedometer, Timers, Checkpoints, Drift */}
-      {!(activeMode === 'race' && gameStatus === 'success') && (
+      {!uiHidden && !(activeMode === 'race' && gameStatus === 'success') && (
         <HUD
         activeMode={activeMode}
         gameStatus={gameStatus}
@@ -3117,6 +3580,7 @@ export default function Game() {
         checkpointIndex={checkpointIndex}
         totalCheckpoints={totalCheckpoints}
         activeTrackId={activeTrackId}
+        activeLayoutId={activeLayoutId}
         minimapCanvasRef={minimapCanvasRef}
         placement={placement}
         totalParticipants={totalParticipants}
@@ -3573,11 +4037,18 @@ export default function Game() {
 
       {/* MAP EDITOR PANEL */}
       <MapEditor
-        activeMode={activeMode}
+        activeMode={uiHidden ? 'hidden' : activeMode}
+        hideUi={() => setUiHidden(true)}
         editorNodes={editorNodes}
         setEditorNodes={setEditorNodes}
         editorScenery={editorScenery}
         setEditorScenery={setEditorScenery}
+        editorSpurs={editorSpurs}
+        setEditorSpurs={setEditorSpurs}
+        activeSpurIndex={activeSpurIndex}
+        setActiveSpurIndex={setActiveSpurIndex}
+        selectedSpurPoint={selectedSpurPoint}
+        setSelectedSpurPoint={setSelectedSpurPoint}
         editorTool={editorTool}
         setEditorTool={setEditorTool}
         editorCornerHeight={editorCornerHeight}
@@ -3613,6 +4084,8 @@ export default function Game() {
         setSceneryFreeMove={setSceneryFreeMove}
         editLayer={editLayer}
         setEditLayer={setEditLayer}
+        editorPreviewLayoutId={editorPreviewLayoutId}
+        setEditorPreviewLayoutId={setEditorPreviewLayoutId}
         terrainBrush={terrainBrush}
         setTerrainBrush={setTerrainBrush}
         terrainBrushRadius={terrainBrushRadius}
@@ -3622,6 +4095,8 @@ export default function Game() {
         conformTerrain={conformTerrain}
         drapeTrackToTerrain={drapeTrackToTerrain}
         raiseTrackAboveTerrain={raiseTrackAboveTerrain}
+        drapeSpurToTerrain={drapeSpurToTerrain}
+        raiseSpurAboveTerrain={raiseSpurAboveTerrain}
         clearTerrain={clearTerrain}
         tracks={trackLibrary.tracks}
         activeTrackId={trackLibrary.activeId}
@@ -3638,6 +4113,13 @@ export default function Game() {
         handleApplyTemplate={handleApplyTemplate}
         launchTestDrive={launchTestDrive}
         exitToGarage={exitToGarage}
+        canUndo={editorHistory.canUndo}
+        canRedo={editorHistory.canRedo}
+        undoEditorChange={undoEditorChange}
+        redoEditorChange={redoEditorChange}
+        deleteEditorSelection={deleteEditorSelection}
+        focusEditorSelection={focusEditorSelection}
+        resetEditorView={resetEditorView}
       />
       {/* Cinematic Blackout Overlay for Mode transitions with Arcade HUD Loading Screen */}
       <div

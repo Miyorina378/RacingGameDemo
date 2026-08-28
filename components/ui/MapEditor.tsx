@@ -2,10 +2,17 @@
 
 import React from 'react';
 import { Copy, Play } from 'lucide-react';
-import { CURB_WIDTH } from '../modes/trackNodes';
+import { CURB_WIDTH, EDITOR_LAYOUTS } from '../modes/trackNodes';
 import { MIN_TERRAIN_BRUSH_RADIUS } from '../modes/terrain';
 import { DEFAULT_FOG_DISTANCE } from '../modes/sceneryDecor';
-import type { TimeOfDay } from '../engine/types';
+import {
+  isTerrainHeightBrush,
+  removeEditorSpurAt,
+  removeEditorSpurPointAt,
+  remapEditorSpursForRemovedNode,
+  setEditorSpurRacedInLayout
+} from '../engine/types';
+import type { EditorBrush, EditorSpur, TimeOfDay } from '../engine/types';
 
 interface MapEditorProps {
   activeMode: string;
@@ -13,6 +20,12 @@ interface MapEditorProps {
   setEditorNodes: React.Dispatch<React.SetStateAction<any[]>>;
   editorScenery: any[];
   setEditorScenery: React.Dispatch<React.SetStateAction<any[]>>;
+  editorSpurs: EditorSpur[];
+  setEditorSpurs: React.Dispatch<React.SetStateAction<EditorSpur[]>>;
+  activeSpurIndex: number | null;
+  setActiveSpurIndex: (idx: number | null) => void;
+  selectedSpurPoint: { spur: number; point: number } | null;
+  setSelectedSpurPoint: (selection: { spur: number; point: number } | null) => void;
   editorTool: string;
   setEditorTool: (tool: any) => void;
   editorCornerHeight: number;
@@ -50,8 +63,10 @@ interface MapEditorProps {
   setSceneryFreeMove: (b: boolean) => void;
   editLayer: 'track' | 'decorate' | 'terrain';
   setEditLayer: (l: 'track' | 'decorate' | 'terrain') => void;
-  terrainBrush: 'raise' | 'lower' | 'smooth' | 'flatten';
-  setTerrainBrush: (b: 'raise' | 'lower' | 'smooth' | 'flatten') => void;
+  editorPreviewLayoutId: string | null;
+  setEditorPreviewLayoutId: (id: string | null) => void;
+  terrainBrush: EditorBrush;
+  setTerrainBrush: (b: EditorBrush) => void;
   terrainBrushRadius: number;
   setTerrainBrushRadius: (r: number) => void;
   terrainBrushStrength: number;
@@ -59,6 +74,8 @@ interface MapEditorProps {
   conformTerrain: () => void;
   drapeTrackToTerrain: () => void;
   raiseTrackAboveTerrain: () => void;
+  drapeSpurToTerrain: () => void;
+  raiseSpurAboveTerrain: () => void;
   clearTerrain: () => void;
   tracks: { id: string; name: string; updatedAt: number; nodes: unknown[] }[];
   activeTrackId: string;
@@ -70,12 +87,21 @@ interface MapEditorProps {
   setLivePreview: (p: boolean) => void;
   
   // Handlers
-  saveCustomTrack: (nodes: any[], name: string, width: number, time: number, obstacles: boolean, gridLimit: number, grass?: boolean, grassWidth?: number, scenery?: any[], haveCurb?: boolean, haveFence?: boolean) => void;
+  saveCustomTrack: (nodes: any[], name: string, width: number, time: number, obstacles: boolean, gridLimit: number, grass?: boolean, grassWidth?: number, scenery?: any[], haveCurb?: boolean, haveFence?: boolean, spurs?: EditorSpur[]) => void;
   importTrack: (code: string) => void;
   handleClearAll: () => void;
   handleApplyTemplate: (type: 'oval' | 'scurve' | 'figure8') => void;
   launchTestDrive: () => void;
   exitToGarage: () => void;
+  /** Clears every panel off the screen. Same thing the H key does. */
+  hideUi: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  undoEditorChange: () => void;
+  redoEditorChange: () => void;
+  deleteEditorSelection: () => void;
+  focusEditorSelection: () => void;
+  resetEditorView: () => void;
 }
 
 /** Silhouette choices per decoration type. Undefined means pick one from position. */
@@ -112,6 +138,37 @@ const renderToolIcon = (tool: string, isActive: boolean) => {
           <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke={isActive ? "#d946ef" : "#a855f7"} strokeWidth="6" strokeLinecap="round" />
           <path d="M 6,36 C 18,36 30,30 30,18 C 30,12 36,6 42,6" stroke="#ffffff" strokeWidth="1.5" strokeDasharray="3,3" strokeLinecap="round" />
           <circle cx="30" cy="18" r="4" fill="#06b6d4" />
+        </svg>
+      );
+    case 'spur':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {/* Main road carrying on, with a branch that stops at a barrier */}
+          <path d="M 4,40 C 14,40 20,34 24,26" stroke={isActive ? "#a855f7" : "#6b21a8"} strokeWidth="5" strokeLinecap="round" />
+          <path d="M 24,26 C 27,20 32,16 40,14" stroke={isActive ? "#f59e0b" : "#a16207"} strokeWidth="5" strokeLinecap="round" />
+          <rect x="30" y="8" width="14" height="4" rx="1" transform="rotate(-20 37 10)" fill={isActive ? "#fca5a5" : "#b45309"} />
+          <circle cx="24" cy="26" r="3" fill="#06b6d4" />
+        </svg>
+      );
+    case 'grass_patch':
+      return (
+        <svg className="w-10 h-10" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="24" cy="38" rx="18" ry="6" fill={isActive ? "#7bb369" : "#4d6b45"} />
+          {[
+            'M 12,38 Q 11,30 14,25',
+            'M 18,39 Q 17,29 20,22',
+            'M 24,40 Q 24,29 26,21',
+            'M 30,39 Q 31,29 34,23',
+            'M 36,38 Q 37,31 39,26'
+          ].map((d) => (
+            <path
+              key={d}
+              d={d}
+              stroke={isActive ? "#4ade80" : "#22c55e"}
+              strokeWidth="2.5"
+              strokeLinecap="round"
+            />
+          ))}
         </svg>
       );
     case 'tree1':
@@ -284,6 +341,12 @@ export default function MapEditor({
   setEditorNodes,
   editorScenery,
   setEditorScenery,
+  editorSpurs,
+  setEditorSpurs,
+  activeSpurIndex,
+  setActiveSpurIndex,
+  selectedSpurPoint,
+  setSelectedSpurPoint,
   editorTool,
   setEditorTool,
   editorCornerHeight,
@@ -320,6 +383,8 @@ export default function MapEditor({
   setSceneryFreeMove,
   editLayer,
   setEditLayer,
+  editorPreviewLayoutId,
+  setEditorPreviewLayoutId,
   terrainBrush,
   setTerrainBrush,
   terrainBrushRadius,
@@ -329,6 +394,8 @@ export default function MapEditor({
   conformTerrain,
   drapeTrackToTerrain,
   raiseTrackAboveTerrain,
+  drapeSpurToTerrain,
+  raiseSpurAboveTerrain,
   clearTerrain,
   tracks,
   activeTrackId,
@@ -344,8 +411,31 @@ export default function MapEditor({
   handleApplyTemplate,
   launchTestDrive,
   exitToGarage,
+  hideUi,
+  canUndo,
+  canRedo,
+  undoEditorChange,
+  redoEditorChange,
+  deleteEditorSelection,
+  focusEditorSelection,
+  resetEditorView,
 }: MapEditorProps) {
+  // Declared before the early return, or the hook count would change with the mode.
+  const [showControlsHelp, setShowControlsHelp] = React.useState(true);
+  const [isDeflated, setIsDeflated] = React.useState(false);
+
   if (activeMode !== 'editor') return null;
+
+  /** Grass brushes share the terrain layer but ignore height, so the UI differs. */
+  const paintingGrass = !isTerrainHeightBrush(terrainBrush);
+  /** Course variations exist when either lap nodes or a raced branch assigns one. */
+  const hasLayoutAssignments =
+    editorNodes.some(
+      (node) => Array.isArray(node.layouts) && node.layouts.length > 0
+    ) ||
+    editorSpurs.some(
+      (spur) => Array.isArray(spur.raceLayouts) && spur.raceLayouts.length > 0
+    );
 
   // Patches the selected node and persists it, mirroring the same save call every
   // other editor control already makes after a change.
@@ -384,26 +474,221 @@ export default function MapEditor({
 
   return (
     <div className="absolute inset-0 pointer-events-none z-30 animate-fadeIn select-none">
-      {/* Floating Left Header */}
-      <div className="absolute top-6 left-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col gap-1 text-slate-100 text-left">
-        <span className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Interactive 3D Editor</span>
-        <h2 className="text-xl font-black italic tracking-wide text-white">Track Designer</h2>
-        <div className="flex gap-4 mt-2.5 pt-2.5 border-t border-slate-900 text-[10px] font-mono text-purple-400">
-          <div>Nodes: <span className="text-white font-bold">{editorNodes.length}</span></div>
-          <div>Scenery: <span className="text-white font-bold">{editorScenery.length}</span></div>
+      {/* DEFLATED / MINIMIZED TOP-RIGHT TOOLBAR */}
+      {isDeflated ? (
+        <div className="absolute top-6 right-6 pointer-events-auto flex items-center gap-2 backdrop-blur-md bg-slate-950/85 border border-purple-500/50 rounded-2xl p-2 px-3.5 shadow-[0_0_25px_rgba(0,0,0,0.6)] animate-fadeIn select-none z-40">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-purple-300 mr-2 border-r border-slate-800 pr-3">
+            <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+            <span className="font-bold text-white uppercase">{editorTrackName || 'Custom Track'}</span>
+            <span className="text-slate-500">· {editorNodes.length} nodes</span>
+          </div>
+          <button
+            onClick={undoEditorChange}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            className="px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded-lg text-[10px] font-bold uppercase disabled:opacity-35 cursor-pointer"
+          >
+            Undo
+          </button>
+          <button
+            onClick={redoEditorChange}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Shift+Z)"
+            className="px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded-lg text-[10px] font-bold uppercase disabled:opacity-35 cursor-pointer"
+          >
+            Redo
+          </button>
+          <button
+            onClick={focusEditorSelection}
+            title="Focus Selection (F)"
+            className="px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
+          >
+            Focus
+          </button>
+          <button
+            onClick={resetEditorView}
+            title="Reset View"
+            className="px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
+          >
+            Reset
+          </button>
+          <button
+            onClick={() => setIsDeflated(false)}
+            title="Inflate / Expand Full UI"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all shadow-md active:scale-95 border border-purple-400"
+          >
+            <span className="text-xs">🗖</span>
+            <span>Inflate UI</span>
+          </button>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Floating Left Header */}
+          <div className="absolute top-6 left-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col gap-1 text-slate-100 text-left">
+            <span className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Interactive 3D Editor</span>
+            <h2 className="text-xl font-black italic tracking-wide text-white">Track Designer</h2>
+            <div className="flex gap-4 mt-2.5 pt-2.5 border-t border-slate-900 text-[10px] font-mono text-purple-400">
+              <div>Nodes: <span className="text-white font-bold">{editorNodes.length}</span></div>
+              <div>Scenery: <span className="text-white font-bold">{editorScenery.length}</span></div>
+            </div>
 
-      {/* Floating Right Controls Panel */}
-      <div className="absolute top-6 right-6 bottom-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-3xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col justify-between overflow-y-auto z-10 text-left">
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider mb-3">Element Properties</h3>
-            {selectedNodeIndex === null && selectedSceneryIndex === null && (
-              <div className="text-xs text-slate-500 italic py-6 text-center border border-dashed border-slate-900 rounded-2xl bg-slate-950/30">
-                Left-Click on a node or scenery object to edit properties...
+            {/* Quick actions. Every one of these also has a keyboard shortcut, listed below. */}
+            <div className="grid grid-cols-3 gap-1.5 mt-3 pt-3 border-t border-slate-900">
+              <button
+                onClick={undoEditorChange}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+                className="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-purple-500/60 text-slate-200 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:border-slate-800"
+              >
+                Undo
+              </button>
+              <button
+                onClick={redoEditorChange}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Shift+Z)"
+                className="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-purple-500/60 text-slate-200 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:border-slate-800"
+              >
+                Redo
+              </button>
+              <button
+                onClick={deleteEditorSelection}
+                disabled={
+                  selectedNodeIndex === null &&
+                  selectedSceneryIndex === null &&
+                  selectedSpurPoint === null
+                }
+                title="Delete selected (Del)"
+                className="bg-red-950/50 hover:bg-red-900 border border-red-900/70 hover:border-red-600 text-red-200 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:border-red-900/70"
+              >
+                Delete
+              </button>
+              <button
+                onClick={focusEditorSelection}
+                title="Fly the camera to the selection (F)"
+                className="col-span-2 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-purple-500/60 text-slate-200 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+              >
+                Focus Selection
+              </button>
+              <button
+                onClick={resetEditorView}
+                title="Frame the whole track again"
+                className="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-purple-500/60 text-slate-200 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+              >
+                Reset View
+              </button>
+              <button
+                onClick={() => setIsDeflated(true)}
+                title="Deflate / Minimize UI (H)"
+                className="col-span-3 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 hover:border-purple-400 text-purple-200 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>🗕</span>
+                <span>Deflate UI · H</span>
+              </button>
+            </div>
+
+            {/* Which variation the viewport draws. Offered for tagged nodes or raced spurs. */}
+            {hasLayoutAssignments && (
+              <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
+                <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">
+                  Showing Course
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {[{ id: null, name: 'All' }, ...EDITOR_LAYOUTS].map((layout) => (
+                    <button
+                      key={layout.id ?? 'all'}
+                      onClick={() => setEditorPreviewLayoutId(layout.id)}
+                      className={`py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase border transition-all cursor-pointer ${
+                        editorPreviewLayoutId === layout.id
+                          ? 'bg-purple-950/50 border-purple-500/80 text-purple-200'
+                          : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                      }`}
+                    >
+                      {layout.id === null ? 'All' : layout.id === 'long' ? 'Long' : 'Short'}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-slate-500 leading-snug">
+                  All shows every node so you can keep editing. Long and Short build the
+                  road exactly as that course will be raced, and Test Drive follows this.
+                </p>
               </div>
             )}
+
+            <label className="flex items-center gap-2 text-[10px] text-slate-400 font-semibold cursor-pointer mt-3">
+              <input
+                type="checkbox"
+                checked={livePreview}
+                onChange={(e) => setLivePreview(e.target.checked)}
+                className="w-3 h-3 accent-purple-500 cursor-pointer"
+              />
+              Rebuild the road as I edit
+            </label>
+            <p className="text-[9px] text-slate-500 leading-snug">
+              Turn this off while laying out a big track, then back on to see the finished road.
+            </p>
+
+            <button
+              onClick={() => setShowControlsHelp((prev) => !prev)}
+              className="flex items-center justify-between mt-3 pt-3 border-t border-slate-900 text-[10px] font-bold text-purple-400 uppercase tracking-wider cursor-pointer bg-transparent border-x-0 border-b-0 w-full"
+            >
+              <span>Controls</span>
+              <span className="font-mono">{showControlsHelp ? '−' : '+'}</span>
+            </button>
+
+            {showControlsHelp && (
+              <dl className="mt-1.5 space-y-1 text-[9px] leading-snug text-slate-400">
+                {[
+                  ['Left click', 'place, or grab what is under the cursor'],
+                  ['Left drag', 'move the node or prop you grabbed'],
+                  ['Double click', 'delete that node or prop'],
+                  ['Right drag', 'look around'],
+                  ['Middle drag', 'slide the view'],
+                  ['Wheel', 'zoom toward the cursor'],
+                  ['W A S D / Q E', 'fly, shift for faster'],
+                  ['F', 'fly to the selection'],
+                  ['Del', 'delete the selection'],
+                  ['Esc', 'deselect'],
+                  ['H', 'deflate / minimize UI'],
+                  ['Ctrl+Z / Ctrl+Shift+Z', 'undo / redo']
+                ].map(([keys, what]) => (
+                  <div key={keys} className="flex gap-2">
+                    <dt className="w-[104px] shrink-0 font-mono text-purple-300">{keys}</dt>
+                    <dd className="flex-1 text-slate-400">{what}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+
+          {/* Floating Right Controls Panel */}
+          <div className="absolute top-6 right-6 bottom-6 w-[320px] pointer-events-auto backdrop-blur-md bg-slate-950/80 border border-purple-500/30 rounded-3xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col justify-between overflow-y-auto z-10 text-left">
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider">Element Properties</h3>
+                  <button
+                    onClick={() => setIsDeflated(true)}
+                    title="Deflate / Minimize UI"
+                    className="flex items-center gap-1 px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/50 hover:border-purple-400 text-purple-200 hover:text-white rounded-xl text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer shadow-sm active:scale-95"
+                  >
+                    <span className="text-[10px]">🗕</span>
+                    <span>Deflate UI</span>
+                  </button>
+                </div>
+                {selectedNodeIndex === null && selectedSceneryIndex === null && (
+                  <div className="py-4 px-3 border border-dashed border-slate-900 rounded-2xl bg-slate-950/30 space-y-1.5">
+                    <p className="text-xs text-slate-400 text-center">
+                      Click a node or a prop in the 3D view to edit it here.
+                    </p>
+                    <p className="text-[9px] text-slate-500 leading-snug text-center">
+                      {editLayer === 'track'
+                        ? 'Track layer: click the road to splice a node into the lap, click open ground to add one at the end.'
+                        : editLayer === 'decorate'
+                          ? 'Decorate layer: pick a prop below, then click the ground to place it. Track nodes are locked while you decorate.'
+                          : 'Terrain layer: drag to sculpt. Nodes and props are locked so a stroke cannot move them.'}
+                    </p>
+                  </div>
+                )}
 
             {/* Selected Node Properties */}
             {selectedNodeIndex !== null && editorNodes[selectedNodeIndex] && (
@@ -517,6 +802,45 @@ export default function MapEditor({
                   )}
                 </div>
 
+                {/* Which course variation this node belongs to. Tag the loop you want
+                    skipped as Long, and the cut-through that replaces it as Short. */}
+                <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
+                  <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Used By</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {([
+                      { label: 'Both', value: undefined },
+                      { label: 'Long', value: ['long'] },
+                      { label: 'Short', value: ['short'] }
+                    ] as const).map((option) => {
+                      const current = editorNodes[selectedNodeIndex].layouts as string[] | undefined;
+                      const isActive = option.value
+                        ? current?.length === 1 && current[0] === option.value[0]
+                        : !current || current.length === 0;
+                      return (
+                        <button
+                          key={option.label}
+                          onClick={() =>
+                            updateSelectedNode({
+                              layouts: option.value ? [...option.value] : undefined
+                            })
+                          }
+                          className={`py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase border transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-purple-950/50 border-purple-500/80 text-purple-200'
+                              : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] text-slate-500 leading-snug">
+                    Both is the default. Mark a node Long to have the Short course skip
+                    it, and Short for the cut-through that closes the lap instead.
+                  </p>
+                </div>
+
                 <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
                   <div className="text-[10px] font-bold text-purple-400 tracking-wider uppercase">Curb</div>
                   <TriToggle
@@ -582,9 +906,11 @@ export default function MapEditor({
                 <button
                   onClick={() => {
                     const newNodes = editorNodes.filter((_, idx) => idx !== selectedNodeIndex);
+                    const newSpurs = remapEditorSpursForRemovedNode(editorSpurs, selectedNodeIndex);
                     setEditorNodes(newNodes);
+                    setEditorSpurs(newSpurs);
                     setSelectedNodeIndex(null);
-                    saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery);
+                    saveCustomTrack(newNodes, editorTrackName, editorRoadWidth, editorTimeLimit, editorHasObstacles, editorGridLimit, editorHaveGrass, editorGrassWidth, editorScenery, editorHaveCurb, editorHaveFence, newSpurs);
                   }}
                   className="w-full mt-3 bg-red-950/60 hover:bg-red-900 border border-red-800/80 hover:border-red-650 text-red-300 hover:text-white py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
                 >
@@ -642,12 +968,16 @@ export default function MapEditor({
                   className="w-full accent-green-500 cursor-pointer mb-2"
                 />
 
-                {(['hill', 'mountain', 'building', 'house', 'construction'] as const).includes(
+                {(['hill', 'mountain', 'building', 'house', 'construction', 'grass_patch'] as const).includes(
                   editorScenery[selectedSceneryIndex].type
                 ) && (
                   <div className="mt-4 pt-2 border-t border-green-900/30">
                     <div className="flex justify-between text-[10px] font-bold text-green-400 tracking-wider uppercase">
-                      <span>Height Scale</span>
+                      <span>
+                        {editorScenery[selectedSceneryIndex].type === 'grass_patch'
+                          ? 'Blade Height'
+                          : 'Height Scale'}
+                      </span>
                       <span className="font-mono">{editorScenery[selectedSceneryIndex].heightScale ?? (editorScenery[selectedSceneryIndex].scale * 0.8)}x</span>
                     </div>
                     <input
@@ -754,6 +1084,502 @@ export default function MapEditor({
               </div>
             )}
           </div>
+
+          {/* Blocked spurs. Listed here rather than as selectable props, because a
+              branch is a run of points, not a single object. */}
+          {(editorSpurs.length > 0 || editorTool === 'spur') && (
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-bold text-slate-355 uppercase tracking-wider">Blocked Spurs</h3>
+                <span className="text-[9px] font-mono text-slate-500">{editorSpurs.length}</span>
+              </div>
+
+              <div className="space-y-1">
+                {editorSpurs.map((spur, idx) => {
+                  const isActive = idx === activeSpurIndex;
+                  const isClosed = spur.endNodeIndex !== undefined || spur.endSpurIndex !== undefined;
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all ${
+                        isActive
+                          ? 'bg-amber-950/40 border-amber-500/70'
+                          : 'bg-slate-950/50 border-slate-900 hover:bg-slate-900/70'
+                      }`}
+                    >
+                      <button
+                        onClick={() => {
+                          setActiveSpurIndex(idx);
+                          setSelectedSpurPoint(null);
+                        }}
+                        className="flex-1 min-w-0 text-left cursor-pointer bg-transparent border-0 p-0"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[11px] font-bold ${isActive ? 'text-white' : 'text-slate-300'}`}>
+                            Spur {idx + 1}
+                          </span>
+                          {isClosed && (
+                            <span className="text-[8px] px-1.5 py-0.2 bg-emerald-950/80 text-emerald-400 border border-emerald-500/50 rounded font-semibold uppercase">
+                              Loop
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[9px] font-mono text-slate-500 truncate">
+                          {spur.nodes.length === 0
+                            ? 'click map / node to start'
+                            : `from node ${(spur.nodeIndex ?? 0) + 1}${
+                                spur.endNodeIndex !== undefined
+                                  ? ` → node ${spur.endNodeIndex + 1} (closed)`
+                                  : spur.endSpurIndex !== undefined
+                                  ? ` → spur ${spur.endSpurIndex + 1}`
+                                  : ` · ${spur.nodes.length} pt · ${
+                                      spur.blocked === false ? 'open end' : 'dead end'
+                                    }`
+                              }`}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditorSpurs(removeEditorSpurAt(editorSpurs, idx));
+                          setActiveSpurIndex(null);
+                          setSelectedSpurPoint(null);
+                        }}
+                        title="Delete spur"
+                        className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer bg-transparent border-0 px-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => {
+                  setEditorSpurs([...editorSpurs, { nodes: [] }]);
+                  setActiveSpurIndex(editorSpurs.length);
+                  setSelectedSpurPoint(null);
+                  setEditorTool('spur');
+                }}
+                className="w-full mt-2 bg-amber-700 hover:bg-amber-600 text-white py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+              >
+                New Spur
+              </button>
+
+              {activeSpurIndex !== null && editorSpurs[activeSpurIndex] && (
+                <div className="mt-2 p-3 bg-slate-950/50 border border-amber-500/30 rounded-xl space-y-2.5">
+                  {/* Start Node Connection */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Start Node</span>
+                    <select
+                      value={editorSpurs[activeSpurIndex].nodeIndex ?? ''}
+                      onChange={(e) => {
+                        const selected = e.target.value;
+                        setEditorSpurs(
+                          editorSpurs.map((spur, i) => {
+                            if (i !== activeSpurIndex) return spur;
+                            let nodeIndex: number | undefined;
+                            if (selected !== '') {
+                              nodeIndex = parseInt(selected, 10);
+                            } else if (spur.nodes[0] && editorNodes.length > 0) {
+                              nodeIndex = editorNodes.reduce((best, node, index) => {
+                                const bestNode = editorNodes[best];
+                                const distance = Math.hypot(
+                                  node.x - spur.nodes[0].x,
+                                  node.z - spur.nodes[0].z
+                                );
+                                const bestDistance = Math.hypot(
+                                  bestNode.x - spur.nodes[0].x,
+                                  bestNode.z - spur.nodes[0].z
+                                );
+                                return distance < bestDistance ? index : best;
+                              }, 0);
+                            }
+                            return { ...spur, nodeIndex, startSpurIndex: undefined };
+                          })
+                        );
+                      }}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-0.5 text-[10px] text-slate-200"
+                    >
+                      <option value="">Nearest (Auto)</option>
+                      {editorNodes.map((_, nodeIdx) => (
+                        <option key={nodeIdx} value={nodeIdx}>
+                          Node {nodeIdx + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* End Node / Loop Closing Connection */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">End / Loop</span>
+                    <select
+                      value={
+                        editorSpurs[activeSpurIndex].endNodeIndex !== undefined
+                          ? `node-${editorSpurs[activeSpurIndex].endNodeIndex}`
+                          : editorSpurs[activeSpurIndex].endSpurIndex !== undefined
+                          ? `spur-${editorSpurs[activeSpurIndex].endSpurIndex}`
+                          : ''
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditorSpurs(
+                          editorSpurs.map((spur, i) => {
+                            if (i !== activeSpurIndex) return spur;
+                            if (val.startsWith('node-')) {
+                              return {
+                                ...spur,
+                                endNodeIndex: parseInt(val.replace('node-', ''), 10),
+                                endSpurIndex: undefined,
+                                blocked: false
+                              };
+                            } else if (val.startsWith('spur-')) {
+                              return {
+                                ...spur,
+                                endSpurIndex: parseInt(val.replace('spur-', ''), 10),
+                                endNodeIndex: undefined,
+                                blocked: false
+                              };
+                            } else {
+                              return {
+                                ...spur,
+                                endNodeIndex: undefined,
+                                endSpurIndex: undefined
+                              };
+                            }
+                          })
+                        );
+                      }}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-0.5 text-[10px] text-slate-200"
+                    >
+                      <option value="">Dead End (Open/Blocked)</option>
+                      <optgroup label="Close Loop To Track Node">
+                        {editorNodes.map((_, nodeIdx) => (
+                          <option key={nodeIdx} value={`node-${nodeIdx}`}>
+                            Close to Node {nodeIdx + 1}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {editorSpurs.length > 1 && (
+                        <optgroup label="Connect To Other Spur">
+                          {editorSpurs.map((_, sIdx) =>
+                            sIdx !== activeSpurIndex ? (
+                              <option key={sIdx} value={`spur-${sIdx}`}>
+                                Connect to Spur {sIdx + 1}
+                              </option>
+                            ) : null
+                          )}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Reverse Direction & Actions */}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      disabled={
+                        editorSpurs[activeSpurIndex].endNodeIndex === undefined &&
+                        editorSpurs[activeSpurIndex].endSpurIndex === undefined
+                      }
+                      title={
+                        editorSpurs[activeSpurIndex].endNodeIndex !== undefined ||
+                        editorSpurs[activeSpurIndex].endSpurIndex !== undefined
+                          ? 'Reverse the connected path and swap its physical sides'
+                          : 'A one-ended spur must stay anchored at its start node'
+                      }
+                      onClick={() => {
+                        setEditorSpurs(
+                          editorSpurs.map((spur, i) => {
+                            if (i !== activeSpurIndex) return spur;
+                            const isClosed =
+                              spur.endNodeIndex !== undefined || spur.endSpurIndex !== undefined;
+                            if (!isClosed) return spur;
+                            return {
+                              ...spur,
+                              nodeIndex: isClosed ? spur.endNodeIndex : spur.nodeIndex,
+                              endNodeIndex: isClosed ? spur.nodeIndex : undefined,
+                              startSpurIndex: isClosed ? spur.endSpurIndex : spur.startSpurIndex,
+                              endSpurIndex: isClosed ? spur.startSpurIndex : undefined,
+                              blockedStart: spur.blockedEnd,
+                              blockedEnd: spur.blockedStart,
+                              leftCurb: spur.rightCurb,
+                              rightCurb: spur.leftCurb,
+                              leftFence: spur.rightFence,
+                              rightFence: spur.leftFence,
+                              leftGrassWidth: spur.rightGrassWidth,
+                              rightGrassWidth: spur.leftGrassWidth,
+                              nodes: [...spur.nodes].reverse()
+                            };
+                          })
+                        );
+                      }}
+                      className="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 py-1 rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all cursor-pointer border border-slate-800 disabled:opacity-35 disabled:cursor-not-allowed"
+                    >
+                      Reverse Path
+                    </button>
+                    {editorSpurs[activeSpurIndex].nodes.length > 0 && (
+                      <button
+                        onClick={() => {
+                          const lastPoint = editorSpurs[activeSpurIndex].nodes.length - 1;
+                          const nextSpurs = removeEditorSpurPointAt(
+                            editorSpurs,
+                            activeSpurIndex,
+                            lastPoint
+                          );
+                          setEditorSpurs(nextSpurs);
+                          setSelectedSpurPoint(null);
+                          if (nextSpurs.length < editorSpurs.length) {
+                            setActiveSpurIndex(null);
+                          }
+                        }}
+                        className="bg-slate-900 hover:bg-slate-800 text-amber-400 py-1 px-2 rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all cursor-pointer border border-slate-800"
+                      >
+                        Undo Point
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex justify-between text-[10px] font-bold text-amber-400 tracking-wider uppercase pt-1">
+                    <span>Spur Width</span>
+                    <span className="font-mono">
+                      {editorSpurs[activeSpurIndex].width ?? Math.round(editorRoadWidth * 0.8)}m
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="6"
+                    max="40"
+                    step="1"
+                    value={editorSpurs[activeSpurIndex].width ?? Math.round(editorRoadWidth * 0.8)}
+                    onChange={(e) => {
+                      const width = parseInt(e.target.value);
+                      setEditorSpurs(
+                        editorSpurs.map((spur, i) => (i === activeSpurIndex ? { ...spur, width } : spur))
+                      );
+                    }}
+                    className="w-full accent-amber-500 cursor-pointer"
+                  />
+
+                  <div className="pt-2 border-t border-amber-900/30 space-y-1.5">
+                    <div className="text-[10px] font-bold text-amber-400 tracking-wider uppercase">Curb</div>
+                    <TriToggle
+                      label="Left"
+                      value={editorSpurs[activeSpurIndex].leftCurb}
+                      onChange={(value) =>
+                        setEditorSpurs(
+                          editorSpurs.map((spur, i) =>
+                            i === activeSpurIndex ? { ...spur, leftCurb: value } : spur
+                          )
+                        )
+                      }
+                    />
+                    <TriToggle
+                      label="Right"
+                      value={editorSpurs[activeSpurIndex].rightCurb}
+                      onChange={(value) =>
+                        setEditorSpurs(
+                          editorSpurs.map((spur, i) =>
+                            i === activeSpurIndex ? { ...spur, rightCurb: value } : spur
+                          )
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-900/30 space-y-1.5">
+                    <div className="text-[10px] font-bold text-amber-400 tracking-wider uppercase">Fence</div>
+                    <TriToggle
+                      label="Left"
+                      value={editorSpurs[activeSpurIndex].leftFence}
+                      onChange={(value) =>
+                        setEditorSpurs(
+                          editorSpurs.map((spur, i) =>
+                            i === activeSpurIndex ? { ...spur, leftFence: value } : spur
+                          )
+                        )
+                      }
+                    />
+                    <TriToggle
+                      label="Right"
+                      value={editorSpurs[activeSpurIndex].rightFence}
+                      onChange={(value) =>
+                        setEditorSpurs(
+                          editorSpurs.map((spur, i) =>
+                            i === activeSpurIndex ? { ...spur, rightFence: value } : spur
+                          )
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-900/30 space-y-2">
+                    <div className="text-[10px] font-bold text-amber-400 tracking-wider uppercase">
+                      Grass Width Override
+                    </div>
+                    {(['left', 'right'] as const).map((side) => {
+                      const key = side === 'left' ? 'leftGrassWidth' : 'rightGrassWidth';
+                      const spur = editorSpurs[activeSpurIndex];
+                      const inherited = editorHaveGrass ? editorGrassWidth : 0;
+                      const hasOverride = spur[key] !== undefined;
+                      const value = hasOverride ? spur[key]! : inherited;
+                      return (
+                        <div key={side} className="flex items-center gap-2">
+                          <label className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold w-20 shrink-0 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={hasOverride}
+                              onChange={(e) =>
+                                setEditorSpurs(
+                                  editorSpurs.map((entry, i) =>
+                                    i === activeSpurIndex
+                                      ? { ...entry, [key]: e.target.checked ? inherited : undefined }
+                                      : entry
+                                  )
+                                )
+                              }
+                              className="w-3 h-3 accent-amber-500 cursor-pointer"
+                            />
+                            {side === 'left' ? 'Left' : 'Right'}
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="15"
+                            step="1"
+                            disabled={!hasOverride}
+                            value={value}
+                            onChange={(e) =>
+                              setEditorSpurs(
+                                editorSpurs.map((entry, i) =>
+                                  i === activeSpurIndex
+                                    ? { ...entry, [key]: parseInt(e.target.value, 10) }
+                                    : entry
+                                )
+                              )
+                            }
+                            className="flex-1 accent-amber-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          />
+                          <span className="text-[9px] font-mono text-amber-400 w-7 text-right shrink-0">
+                            {value}m
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-900/30 space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-amber-400 tracking-wider uppercase">
+                      <span>Elevation</span>
+                      <span className="font-mono text-[9px] text-slate-500">
+                        {editorSpurs[activeSpurIndex].elevationMode === 'authored'
+                          ? 'Point Heights'
+                          : 'Live Terrain'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        disabled={editorSpurs[activeSpurIndex].nodes.length === 0}
+                        onClick={raiseSpurAboveTerrain}
+                        className="bg-emerald-800 hover:bg-emerald-700 text-white py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                      >
+                        Lift Spur
+                      </button>
+                      <button
+                        type="button"
+                        disabled={editorSpurs[activeSpurIndex].nodes.length === 0}
+                        onClick={drapeSpurToTerrain}
+                        className="bg-amber-900/70 hover:bg-amber-800 border border-amber-700/60 text-amber-100 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                      >
+                        Drape Spur
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-slate-500 leading-snug">
+                      Lift clears terrain across the road and both verges. Drape writes each spur point onto the ground.
+                    </p>
+                  </div>
+
+                  {editorSpurs[activeSpurIndex].endNodeIndex === undefined &&
+                    editorSpurs[activeSpurIndex].endSpurIndex === undefined && (
+                      <label className="flex items-center gap-2 text-[10px] text-slate-400 font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editorSpurs[activeSpurIndex].blocked !== false}
+                          onChange={(e) =>
+                            setEditorSpurs(
+                              editorSpurs.map((spur, i) =>
+                                i === activeSpurIndex ? { ...spur, blocked: e.target.checked } : spur
+                              )
+                            )
+                          }
+                          className="w-3 h-3 accent-amber-500 cursor-pointer"
+                        />
+                        Barriers at the dead end
+                      </label>
+                    )}
+
+                  {/* Racing a branch turns it into the road for that course, and
+                      leaves the stretch it bypasses standing as the closed section. */}
+                  <div className="pt-2 border-t border-amber-900/30 space-y-1.5">
+                    <div className="text-[10px] font-bold text-amber-400 tracking-wider uppercase">
+                      Raced In
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {EDITOR_LAYOUTS.map((layout) => {
+                        const spur = editorSpurs[activeSpurIndex];
+                        const isRaced = spur.raceLayouts?.includes(layout.id) ?? false;
+                        // Only a branch that comes back to the lap can carry a course.
+                        const canRace =
+                          spur.endNodeIndex !== undefined &&
+                          spur.nodeIndex !== undefined &&
+                          spur.nodes.length > 0;
+                        return (
+                          <button
+                            key={layout.id}
+                            disabled={!canRace && !isRaced}
+                            title={
+                              isRaced
+                                ? `Stop racing the ${layout.name} down this branch`
+                                : canRace
+                                  ? `Race the ${layout.name} down this branch`
+                                  : 'Give the branch a start node and an end node first'
+                            }
+                            onClick={() =>
+                              setEditorSpurs(
+                                setEditorSpurRacedInLayout(
+                                  editorSpurs,
+                                  activeSpurIndex,
+                                  layout.id,
+                                  !isRaced
+                                )
+                              )
+                            }
+                            className={`py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase border transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
+                              isRaced
+                                ? 'bg-amber-950/50 border-amber-500/80 text-amber-200'
+                                : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                            }`}
+                          >
+                            {layout.id === 'long' ? 'Long' : 'Short'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[9px] text-slate-500 leading-snug">
+                      {editorSpurs[activeSpurIndex].endNodeIndex === undefined
+                        ? 'Close the loop to a track node above, then a course can race this branch.'
+                        : 'In a course that races it, this branch is the road: it carries the racing line, the lap and the AI. The bypassed stretch stays on the map as the closed-off section.'}
+                    </p>
+                  </div>
+
+                  <p className="text-[9px] text-slate-500 leading-snug">
+                    Spur branches can leave from any node and connect to other nodes to create alternate loops,
+                    shortcuts, or dead-end paths. Curbs and fences automatically open at connected junctions.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Saved Tracks */}
           <div className="mb-5">
@@ -1190,7 +2016,8 @@ export default function MapEditor({
           <button
             onClick={() => {
               setEditLayer('decorate');
-              if (editorTool === 'node') setEditorTool('tree1');
+              // Track-layer tools mean nothing here, so fall back to a prop.
+              if (editorTool === 'node' || editorTool === 'spur') setEditorTool('tree1');
             }}
             className={`flex-1 text-xs font-extrabold py-2 px-3 rounded-lg transition-all uppercase tracking-wider cursor-pointer ${
               editLayer === 'decorate'
@@ -1220,27 +2047,45 @@ export default function MapEditor({
                 { id: 'raise', label: 'Raise' },
                 { id: 'lower', label: 'Lower' },
                 { id: 'smooth', label: 'Smooth' },
-                { id: 'flatten', label: 'Flatten' }
-              ] as const).map((b) => (
-                <button
-                  key={b.id}
-                  onClick={() => setTerrainBrush(b.id)}
-                  className={`px-4 py-2 rounded-xl border text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer ${
-                    terrainBrush === b.id
-                      ? 'bg-amber-950/50 border-amber-500/80 text-amber-200'
-                      : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  {b.label}
-                </button>
-              ))}
+                { id: 'flatten', label: 'Flatten' },
+                { id: 'grass', label: 'Grass' },
+                { id: 'grass_erase', label: 'Clear Grass' }
+              ] as const).map((b) => {
+                const isGrassBrush = b.id === 'grass' || b.id === 'grass_erase';
+                const activeStyle = isGrassBrush
+                  ? 'bg-emerald-950/50 border-emerald-500/80 text-emerald-200'
+                  : 'bg-amber-950/50 border-amber-500/80 text-amber-200';
+                return (
+                  <button
+                    key={b.id}
+                    onClick={() => setTerrainBrush(b.id)}
+                    className={`px-3 py-2 rounded-xl border text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer ${
+                      terrainBrush === b.id
+                        ? activeStyle
+                        : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    {b.label}
+                  </button>
+                );
+              })}
             </div>
+
+            {paintingGrass && (
+              <p className="text-[9px] text-emerald-400/90 leading-snug text-center -mt-1">
+                {terrainBrush === 'grass'
+                  ? 'Drag on the ground to plant grass. The ring is the brush, so brush size sets how big each patch is. Grass keeps off the tarmac and never changes grip.'
+                  : 'Drag over planted grass to clear it. Other decoration is left alone.'}
+              </p>
+            )}
 
             <div className="flex gap-4">
               <div className="flex-1 space-y-1">
                 <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                  <span>Brush Size</span>
-                  <span className="text-amber-400 font-mono">{terrainBrushRadius}m</span>
+                  <span>{paintingGrass ? 'Patch Size' : 'Brush Size'}</span>
+                  <span className={`font-mono ${paintingGrass ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {terrainBrushRadius}m
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -1249,24 +2094,27 @@ export default function MapEditor({
                   step="1"
                   value={terrainBrushRadius}
                   onChange={(e) => setTerrainBrushRadius(parseInt(e.target.value))}
-                  className="w-full accent-amber-500 cursor-pointer"
+                  className={`w-full cursor-pointer ${paintingGrass ? 'accent-emerald-500' : 'accent-amber-500'}`}
                 />
               </div>
-              <div className="flex-1 space-y-1">
-                <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                  <span>Strength</span>
-                  <span className="text-amber-400 font-mono">{terrainBrushStrength.toFixed(1)}</span>
+              {/* Strength only means something to the height brushes. */}
+              {!paintingGrass && (
+                <div className="flex-1 space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                    <span>Strength</span>
+                    <span className="text-amber-400 font-mono">{terrainBrushStrength.toFixed(1)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="5"
+                    step="0.1"
+                    value={terrainBrushStrength}
+                    onChange={(e) => setTerrainBrushStrength(parseFloat(e.target.value))}
+                    className="w-full accent-amber-500 cursor-pointer"
+                  />
                 </div>
-                <input
-                  type="range"
-                  min="0.1"
-                  max="5"
-                  step="0.1"
-                  value={terrainBrushStrength}
-                  onChange={(e) => setTerrainBrushStrength(parseFloat(e.target.value))}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-              </div>
+              )}
             </div>
 
             <button
@@ -1305,7 +2153,7 @@ export default function MapEditor({
           </div>
         ) : editLayer === 'track' ? (
           /* Track Mode options */
-          <div className="flex gap-4">
+          <div className="flex items-center gap-4">
             <button
               onClick={() => setEditorTool('node')}
               className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border transition-all cursor-pointer w-[100px] h-[95px] justify-between ${
@@ -1317,11 +2165,52 @@ export default function MapEditor({
               {renderToolIcon('node', editorTool === 'node')}
               <span className="text-[10px] font-bold tracking-wide">Track Node</span>
             </button>
+            <button
+              onClick={() => setEditorTool('spur')}
+              className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border transition-all cursor-pointer w-[100px] h-[95px] justify-between ${
+                editorTool === 'spur'
+                  ? 'bg-amber-950/40 border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+                  : 'bg-slate-950/55 border-slate-900 text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              {renderToolIcon('spur', editorTool === 'spur')}
+              <span className="text-[10px] font-bold tracking-wide leading-none text-center">
+                Blocked Spur
+              </span>
+            </button>
+            <div className="text-[9px] text-slate-500 leading-snug max-w-[250px] space-y-1">
+              {editorTool === 'spur' ? (
+                <>
+                  <p>
+                    First click joins the branch to the nearest track node and opens the
+                    curb, grass and fence on that side. Keep clicking to run it out.
+                  </p>
+                  <p>
+                    You can drive onto it; the far end is walled off. It stays out of the
+                    racing line and the lap count. Use{' '}
+                    <span className="text-amber-300 font-mono">New Spur</span> in the
+                    panel to start another one.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    <span className="text-green-400 font-bold">Green</span> handle is the start line.
+                    Click the road to add a node in between, open ground to add one at the end.
+                  </p>
+                  <p>
+                    Drag a handle to move it, double click it to delete it. Nudged too far?{' '}
+                    <span className="text-purple-300 font-mono">Ctrl+Z</span>.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         ) : (
           /* Decorate Mode options */
           <div className="flex gap-2 overflow-x-auto w-full pb-1 max-w-[580px] scrollbar-thin">
             {[
+              { id: 'grass_patch', name: 'Grass Field' },
               { id: 'tree1', name: 'Pine Tree' },
               { id: 'tree2', name: 'Oak Tree' },
               { id: 'tree3', name: 'Palm Tree' },
@@ -1352,6 +2241,8 @@ export default function MapEditor({
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

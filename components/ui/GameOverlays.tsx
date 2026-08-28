@@ -20,12 +20,13 @@ interface GameOverlaysProps {
   raceResults: RaceResult[] | null;
   placement: number;
   activeTrackId: string;
+  activeLayoutId: string | null;
   activeLicenseTestId: string;
   exitToGarage: () => void;
   saveReplay: () => void;
   replaySaveMessage: string;
   startLicenseTest: (testId?: string) => void;
-  startRace: (trackId?: string) => void;
+  startRace: (trackId?: string, layoutId?: string) => void;
   startTutorial: () => void;
 }
 
@@ -44,6 +45,7 @@ export default function GameOverlays({
   raceResults,
   placement,
   activeTrackId,
+  activeLayoutId,
   activeLicenseTestId,
   exitToGarage,
   saveReplay,
@@ -202,7 +204,9 @@ export default function GameOverlays({
               <button
                 onClick={() => {
                   if (activeMode === 'license') startLicenseTest(activeLicenseTestId);
-                  else if (activeMode === 'race') startRace(activeTrackId);
+                  else if (activeMode === 'race') {
+                    startRace(activeTrackId, activeLayoutId ?? undefined);
+                  }
                   else if (activeMode === 'tutorial') startTutorial();
                 }}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all cursor-pointer"
@@ -237,7 +241,9 @@ export default function GameOverlays({
             <button
               onClick={() => {
                 if (activeMode === 'license') startLicenseTest(activeLicenseTestId);
-                else if (activeMode === 'race') startRace(activeTrackId);
+                else if (activeMode === 'race') {
+                  startRace(activeTrackId, activeLayoutId ?? undefined);
+                }
                 else if (activeMode === 'tutorial') startTutorial();
               }}
               className="bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 px-6 rounded-xl transition-all cursor-pointer border border-rose-500"

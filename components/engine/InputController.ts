@@ -10,6 +10,23 @@ interface InputControllerOptions {
 }
 
 const DEFAULT_DRIVING_KEYS = ['w', 's', 'a', 'd', ' '];
+
+/**
+ * Keys typed into a text field are text, not controls. Without this check, naming a
+ * track in the editor flew the free camera across the map one letter at a time, and
+ * a space in the name yanked it straight up.
+ */
+const isTypingTarget = (target: EventTarget | null): boolean => {
+  const element = target as HTMLElement | null;
+  if (!element || typeof element.tagName !== 'string') return false;
+  const tag = element.tagName.toLowerCase();
+  return (
+    tag === 'input' ||
+    tag === 'textarea' ||
+    tag === 'select' ||
+    element.isContentEditable === true
+  );
+};
 const DEFAULT_DRIVING_KEY_MAP: Record<string, string[]> = {
   w: ['w'],
   s: ['s'],
@@ -41,6 +58,13 @@ export class InputController {
   }
 
   private handleKeyDown = (event: KeyboardEvent) => {
+    if (isTypingTarget(event.target)) {
+      // Drop anything already held, or a key pressed before focusing the field would
+      // stay stuck down for as long as the field has focus.
+      this.releaseAllKeys();
+      return;
+    }
+
     const keyLower = event.key.toLowerCase();
     this.mapDrivingKey(keyLower, true);
 
@@ -56,6 +80,14 @@ export class InputController {
   private handleKeyUp = (event: KeyboardEvent) => {
     this.mapDrivingKey(event.key.toLowerCase(), false);
   };
+
+  /** Clear every held key, so nothing is left pressed across a focus change. */
+  public releaseAllKeys() {
+    const keys = this.options.keys;
+    for (const key of Object.keys(keys)) {
+      keys[key] = false;
+    }
+  }
 
   private mapDrivingKey(keyLower: string, pressed: boolean) {
     const bindings = this.options.getKeyBindings();

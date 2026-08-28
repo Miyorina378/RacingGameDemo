@@ -52,7 +52,7 @@ export class RacingAI {
     grassWidth?: number;
     fence?: boolean;
   };
-  public isOnGrass?: (x: number, z: number) => boolean;
+  public isOnGrass?: (x: number, z: number, yHint?: number) => boolean;
   public trackBoundary = 0;
   public obstacles: Obstacle[] = [];
 
@@ -661,7 +661,7 @@ export class RacingAI {
     const headingDot = heading.dot(projection.tangent);
 
     let onGrass = false;
-    if (this.isOnGrass) onGrass = this.isOnGrass(position.x, position.z);
+    if (this.isOnGrass) onGrass = this.isOnGrass(position.x, position.z, position.y);
     if (onGrass) this.grassTimer += deltaTime;
     else this.grassTimer = Math.max(0, this.grassTimer - deltaTime * 3);
 

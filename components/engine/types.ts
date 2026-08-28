@@ -67,6 +67,11 @@ export interface EditorNode {
   rightFence?: boolean;
   leftGrassWidth?: number;
   rightGrassWidth?: number;
+  /**
+   * Which course variations use this node. Omit for "all of them", so a track only
+   * needs tagging where a short and a long version actually diverge.
+   */
+  layouts?: string[];
 }
 
 /**
@@ -90,9 +95,27 @@ export type SceneryType =
   | 'podium'
   | 'building'
   | 'house'
-  | 'construction';
+  | 'construction'
+  /**
+   * Free-standing patch of grass. Decoration only: it never touches the grip or
+   * boundary bands, which is what lets grass be placed away from the road.
+   */
+  | 'grass_patch';
 
 export type TimeOfDay = 'afternoon' | 'evening' | 'night';
+
+/** Brushes that move the heightmap. */
+export type TerrainHeightBrush = 'raise' | 'lower' | 'smooth' | 'flatten';
+
+/**
+ * Everything the ground brush can do. Grass painting shares the terrain layer's
+ * ring cursor and hidden pointer, because it is the same gesture: drag over the
+ * ground and something happens under the ring.
+ */
+export type EditorBrush = TerrainHeightBrush | 'grass' | 'grass_erase';
+
+export const isTerrainHeightBrush = (brush: EditorBrush): brush is TerrainHeightBrush =>
+  brush === 'raise' || brush === 'lower' || brush === 'smooth' || brush === 'flatten';
 
 export interface EditorScenery {
   type: SceneryType;
@@ -117,9 +140,153 @@ export const DEFAULT_ENGINE_KEY_BINDINGS: KeyBindings = {
   handbrake: ' ',
 };
 
+/**
+ * A blocked-off branch drawn in the editor: an open run of points leaving the
+ * circuit. Kept separate from the lap's nodes, because it must never reach the road
+ * builder's centreline — see BaseMode.createSpurRoads.
+ */
+export interface EditorSpur {
+  /**
+   * Track node this branch leaves from. Set from the nearest node on the first
+   * click, or chosen explicitly in the editor.
+   */
+  nodeIndex?: number;
+  /**
+   * Track node this branch connects to at the far end to close the loop.
+   */
+  endNodeIndex?: number;
+  /** Spur index this branch leaves from. */
+  startSpurIndex?: number;
+  /** Spur index this branch connects to at the far end. */
+  endSpurIndex?: number;
+  /** Points along the branch. The junctions themselves are not repeated. */
+  nodes: { x: number; z: number; y?: number }[];
+  width?: number;
+  /** Per-side curb overrides. Unset inherits the track-wide curb setting. */
+  leftCurb?: boolean;
+  rightCurb?: boolean;
+  /** Per-side fence overrides. Unset inherits the track-wide fence setting. */
+  leftFence?: boolean;
+  rightFence?: boolean;
+  /** Per-side grass width in metres. Unset inherits the track-wide grass width. */
+  leftGrassWidth?: number;
+  rightGrassWidth?: number;
+  /**
+   * `terrain` (and old saves with no value) follows live ground. `authored` uses
+   * each spur point's y value, which is what Lift/Drape write.
+   */
+  elevationMode?: 'terrain' | 'authored';
+  /** Barrier across the dead end. Defaults to blocked if end is open, false if loop closed. */
+  blocked?: boolean;
+  /** Explicit closure across the sampled start, including an attached junction. */
+  blockedStart?: boolean;
+  /** Explicit closure across the sampled end, including an attached junction. */
+  blockedEnd?: boolean;
+  /**
+   * Courses that race down this branch rather than the stretch of lap it bypasses.
+   * Needs both ends on the track, since a course still has to close. Empty or missing
+   * leaves the branch as scenery you can drive onto but never race.
+   */
+  raceLayouts?: string[];
+}
+
+const remapRemovedIndex = (value: number | undefined, removedIndex: number) => {
+  if (value === undefined || value === removedIndex) return undefined;
+  return value > removedIndex ? value - 1 : value;
+};
+
+/** Removes one branch and keeps every branch-to-branch attachment on the same target. */
+export const removeEditorSpurAt = (spurs: EditorSpur[], removedIndex: number): EditorSpur[] =>
+  spurs
+    .filter((_, index) => index !== removedIndex)
+    .map((spur) => {
+      const lostEnd = spur.endSpurIndex === removedIndex;
+      return {
+        ...spur,
+        startSpurIndex: remapRemovedIndex(spur.startSpurIndex, removedIndex),
+        endSpurIndex: remapRemovedIndex(spur.endSpurIndex, removedIndex),
+        blocked: lostEnd ? true : spur.blocked
+      };
+    });
+
+/** Removes a handle, removing/remapping the whole branch if that was its last one. */
+export const removeEditorSpurPointAt = (
+  spurs: EditorSpur[],
+  spurIndex: number,
+  pointIndex: number
+): EditorSpur[] => {
+  const next = spurs.map((spur, index) =>
+    index === spurIndex
+      ? { ...spur, nodes: spur.nodes.filter((_, point) => point !== pointIndex) }
+      : spur
+  );
+  return next[spurIndex]?.nodes.length ? next : removeEditorSpurAt(next, spurIndex);
+};
+
+/** Keeps node-index attachments stable when a track node is inserted. */
+export const remapEditorSpursForInsertedNode = (
+  spurs: EditorSpur[],
+  insertedIndex: number
+): EditorSpur[] =>
+  spurs.map((spur) => ({
+    ...spur,
+    nodeIndex:
+      spur.nodeIndex !== undefined && spur.nodeIndex >= insertedIndex
+        ? spur.nodeIndex + 1
+        : spur.nodeIndex,
+    endNodeIndex:
+      spur.endNodeIndex !== undefined && spur.endNodeIndex >= insertedIndex
+        ? spur.endNodeIndex + 1
+        : spur.endNodeIndex
+  }));
+
+/** Clears an attachment to a deleted node and shifts all later node references down. */
+export const remapEditorSpursForRemovedNode = (
+  spurs: EditorSpur[],
+  removedIndex: number
+): EditorSpur[] =>
+  spurs.map((spur) => {
+    const lostStart = spur.nodeIndex === removedIndex;
+    const lostEnd = spur.endNodeIndex === removedIndex;
+    const lostRaceEndpoint = lostStart || lostEnd;
+    return {
+      ...spur,
+      nodeIndex: remapRemovedIndex(spur.nodeIndex, removedIndex),
+      endNodeIndex: remapRemovedIndex(spur.endNodeIndex, removedIndex),
+      blocked: lostEnd ? true : spur.blocked,
+      // A raced branch requires two track endpoints. Keeping its assignment after
+      // either endpoint disappears advertises a course the resolver cannot build.
+      raceLayouts: lostRaceEndpoint ? undefined : spur.raceLayouts
+    };
+  });
+
+/** One layout has one alternate road; assigning it here removes it from the others. */
+export const setEditorSpurRacedInLayout = (
+  spurs: EditorSpur[],
+  spurIndex: number,
+  layoutId: string,
+  raced: boolean
+): EditorSpur[] =>
+  spurs.map((spur, index) => {
+    const current = spur.raceLayouts ?? [];
+    const next =
+      index === spurIndex && raced
+        ? [...current.filter((id) => id !== layoutId), layoutId]
+        : current.filter((id) => id !== layoutId);
+    return {
+      ...spur,
+      raceLayouts: next.length > 0 ? next : undefined
+    };
+  });
+
 export interface EditorState {
   nodes: EditorNode[];
   scenery: EditorScenery[];
+  spurs: EditorSpur[];
+  /** Spur that new points are appended to, and whose settings the panel edits. */
+  activeSpurIndex: number | null;
+  /** Which spur point is selected, as a spur index and a point index. */
+  selectedSpurPoint: { spur: number; point: number } | null;
   tool: string;
   snapToGrid: number;
   /**
@@ -135,7 +302,12 @@ export interface EditorState {
   sceneryFreeMove: boolean;
   /** Which editor surface is being edited: track nodes, decoration, or terrain. */
   editLayer: 'track' | 'decorate' | 'terrain';
-  terrainBrush: 'raise' | 'lower' | 'smooth' | 'flatten';
+  /**
+   * Layout the editor viewport is previewing. null shows every node, which is what
+   * you want while laying a course out; picking one shows that variation only.
+   */
+  previewLayoutId: string | null;
+  terrainBrush: EditorBrush;
   terrainBrushRadius: number;
   terrainBrushStrength: number;
   /** Fires after a sculpt stroke so React can persist the new heightmap. */
@@ -147,6 +319,8 @@ export interface EditorState {
   activeMode: string;
   onUpdateNodes: ((nodes: EditorNode[]) => void) | null;
   onUpdateScenery: ((scenery: EditorScenery[]) => void) | null;
+  onUpdateSpurs: ((spurs: EditorSpur[]) => void) | null;
+  onSelectSpurPoint: ((selection: { spur: number; point: number } | null) => void) | null;
   onSelectNode: ((idx: number | null) => void) | null;
   onSelectScenery: ((idx: number | null) => void) | null;
   onDragNodeStart: ((idx: number) => void) | null;
@@ -159,14 +333,18 @@ export function createDefaultEditorState(): EditorState {
   return {
     nodes: [],
     scenery: [],
+    spurs: [],
+    activeSpurIndex: null,
+    selectedSpurPoint: null,
     tool: 'node',
     snapToGrid: 10,
     gridLimit: 250,
     sceneryFreeMove: true,
     editLayer: 'track',
+    previewLayoutId: null,
     terrainBrush: 'raise',
     terrainBrushRadius: DEFAULT_TERRAIN_BRUSH_RADIUS,
-    terrainBrushStrength: 1.5,
+    terrainBrushStrength: 0.1,
     onTerrainChange: null,
     cornerHeight: 2,
     selectedNodeIndex: null,
@@ -175,6 +353,8 @@ export function createDefaultEditorState(): EditorState {
     activeMode: 'garage',
     onUpdateNodes: null,
     onUpdateScenery: null,
+    onUpdateSpurs: null,
+    onSelectSpurPoint: null,
     onSelectNode: null,
     onSelectScenery: null,
     onDragNodeStart: null,

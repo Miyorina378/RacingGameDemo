@@ -5,6 +5,7 @@ import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOu
 import * as THREE from 'three';
 import { CARS_DATABASE, CarConfig } from '../config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig } from '../config/TrackDatabase';
+import { getTrackLayouts } from '../modes/trackNodes';
 import { Vehicle } from '../objects/Vehicle';
 import type { DrivingMode } from '../option';
 import {
@@ -1929,7 +1930,7 @@ interface GarageProps {
   buyUpgrade: (item: any, cost: number) => void;
   toggleUpgrade: (item: any) => void;
   startRace: (trackId?: string) => void;
-  startQuickPlayRace: (carId: string, trackId: string, lapCount?: number, difficulty?: QuickPlayDifficulty, drivingMode?: DrivingMode, opponentCount?: number) => void;
+  startQuickPlayRace: (carId: string, trackId: string, lapCount?: number, difficulty?: QuickPlayDifficulty, drivingMode?: DrivingMode, opponentCount?: number, layoutId?: string) => void;
   drivingMode: DrivingMode;
   setDrivingMode: (mode: DrivingMode) => void;
   startFreeRoam: () => void;
@@ -2002,6 +2003,8 @@ export default function Garage({
   const [quickPlayStep, setQuickPlayStep] = useState<QuickPlayStep>('map');
   const [quickPlayTrackId, setQuickPlayTrackId] = useState<string | null>(() => getDefaultQuickPlayTrackId('city'));
   const [quickPlayLapCount, setQuickPlayLapCount] = useState(3);
+  /** Chosen course variation. null means the track's default layout. */
+  const [quickPlayLayoutId, setQuickPlayLayoutId] = useState<string | null>(null);
   const [quickPlayDifficulty, setQuickPlayDifficulty] = useState<QuickPlayDifficulty>('normal');
   const [quickPlaySelectedBrand, setQuickPlaySelectedBrand] = useState<string>('All');
   const [quickPlayCarId, setQuickPlayCarId] = useState<string | null>(null);
@@ -2426,6 +2429,21 @@ export default function Garage({
   const quickPlaySelectedMeta = quickPlayMapTrack ? getQuickPlayTrackMeta(quickPlayMapTrack) : null;
   const QuickPlaySelectedTypeIcon = quickPlaySelectedMeta ? getQuickPlayTypeIcon(quickPlaySelectedMeta.category) : Route;
   const quickPlayDifficultyIndex = Math.max(0, QUICK_PLAY_DIFFICULTIES.findIndex((item) => item.id === quickPlayDifficulty));
+  // A track only offers a choice when it actually declares more than one variation,
+  // so single-layout courses show no extra control at all.
+  const quickPlayLayouts = quickPlayChosenTrack ? getTrackLayouts(quickPlayChosenTrack) : [];
+  const quickPlayLayoutIndex = Math.max(
+    0,
+    quickPlayLayouts.findIndex((layout) => layout.id === quickPlayLayoutId)
+  );
+  const adjustQuickPlayLayout = (offset: number) => {
+    if (quickPlayLayouts.length < 2) return;
+    const nextIndex = Math.max(
+      0,
+      Math.min(quickPlayLayouts.length - 1, quickPlayLayoutIndex + offset)
+    );
+    setQuickPlayLayoutId(quickPlayLayouts[nextIndex].id);
+  };
   const isQuickPlayMapSelect = driveSubMode === 'quickplay';
   const isQuickPlayCarSelectStep = isQuickPlayMapSelect && quickPlayStep === 'car';
   const hideGarageBackground = isQuickPlayMapSelect && (!isQuickPlayCarSelectStep || !quickPlayCarHasBeenClicked);
@@ -4098,6 +4116,39 @@ export default function Garage({
                         </div>
                       </div>
 
+                      {/* Course variation. Only shown when the track has more than one. */}
+                      {quickPlayLayouts.length > 1 && (
+                        <>
+                          <div className="h-[1px] w-full bg-white/10" />
+                          <div className="flex flex-col gap-2">
+                            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Course</span>
+                            <div className="flex items-center justify-between w-full px-1 py-1">
+                              <button
+                                type="button"
+                                aria-label="Previous course variation"
+                                onClick={() => adjustQuickPlayLayout(-1)}
+                                className="flex h-8 w-8 items-center justify-center text-rose-500 hover:text-rose-450 hover:scale-110 active:scale-95 transition-all disabled:opacity-25 disabled:hover:scale-100 disabled:cursor-not-allowed cursor-pointer"
+                                disabled={quickPlayLayoutIndex === 0}
+                              >
+                                <ChevronLeft className="h-6.5 w-6.5" strokeWidth={3.5} />
+                              </button>
+                              <span className="w-32 text-center text-[11px] font-black uppercase tracking-wider text-zinc-100">
+                                {quickPlayLayouts[quickPlayLayoutIndex]?.name || 'Full Circuit'}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label="Next course variation"
+                                onClick={() => adjustQuickPlayLayout(1)}
+                                className="flex h-8 w-8 items-center justify-center text-rose-500 hover:text-rose-450 hover:scale-110 active:scale-95 transition-all disabled:opacity-25 disabled:hover:scale-100 disabled:cursor-not-allowed cursor-pointer"
+                                disabled={quickPlayLayoutIndex === quickPlayLayouts.length - 1}
+                              >
+                                <ChevronRight className="h-6.5 w-6.5" strokeWidth={3.5} />
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+
                       <div className="h-[1px] w-full bg-white/10" />
 
                       {/* Driving Mode Selector */}
@@ -4417,7 +4468,7 @@ export default function Garage({
                                   onClick={() => {
                                     const trackId = quickPlayChosenTrack?.id || getDefaultQuickPlayTrackId('city');
                                     const carToDrive = quickPlayCarId || activeCarId;
-                                    if (trackId) startQuickPlayRace(carToDrive, trackId, quickPlayLapCount, quickPlayDifficulty, drivingMode, quickPlayOpponentCount);
+                                    if (trackId) startQuickPlayRace(carToDrive, trackId, quickPlayLapCount, quickPlayDifficulty, drivingMode, quickPlayOpponentCount, quickPlayLayoutId ?? undefined);
                                   }}
                                   className="group relative flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-zinc-950 transition-all cursor-pointer shadow-[0_0_20px_rgba(6,182,212,0.5)] hover:shadow-[0_0_28px_rgba(6,182,212,0.8)] hover:scale-105 active:scale-95"
                                 >

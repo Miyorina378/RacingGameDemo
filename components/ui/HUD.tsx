@@ -8,7 +8,7 @@ import { HUDConfig } from '../option';
 import { TIRE_COMPOUNDS, TireCompoundType } from '../objects/TireCompound';
 import type { SuggestedGearAdvice } from '../engine/SuggestedGearAdvisor';
 import { buildCenterline } from '../modes/centerline';
-import { resolveTrackNodes } from '../modes/trackNodes';
+import { resolveTrackLayout, resolveTrackNodes } from '../modes/trackNodes';
 
 const getTempColorClass = (temp: number, compoundId: string) => {
   const config = TIRE_COMPOUNDS[compoundId as TireCompoundType] || TIRE_COMPOUNDS.normal;
@@ -28,6 +28,8 @@ interface HUDProps {
   checkpointIndex: number;
   totalCheckpoints: number;
   activeTrackId: string;
+  /** Layout being raced, so the minimap draws the variation actually on track. */
+  activeLayoutId?: string | null;
   minimapCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   placement: number;
   totalParticipants: number;
@@ -108,6 +110,7 @@ export default function HUD({
   checkpointIndex,
   totalCheckpoints,
   activeTrackId,
+  activeLayoutId,
   minimapCanvasRef,
   placement,
   totalParticipants,
@@ -177,7 +180,8 @@ export default function HUD({
         minZ = -140;
         maxZ = 140;
       } else {
-        const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
+        const rawTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
+        const activeTrack = rawTrack ? resolveTrackLayout(rawTrack, activeLayoutId) : undefined;
         if (activeTrack && activeTrack.path.length > 0) {
           drawRoad = true;
           const getPos = (pt: THREE.Vector3 | TrackNode) => 'isVector3' in pt ? pt : pt.pos;
@@ -295,7 +299,7 @@ export default function HUD({
     return () => {
       cancelAnimationFrame(animFrameId);
     };
-  }, [activeMode, gameStatus, activeTrackId, minimapCanvasRef, engineRef]);
+  }, [activeMode, gameStatus, activeTrackId, activeLayoutId, minimapCanvasRef, engineRef]);
 
   if (activeMode === 'garage') return null;
 
@@ -374,7 +378,8 @@ export default function HUD({
 
                 {/* Track length */}
                 {hudConfig.showLength && (() => {
-                  const activeTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
+                  const rawTrack = TRACKS_DATABASE.find(t => t.id === activeTrackId);
+                  const activeTrack = rawTrack ? resolveTrackLayout(rawTrack, activeLayoutId) : undefined;
                   const trackLength = activeTrack ? getTrackLength(activeTrack.path.map(p => 'isVector3' in p ? p : p.pos)) : 0;
                   if (trackLength <= 0) return null;
                   return (

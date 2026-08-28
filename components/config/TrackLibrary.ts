@@ -1,4 +1,4 @@
-import { EditorNode, EditorScenery, TimeOfDay } from '../engine/types';
+import { EditorNode, EditorScenery, EditorSpur, TimeOfDay } from '../engine/types';
 
 /**
  * Storage for many custom tracks.
@@ -19,6 +19,8 @@ export interface SavedTrack {
   updatedAt: number;
   nodes: EditorNode[];
   scenery: EditorScenery[];
+  /** Blocked-off branches. Visual only, so they never affect a saved lap. */
+  spurs: EditorSpur[];
   terrain: number[];
   roadWidth: number;
   timeLimit: number;
@@ -47,6 +49,7 @@ export const createEmptyTrack = (name: string): SavedTrack => ({
   updatedAt: Date.now(),
   nodes: [],
   scenery: [],
+  spurs: [],
   terrain: [],
   roadWidth: 18,
   timeLimit: 45,
@@ -71,6 +74,7 @@ const normalize = (raw: Partial<SavedTrack>, fallbackName: string): SavedTrack =
     updatedAt: raw.updatedAt ?? Date.now(),
     nodes: Array.isArray(raw.nodes) ? raw.nodes : [],
     scenery: Array.isArray(raw.scenery) ? raw.scenery : [],
+    spurs: Array.isArray(raw.spurs) ? raw.spurs : [],
     terrain: Array.isArray(raw.terrain) ? raw.terrain : [],
     fogDistance: raw.fogDistance ?? null
   };

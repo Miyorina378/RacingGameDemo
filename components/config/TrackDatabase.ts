@@ -16,6 +16,72 @@ export interface TrackNode {
   rightFence?: boolean;
   sharp?: boolean; // Meet the neighbouring runs as a hard corner instead of a smooth spline
   cornerRadius?: number; // Fillet setback from the vertex. Only used when sharp.
+  /**
+   * Which layouts this node belongs to. Omit for "every layout", which is what
+   * every existing track does, so a node only needs tagging when a variation
+   * actually differs. A short circuit tags its own cut-through nodes, and the
+   * loop it bypasses tags the long-only nodes.
+   */
+  layouts?: string[];
+}
+
+/** One selectable variation of a track, e.g. a long circuit and a short one. */
+export interface TrackLayout {
+  id: string;
+  name: string;
+}
+
+/**
+ * A stretch of road that branches off the circuit and goes nowhere: the closed-off
+ * sections a real track has, where the tarmac carries on past a barrier.
+ *
+ * Decoration only. It is never part of the racing line, the lap, or the collision
+ * surface, so it costs nothing but the mesh.
+ */
+export interface TrackSpur {
+  /**
+   * Layouts that race down this branch instead of the stretch of circuit it
+   * bypasses. Needs both ends attached to the lap, since the course still has to
+   * close. Omit for a branch that is only ever scenery.
+   *
+   * In the layouts that use it the branch becomes the road: it carries the racing
+   * line, the lap and the AI, and the piece of circuit it replaced is left standing
+   * as the closed-off section instead.
+   */
+  raceLayouts?: string[];
+  /**
+   * Node on the circuit this branch leaves from. The junction point itself is taken
+   * from that node, so a spur is always attached to the track rather than floating
+   * near it, and the curb, grass and fence on that side are opened up to let a car
+   * through.
+   */
+  nodeIndex?: number;
+  /** Node on the circuit this branch reconnects to, closing the loop. */
+  endNodeIndex?: number;
+  /** Spur index this branch leaves from. */
+  startSpurIndex?: number;
+  /** Spur index this branch reconnects to. */
+  endSpurIndex?: number;
+  /** The run along the branch. Does not repeat the junction points. */
+  path: THREE.Vector3[];
+  /** Defaults to a little narrower than the main road. */
+  width?: number;
+  /** Per-side overrides. Unset preserves the old track-wide behavior. */
+  leftCurb?: boolean;
+  rightCurb?: boolean;
+  leftFence?: boolean;
+  rightFence?: boolean;
+  /** Grass width in metres; zero disables that side. Unset inherits the track. */
+  leftGrassWidth?: number;
+  rightGrassWidth?: number;
+  /** Missing/terrain follows live ground; authored uses the path point heights. */
+  elevationMode?: 'terrain' | 'authored';
+  /** Barrier across an unattached dead end. Defaults to blocked for legacy saves. */
+  blocked?: boolean;
+  /** Explicit closure across the sampled start, even when it is attached. */
+  blockedStart?: boolean;
+  /** Explicit closure across the sampled end, even when it is attached. */
+  blockedEnd?: boolean;
 }
 
 export interface TrackScenery {
@@ -38,6 +104,13 @@ export interface TrackConfig {
   requiresLicense: boolean;
   baseReward: number;
   path: (THREE.Vector3 | TrackNode)[];
+  /**
+   * Selectable variations of this course. The first entry is the default. Omit for
+   * a track with a single layout, which is every track that predates this.
+   */
+  layouts?: TrackLayout[];
+  /** Blocked-off branches that lead nowhere. Purely visual. */
+  spurs?: TrackSpur[];
   curveType?: 'centripetal' | 'chordal' | 'catmullrom';
   tension?: number;
   scenery?: TrackScenery[];

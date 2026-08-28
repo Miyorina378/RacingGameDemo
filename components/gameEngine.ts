@@ -20,6 +20,7 @@ import {
   GameStatus,
   createDefaultEditorState
 } from './engine/types';
+import { resolveTrackLayout } from './modes/trackNodes';
 import { InputController } from './engine/InputController';
 import { createThreeWorld } from './engine/threeWorld';
 import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
@@ -131,6 +132,8 @@ export class GameEngine {
   /** Camera FOV before the replay director started borrowing the lens. */
   private replayBaseFov = 65;
   public isQuickPlayRace = false;
+  /** Layout the active race or preview is using. Undefined means the whole course. */
+  public activeLayoutId?: string;
   private suggestedGearAdvisor = new SuggestedGearAdvisor();
 
   // Player Stats
@@ -433,7 +436,11 @@ export class GameEngine {
 
   public buildRaceTrack(trackId: string = 'sprint_circuit', options: RaceOptions = {}) {
     this.activeTrackId = trackId;
-    const trackConfig = TRACKS_DATABASE.find(t => t.id === trackId);
+    this.activeLayoutId = options.layoutId;
+    const rawConfig = TRACKS_DATABASE.find(t => t.id === trackId);
+    // The advisor plans corners from the path, so it has to see the same variation
+    // the road is built from.
+    const trackConfig = rawConfig ? resolveTrackLayout(rawConfig, options.layoutId) : undefined;
     this.sky.updateTimeOfDay(trackConfig?.time ?? 'night', trackConfig?.fogDistance);
     this.suggestedGearAdvisor.setTrack(trackConfig || null, true);
     // Set player vehicle driving mode
@@ -450,6 +457,7 @@ export class GameEngine {
 
   public buildPreviewTrack(trackId: string = 'custom') {
     this.activeTrackId = trackId;
+    this.activeLayoutId = this.editorState.previewLayoutId ?? undefined;
     const trackConfig = TRACKS_DATABASE.find(t => t.id === trackId);
     this.sky.updateTimeOfDay(trackConfig?.time ?? 'afternoon', trackConfig?.fogDistance);
     if (this.currentModeInstance instanceof PreviewMode) {
@@ -473,6 +481,20 @@ export class GameEngine {
     // Vehicle keeps a stable root mesh, so swapping its contents does not require
     // rebuilding the active mode or reallocating the full showroom environment.
     this.vehicle.rebuild(carId, color);
+  }
+
+  /** Fly the editor camera to the selected node or prop. */
+  public focusEditorSelection(): void {
+    if (this.currentModeInstance instanceof PreviewMode) {
+      this.currentModeInstance.focusOnSelection();
+    }
+  }
+
+  /** Put the editor camera back on the opening overhead framing. */
+  public resetEditorView(): void {
+    if (this.currentModeInstance instanceof PreviewMode) {
+      this.currentModeInstance.resetView();
+    }
   }
 
   public triggerPurchaseCelebration() {
@@ -997,6 +1019,8 @@ export class GameEngine {
 
   private handlePointerDown = (e: PointerEvent) => {
     if (this.activeMode !== 'garage') return;
+    // PreviewMode owns its own camera, including in the editor.
+    if (this.currentModeInstance instanceof PreviewMode) return;
 
     // Only capture if the click target is the canvas itself, not UI elements on top
     if (e.target !== this.canvas) return;
@@ -1017,6 +1041,7 @@ export class GameEngine {
 
   private handlePointerMove = (e: PointerEvent) => {
     if (!this.isPointerDown || this.activeMode !== 'garage') return;
+    if (this.currentModeInstance instanceof PreviewMode) return;
 
     const deltaX = e.clientX - this.prevPointerX;
     const deltaY = e.clientY - this.prevPointerY;
@@ -1039,6 +1064,10 @@ export class GameEngine {
 
   private handleWheel = (e: WheelEvent) => {
     if (this.activeMode !== 'garage') return;
+    // The editor runs inside a PreviewMode that the engine still calls 'garage'.
+    // Without this the showroom zoom ate every editor wheel event: it cancelled the
+    // scroll, moved a radius nothing was reading, and gave the editor no zoom at all.
+    if (this.currentModeInstance instanceof PreviewMode) return;
 
     const rect = this.canvas.getBoundingClientRect();
     const x = e.clientX;
