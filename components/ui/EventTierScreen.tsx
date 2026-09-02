@@ -483,10 +483,10 @@ export default function EventTierScreen({
         <img
           src={tierConfig.bgImage}
           alt={tierConfig.name}
-          className="w-full h-full object-cover object-center scale-105 filter brightness-[0.75] contrast-[1.05] transition-all duration-700 ease-in-out"
+          className="w-full h-full object-cover object-center scale-105 filter brightness-[0.95] contrast-[1.05] transition-all duration-700 ease-in-out"
         />
         {/* Subtle dark ambient scrim matching event card */}
-        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/70 via-zinc-950/20 to-zinc-950/80" />
+        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/40 via-transparent to-zinc-950/50" />
       </div>
 
       {/* 2. TOP BAR: HORIZONTALLY REVERSED SVG BACK BUTTON (Left) & BANK (Right) ONLY */}
@@ -585,17 +585,12 @@ export default function EventTierScreen({
                 }}
                 onMouseLeave={() => setHoveredEvent(null)}
                 className={`event-card-item snap-center shrink-0 group relative flex flex-row h-[500px] sm:h-[530px] rounded-[32px] overflow-hidden transition-all duration-500 ease-in-out ${isExpanded
-                  ? 'w-[820px] sm:w-[980px] md:w-[1080px] lg:w-[1140px] z-20 cursor-default shadow-[0_25px_70px_rgba(0,0,0,0.6)]'
+                  ? 'w-[820px] sm:w-[980px] md:w-[1080px] lg:w-[1140px] z-20 cursor-default'
                   : 'w-[240px] sm:w-[255px] cursor-pointer hover:scale-[1.035] hover:-translate-y-2.5'
                   } ${isRevealed && isScreenMounted && !isScreenExiting
                     ? 'opacity-100 translate-y-0 pointer-events-auto'
                     : 'opacity-0 translate-y-[120vh] pointer-events-none'
-                  } ${isAllWon
-                    ? 'bg-zinc-950/60'
-                    : isLocked
-                      ? 'bg-zinc-950/70'
-                      : 'bg-zinc-950/50'
-                  }`}
+                  } bg-transparent`}
               >
                 {/* Left Column: Event Artwork Poster Card */}
                 <div
@@ -606,7 +601,7 @@ export default function EventTierScreen({
                       setExpandedEventId(null);
                     }
                   }}
-                  className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none cursor-pointer rounded-l-[32px]"
+                  className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none cursor-pointer rounded-l-[32px] bg-zinc-950"
                   title={isExpanded ? 'Click poster to collapse' : undefined}
                 >
                   {/* Inner Box Artwork Image */}
@@ -614,7 +609,7 @@ export default function EventTierScreen({
                     <img
                       src={event.bgImage}
                       alt={event.name}
-                      className="w-full h-full object-cover object-center filter brightness-[0.80] transition-all duration-700 ease-in-out"
+                      className="w-full h-full object-cover object-center filter brightness-[0.90] transition-all duration-700 ease-in-out"
                     />
                   </div>
 
@@ -638,13 +633,13 @@ export default function EventTierScreen({
                   {/* Bottom: Checkered Flag Pill with Races Completed */}
                   <div className="relative z-10 bg-slate-950/85 border border-white/15 backdrop-blur-md rounded-2xl p-2.5 sm:p-3 flex items-center gap-3 shadow-xl">
                     <div className="w-10 h-10 rounded-full bg-slate-800/90 border border-white/10 flex items-center justify-center shrink-0">
-                      <Flag className="w-5 h-5 text-cyan-400 fill-cyan-400/20" />
+                      <Flag className="w-5 h-5 text-[#38ecff] fill-[#38ecff]/20" />
                     </div>
                     <div className="flex flex-col min-w-0 text-left">
                       <span className="text-base sm:text-lg font-black font-mono text-white leading-none">
                         {wins} / {totalStages}
                       </span>
-                      <span className="text-[8px] sm:text-[9px] font-extrabold tracking-wider text-cyan-300 uppercase mt-1">
+                      <span className="text-[8px] sm:text-[9px] font-extrabold tracking-wider text-[#38ecff] uppercase mt-1">
                         RACES COMPLETED
                       </span>
                     </div>
@@ -661,7 +656,7 @@ export default function EventTierScreen({
                 >
                   {/* MIDDLE COLUMN: Regulation, Tires Restrictions, License, Prize Table */}
                   <div
-                    className="flex-1 flex flex-col justify-between px-6 sm:px-8 py-6 bg-[#8f9ca8] text-slate-950 select-none overflow-y-auto scrollbar-none min-w-[320px]"
+                    className="flex-1 flex flex-col justify-between px-6 sm:px-8 py-6 bg-[#dbe5ee] text-slate-950 select-none overflow-y-auto scrollbar-none min-w-[320px]"
                     style={{
                       WebkitMaskImage:
                         'radial-gradient(circle 14px at 100% 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 100% 100%, transparent 13.5px, black 14px)',
@@ -673,12 +668,12 @@ export default function EventTierScreen({
                   >
                     {/* 1. Regulation */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
                         <SlidersHorizontal className="w-4 h-4" />
                       </div>
                       <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
-                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
-                          REGULATION
+                        <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
+                           REGULATION
                         </h4>
                         <ul className="flex flex-col gap-0.5">
                           {regulations.map((condition, rIdx) => {
@@ -696,16 +691,16 @@ export default function EventTierScreen({
                       </div>
                     </div>
 
-                    {/* 50% brightness divider line */}
-                    <div className="h-px w-full bg-[#758491] my-1.5" />
+                    {/* Divider line */}
+                    <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
 
                     {/* 2. Tires Restrictions */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
                         <Disc className="w-4 h-4" />
                       </div>
                       <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
-                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
+                        <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
                           TIRES RESTRICTIONS
                         </h4>
                         <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
@@ -715,16 +710,16 @@ export default function EventTierScreen({
                       </div>
                     </div>
 
-                    {/* 50% brightness divider line */}
-                    <div className="h-px w-full bg-[#758491] my-1.5" />
+                    {/* Divider line */}
+                    <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
 
                     {/* 3. License */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
                         <CreditCard className="w-4 h-4" />
                       </div>
                       <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
-                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
+                        <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
                           LICENSE
                         </h4>
                         <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
@@ -734,16 +729,16 @@ export default function EventTierScreen({
                       </div>
                     </div>
 
-                    {/* 50% brightness divider line */}
-                    <div className="h-px w-full bg-[#758491] my-1.5" />
+                    {/* Divider line */}
+                    <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
 
                     {/* 4. Prize Table */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
                         <Trophy className="w-4 h-4" />
                       </div>
                       <div className="flex flex-col gap-1.5 min-w-0 flex-1 text-left">
-                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
+                        <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
                           PRIZE
                         </h4>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-0.5">
@@ -752,7 +747,7 @@ export default function EventTierScreen({
                             {prizeRows.map(([left]) => (
                               <div
                                 key={left.rank}
-                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-[#7a8b98] border border-[#697986]"
+                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
                               >
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-xs font-black text-slate-950 w-5">
@@ -791,7 +786,7 @@ export default function EventTierScreen({
                             {prizeRows.map(([, right]) => (
                               <div
                                 key={right.rank}
-                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-[#7a8b98] border border-[#697986]"
+                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
                               >
                                 <span className="text-xs font-black text-slate-950">
                                   {right.place.split(' ')[0]}
@@ -808,11 +803,11 @@ export default function EventTierScreen({
                   </div>
 
                   {/* Vertical Ticket Perforation Divider */}
-                  <div className="relative w-0 flex items-stretch border-r-2 border-dashed border-[#697986] my-3.5 z-10" />
+                  <div className="relative w-0 flex items-stretch border-r-2 border-dashed border-[#8da0b3] my-3.5 z-10" />
 
                   {/* RIGHT COLUMN: Ticket Stub (Stages List + Barcode + ADMIT ONE) */}
                   <div
-                    className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-5 bg-[#8f9ca8] select-none rounded-r-[32px] overflow-hidden"
+                    className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-5 bg-[#dbe5ee] select-none rounded-r-[32px] overflow-hidden"
                     style={{
                       WebkitMaskImage:
                         'radial-gradient(circle 14px at 0 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 0 100%, transparent 13.5px, black 14px)',
@@ -825,18 +820,18 @@ export default function EventTierScreen({
                     {/* Soft ambient cyan glow in background top right */}
                     <div
                       aria-hidden
-                      className="absolute -top-16 -right-16 w-44 h-44 rounded-full bg-cyan-400/15 blur-xl pointer-events-none"
+                      className="absolute -top-16 -right-16 w-44 h-44 rounded-full bg-[#38ecff]/25 blur-xl pointer-events-none"
                     />
 
                     {/* Top: Flag Icon + Series Title + Dash */}
                     <div className="relative z-10 flex flex-col text-left">
-                      <div className="w-8 h-8 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 mb-1.5 shadow-sm">
+                      <div className="w-8 h-8 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 mb-1.5 shadow-sm">
                         <Flag className="w-4 h-4 fill-slate-950/20" />
                       </div>
                       <h3 className="text-base sm:text-lg font-black text-slate-950 uppercase tracking-wide leading-tight">
                         {event.name}
                       </h3>
-                      <div className="w-5 h-1 bg-[#0e7490] rounded-full mt-1.5 mb-2 shadow-sm" />
+                      <div className="w-5 h-1 bg-[#38ecff] rounded-full mt-1.5 mb-2 shadow-sm" />
                     </div>
 
                     {/* Middle: Stage list (Canopy Speedway, Sprint Circuit, etc.) */}
@@ -851,12 +846,12 @@ export default function EventTierScreen({
                               e.stopPropagation();
                               if (!isStageLocked) handleLaunchStage(event, stage);
                             }}
-                            className={`flex items-center gap-2.5 p-1.5 rounded-xl border border-[#697986] bg-[#7a8b98] hover:border-[#529eaf] hover:bg-[#6e7f8c] transition-all cursor-pointer group/stage ${isStageLocked ? 'opacity-40 cursor-not-allowed' : ''
+                            className={`flex items-center gap-2.5 p-1.5 rounded-xl border border-[#b8c8d6] bg-white/70 hover:border-[#38ecff] hover:bg-white transition-all cursor-pointer group/stage shadow-sm ${isStageLocked ? 'opacity-40 cursor-not-allowed' : ''
                               }`}
                             title={isStageLocked ? 'License required' : `Race ${trackNameFor(stage)}`}
                           >
                             {/* Curved circuit path icon in cyan ring */}
-                            <div className="w-8 h-8 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center shrink-0 text-slate-950 group-hover/stage:bg-cyan-600 group-hover/stage:text-white transition-colors shadow-sm">
+                            <div className="w-8 h-8 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center shrink-0 text-slate-950 group-hover/stage:bg-[#28cee0] group-hover/stage:text-white transition-colors shadow-sm">
                               <svg className="w-4 h-4 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
                                 <path d="M4 12a8 8 0 0 1 16 0c0 4-3 7-8 7s-8-3-8-7z" />
                               </svg>
@@ -880,7 +875,7 @@ export default function EventTierScreen({
                         e.stopPropagation();
                         if (eventStages[0]) handleLaunchStage(event, eventStages[0]);
                       }}
-                      className="relative z-10 pt-2.5 border-t border-[#758491] flex flex-col items-center gap-1.5 cursor-pointer group/barcode hover:opacity-90 transition-opacity"
+                      className="relative z-10 pt-2.5 border-t border-[#b4c3d0] flex flex-col items-center gap-1.5 cursor-pointer group/barcode hover:opacity-90 transition-opacity"
                       title="Enter Event Race"
                     >
                       {/* Crisp vertical barcode bars */}
@@ -913,7 +908,7 @@ export default function EventTierScreen({
                         <span className="w-[2px] h-full bg-slate-950" />
                       </div>
 
-                      <div className="flex items-center gap-1 text-[9px] font-black text-cyan-950 tracking-widest uppercase group-hover/barcode:text-cyan-900 transition-colors">
+                      <div className="flex items-center gap-1 text-[9px] font-black text-cyan-950 tracking-widest uppercase group-hover/barcode:text-[#38ecff] transition-colors">
                         <span>›</span>
                         <span>ADMIT ONE</span>
                         <span>‹</span>
