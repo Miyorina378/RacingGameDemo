@@ -90,6 +90,7 @@ import {
   hasAnyLicense,
   loadLicenseProgress
 } from './config/LicenseDatabase';
+import { recordStageResult } from './config/CareerEventDatabase';
 
 // Node shape used by the in-game track editor. Left/right curb, fence, and grass
 // width are per-node overrides: leave a field undefined to inherit the track-wide
@@ -1599,6 +1600,24 @@ export default function Game() {
             spread: 60,
             origin: { y: 0.6 }
           });
+
+          // Record the career stage result. The finishing place is taken from the
+          // result table rather than React state, which the callback closes over
+          // before the race has run.
+          if (typeof window !== 'undefined') {
+            const currentCareerEventStr = localStorage.getItem('cyberdrive_current_career_event');
+            if (currentCareerEventStr) {
+              try {
+                const { eventId, stageId } = JSON.parse(currentCareerEventStr);
+                const playerResult = results?.find((entry) => entry?.isPlayer);
+                const finishedPlace =
+                  typeof playerResult?.pos === 'number' && playerResult.pos > 0
+                    ? playerResult.pos
+                    : 1;
+                recordStageResult(eventId, stageId, finishedPlace);
+              } catch {}
+            }
+          }
 
           // Sync license state from engine to React UI
           if (engineRef.current) {
