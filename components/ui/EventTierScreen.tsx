@@ -9,7 +9,10 @@ import {
   Sparkles,
   ShieldCheck,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  SlidersHorizontal,
+  Disc,
+  CreditCard
 } from 'lucide-react';
 import {
   CareerTierId,
@@ -130,9 +133,8 @@ const EventSubtitleBar = ({ event }: { event: CareerEvent | null }) => {
 
   return (
     <div
-      className={`dealer-movie-bar pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden border-y border-white/12 bg-black/92 px-6 py-4 text-center shadow-[0_0_35px_rgba(0,0,0,0.65)] transition-all duration-400 ease-in-out ${
-        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
-      }`}
+      className={`dealer-movie-bar pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden border-y border-white/12 bg-black/92 px-6 py-4 text-center shadow-[0_0_35px_rgba(0,0,0,0.65)] transition-all duration-400 ease-in-out ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
+        }`}
     >
       <div ref={windowRef} className="dealer-marquee-window text-sm font-semibold text-zinc-100">
         <div ref={trackRef} className={`dealer-marquee-track ${isOverflowing ? 'is-overflowing' : 'is-centered'}`}>
@@ -190,9 +192,8 @@ const StagePlacementBadge = ({
   if (placement === null) {
     return (
       <div
-        className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border-2 border-dashed ${
-          light ? 'border-zinc-300/90' : 'border-zinc-700'
-        }`}
+        className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border-2 border-dashed ${light ? 'border-zinc-300/90' : 'border-zinc-700'
+          }`}
         title="Not raced yet"
         aria-label="Not raced yet"
       >
@@ -207,9 +208,8 @@ const StagePlacementBadge = ({
   if (medal) {
     return (
       <div
-        className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-full ring-1 ${
-          medal.face
-        } ${medal.glow} ${light ? 'ring-black/10' : 'ring-white/20'}`}
+        className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-full ring-1 ${medal.face
+          } ${medal.glow} ${light ? 'ring-black/10' : 'ring-white/20'}`}
         title={`${medal.label} — finished ${ordinal(placement)}`}
         aria-label={`Finished ${ordinal(placement)}`}
       >
@@ -222,11 +222,10 @@ const StagePlacementBadge = ({
 
   return (
     <div
-      className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border ${
-        light
-          ? 'border-zinc-200 bg-zinc-100 text-zinc-500'
-          : 'border-zinc-800 bg-zinc-900 text-zinc-400'
-      }`}
+      className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border ${light
+        ? 'border-zinc-200 bg-zinc-100 text-zinc-500'
+        : 'border-zinc-800 bg-zinc-900 text-zinc-400'
+        }`}
       title={`Finished ${ordinal(placement)}`}
       aria-label={`Finished ${ordinal(placement)}`}
     >
@@ -254,9 +253,8 @@ const SectionLabel = ({
       aria-hidden
     />
     <h4
-      className={`text-[10px] font-black uppercase tracking-[0.3em] ${
-        light ? 'text-zinc-500' : 'text-zinc-400'
-      }`}
+      className={`text-[10px] font-black uppercase tracking-[0.3em] ${light ? 'text-zinc-500' : 'text-zinc-400'
+        }`}
     >
       {title}
     </h4>
@@ -267,11 +265,10 @@ const SectionLabel = ({
 const HairLine = ({ light }: { light: boolean }) => (
   <div
     aria-hidden
-    className={`h-px w-full ${
-      light
-        ? 'bg-gradient-to-r from-zinc-300 via-zinc-200 to-transparent'
-        : 'bg-gradient-to-r from-zinc-700 via-zinc-800 to-transparent'
-    }`}
+    className={`h-px w-full ${light
+      ? 'bg-gradient-to-r from-zinc-300 via-zinc-200 to-transparent'
+      : 'bg-gradient-to-r from-zinc-700 via-zinc-800 to-transparent'
+      }`}
   />
 );
 
@@ -337,6 +334,13 @@ export default function EventTierScreen({
   const tierEvents = useMemo(() => {
     return CAREER_EVENTS.filter((e) => e.tier === activeTier);
   }, [activeTier]);
+
+  const activeDisplayEvent =
+    hoveredEvent ||
+    (expandedEventId ? tierEvents.find((e) => e.id === expandedEventId) : null) ||
+    tierEvents[activeSlideIndex] ||
+    tierEvents[0] ||
+    null;
 
   // Seamless bottom-to-top staggered reveal (0% to 100% opacity, ease-in-out)
   useEffect(() => {
@@ -469,12 +473,10 @@ export default function EventTierScreen({
       startRace(stage.trackId, stage.layoutId);
     }, 380);
   };
-
   return (
     <div
-      className={`relative inset-0 w-full h-full flex flex-col bg-zinc-950 text-white select-none overflow-hidden font-sans transition-opacity duration-500 ease-in-out ${
-        isScreenMounted && !isScreenExiting ? 'opacity-100' : 'opacity-0'
-      }`}
+      className={`relative inset-0 w-full h-full flex flex-col bg-zinc-950 text-white select-none overflow-hidden font-sans transition-opacity duration-500 ease-in-out ${isScreenMounted && !isScreenExiting ? 'opacity-100' : 'opacity-0'
+        }`}
     >
       {/* 1. DYNAMIC BACKGROUND IMAGE MATCHING EVENT CARD LIGHTING */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
@@ -518,9 +520,8 @@ export default function EventTierScreen({
         <button
           disabled={activeSlideIndex === 0}
           onClick={handlePrevSlide}
-          className={`absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all shadow-2xl backdrop-blur-md cursor-pointer ${
-            activeSlideIndex === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
-          }`}
+          className={`absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all shadow-2xl backdrop-blur-md cursor-pointer ${activeSlideIndex === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
+            }`}
         >
           <ChevronLeft className="w-6 h-6 text-zinc-200" />
         </button>
@@ -529,9 +530,8 @@ export default function EventTierScreen({
         <button
           disabled={activeSlideIndex === tierEvents.length - 1}
           onClick={handleNextSlide}
-          className={`absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all shadow-2xl backdrop-blur-md cursor-pointer ${
-            activeSlideIndex === tierEvents.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
-          }`}
+          className={`absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all shadow-2xl backdrop-blur-md cursor-pointer ${activeSlideIndex === tierEvents.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
+            }`}
         >
           <ChevronRight className="w-6 h-6 text-zinc-200" />
         </button>
@@ -541,7 +541,12 @@ export default function EventTierScreen({
           ref={carouselRef}
           onScroll={handleScroll}
           className="w-full flex items-center gap-12 sm:gap-16 overflow-x-auto scroll-smooth snap-x snap-mandatory px-16 md:px-36 py-8 scrollbar-none"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          style={{
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 80px, black calc(100% - 80px), transparent 100%)',
+            maskImage: 'linear-gradient(to right, transparent 0%, black 80px, black calc(100% - 80px), transparent 100%)'
+          }}
         >
           {tierEvents.map((event, idx) => {
             const wins = getEventFirstPlaceCount(event, eventProgress);
@@ -555,29 +560,22 @@ export default function EventTierScreen({
             const tireRestriction = getEventTireRestriction(event);
             const prizeTable = getEventPrizeTable(event);
             const licenseRequirement = getEventLicenseRequirement(event);
-            const eventStages = getEventStages(event);
-            // Two prize columns: 1st-3rd on the left, 4th-6th beside them.
-            const prizeRows = [0, 1, 2].map((row) => [prizeTable[row], prizeTable[row + 3]]);
-
-            // Circumference for r=42 is 2 * PI * 42 = 263.89
-            const circumference = 263.89;
-            const strokeOffset = circumference - (circumference * wins) / (totalStages || 1);
+            const eventStages = event.stages;
+            const prizeRows = [
+              [prizeTable[0], prizeTable[3]],
+              [prizeTable[1], prizeTable[4]],
+              [prizeTable[2], prizeTable[5]],
+            ];
 
             return (
               <div
                 key={event.id}
                 onClick={() => {
-                  // With the close button gone, the artwork itself is the toggle:
-                  // clicking the open card folds it again, as Escape does.
-                  playSoundBlip('select');
-                  if (isExpanded) {
-                    setExpandedEventId(null);
-                    return;
-                  }
-                  setExpandedEventId(event.id);
-                  setTimeout(() => {
+                  if (!isExpanded) {
+                    playSoundBlip('select');
+                    setExpandedEventId(event.id);
                     scrollToSlide(idx);
-                  }, 80);
+                  }
                 }}
                 onMouseEnter={() => {
                   setHoveredEvent(event);
@@ -586,468 +584,341 @@ export default function EventTierScreen({
                   }
                 }}
                 onMouseLeave={() => setHoveredEvent(null)}
-                className={`event-card-item snap-center shrink-0 group relative flex flex-row h-[500px] sm:h-[530px] rounded-3xl border overflow-hidden transition-all duration-500 ease-in-out backdrop-blur-md ${
-                  isExpanded
-                    ? `w-[700px] sm:w-[900px] md:w-[1020px] z-20 cursor-pointer ${
-                        isLightTheme
-                          ? 'ring-1 ring-zinc-900/10 shadow-[0_28px_70px_rgba(9,9,11,0.45)] bg-[#f6f6f6] border-[#f6f6f6]'
-                          : 'ring-2 ring-cyan-400/60 shadow-[0_0_45px_rgba(6,182,212,0.3)] bg-zinc-950/95'
-                      }`
-                    : 'w-[240px] sm:w-[255px] cursor-pointer hover:scale-[1.035] hover:-translate-y-2.5 ' +
-                      (isActiveSlide ? 'ring-2 ring-white/30' : 'opacity-85 hover:opacity-100')
-                } ${
-                  isRevealed && isScreenMounted && !isScreenExiting
+                className={`event-card-item snap-center shrink-0 group relative flex flex-row h-[500px] sm:h-[530px] rounded-[32px] overflow-hidden transition-all duration-500 ease-in-out ${isExpanded
+                  ? 'w-[820px] sm:w-[980px] md:w-[1080px] lg:w-[1140px] z-20 cursor-default shadow-[0_25px_70px_rgba(0,0,0,0.6)]'
+                  : 'w-[240px] sm:w-[255px] cursor-pointer hover:scale-[1.035] hover:-translate-y-2.5'
+                  } ${isRevealed && isScreenMounted && !isScreenExiting
                     ? 'opacity-100 translate-y-0 pointer-events-auto'
                     : 'opacity-0 translate-y-[120vh] pointer-events-none'
-                } ${
-                  isAllWon
-                    ? 'bg-zinc-950/60 border-amber-500/70'
+                  } ${isAllWon
+                    ? 'bg-zinc-950/60'
                     : isLocked
-                    ? 'bg-zinc-950/70 border-zinc-800 opacity-75'
-                    : 'bg-zinc-950/50 border-zinc-700/60 hover:border-zinc-400'
-                }`}
+                      ? 'bg-zinc-950/70'
+                      : 'bg-zinc-950/50'
+                  }`}
               >
-                {/* Left Column: Event Artwork Card Box */}
-                <div className="relative w-[240px] sm:w-[255px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none">
-                  {/* Inner Box Artwork Image with Original Atmospheric Lighting */}
+                {/* Left Column: Event Artwork Poster Card */}
+                <div
+                  onClick={(e) => {
+                    if (isExpanded) {
+                      e.stopPropagation();
+                      playSoundBlip('select');
+                      setExpandedEventId(null);
+                    }
+                  }}
+                  className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none cursor-pointer rounded-l-[32px]"
+                  title={isExpanded ? 'Click poster to collapse' : undefined}
+                >
+                  {/* Inner Box Artwork Image */}
                   <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
                     <img
                       src={event.bgImage}
                       alt={event.name}
-                      className="w-full h-full object-cover object-center filter brightness-[0.75] group-hover:brightness-[0.9] transition-all duration-700 ease-in-out"
+                      className="w-full h-full object-cover object-center filter brightness-[0.80] transition-all duration-700 ease-in-out"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/80 via-zinc-950/30 to-zinc-950/90" />
-                    {/* On the light card the poster feathers into the paper instead of
-                        stopping at a hard seam. */}
-                    {isExpanded && isLightTheme && (
-                      <div
-                        aria-hidden
-                        className="absolute inset-y-0 right-0 w-16 bg-gradient-to-r from-transparent via-[#f6f6f6]/55 to-[#f6f6f6]"
-                      />
-                    )}
                   </div>
 
-                  {/* Top: Series Name & License Req Only */}
-                  <div className="relative z-10 flex flex-col text-center pt-2 px-1">
+                  {/* Top: Event Title + Dash */}
+                  <div className="relative z-10 flex flex-col pt-2 text-left">
                     {isLocked && (
-                      <div className="flex items-center justify-center gap-1 text-[9px] font-mono text-rose-400 bg-rose-950/85 border border-rose-800/60 px-2.5 py-0.5 rounded-md mb-2.5 w-fit mx-auto">
+                      <div className="flex items-center gap-1 text-[9px] font-mono text-rose-400 bg-rose-950/85 border border-rose-800/60 px-2.5 py-0.5 rounded-md mb-2.5 w-fit">
                         <Lock className="w-3 h-3" />
                         <span>LICENSE REQ</span>
                       </div>
                     )}
-                    <h3 className="text-lg font-black text-white uppercase tracking-wide group-hover:text-white transition-colors leading-snug drop-shadow-sm">
+                    <h3 className="text-2xl sm:text-[28px] font-black text-white uppercase tracking-wider leading-[1.05] drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]">
                       {event.name}
                     </h3>
+                    <div className="w-6 h-1 bg-white/90 rounded-full mt-2.5 shadow-sm" />
                   </div>
 
                   {/* Middle Spacer */}
                   <div className="flex-1" />
 
-                  {/* Bottom / Lower Section: Circle + 0/3 Side-by-Side */}
-                  <div className="relative z-10 pb-3 flex items-center justify-center gap-3.5 w-full">
-                    {/* Perfect Round Circle Indicator */}
-                    <div className="relative w-14 h-14 aspect-square rounded-full shrink-0 flex items-center justify-center">
-                      <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
-                        <circle
-                          cx="50"
-                          cy="50"
-                          r="42"
-                          fill="rgba(10, 10, 16, 0.85)"
-                          stroke="rgba(255, 255, 255, 0.18)"
-                          strokeWidth="5"
-                        />
-                        {wins > 0 && !isAllWon && (
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="42"
-                            fill="none"
-                            stroke={event.accentColor}
-                            strokeWidth="5"
-                            strokeDasharray={circumference}
-                            strokeDashoffset={strokeOffset}
-                            strokeLinecap="round"
-                            className="transition-all duration-700 ease-in-out"
-                          />
-                        )}
-                        {isAllWon && (
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="42"
-                            fill="rgba(245, 158, 11, 0.25)"
-                            stroke="#f59e0b"
-                            strokeWidth="5"
-                            className="animate-pulse"
-                          />
-                        )}
-                      </svg>
-                      {isAllWon && (
-                        <div className="relative z-10 flex flex-col items-center justify-center">
-                          <Trophy className="w-7 h-7 text-amber-400 fill-amber-400 animate-bounce" />
-                          <Sparkles className="w-3 h-3 text-yellow-300 absolute -top-1 -right-1 animate-spin" />
-                        </div>
-                      )}
+                  {/* Bottom: Checkered Flag Pill with Races Completed */}
+                  <div className="relative z-10 bg-slate-950/85 border border-white/15 backdrop-blur-md rounded-2xl p-2.5 sm:p-3 flex items-center gap-3 shadow-xl">
+                    <div className="w-10 h-10 rounded-full bg-slate-800/90 border border-white/10 flex items-center justify-center shrink-0">
+                      <Flag className="w-5 h-5 text-cyan-400 fill-cyan-400/20" />
                     </div>
-
-                    <span
-                      className={`text-2xl sm:text-3xl font-black font-mono tracking-wider ${
-                        isAllWon ? 'text-amber-400' : wins > 0 ? 'text-cyan-400' : 'text-zinc-100'
-                      }`}
-                    >
-                      {wins}/{totalStages}
-                    </span>
+                    <div className="flex flex-col min-w-0 text-left">
+                      <span className="text-base sm:text-lg font-black font-mono text-white leading-none">
+                        {wins} / {totalStages}
+                      </span>
+                      <span className="text-[8px] sm:text-[9px] font-extrabold tracking-wider text-cyan-300 uppercase mt-1">
+                        RACES COMPLETED
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Right Expanded Block: rules on one half, the track tickets on the other */}
+                {/* Right Expanded Block: Middle Details + Seam + Ticket Stub (50% brightness white paper tone) */}
                 <div
-                  className={`transition-all duration-500 ease-in-out flex flex-row min-w-0 overflow-hidden ${
-                    isLightTheme
-                      ? 'bg-[#f6f6f6] border-l border-zinc-200'
-                      : 'bg-zinc-950/95 border-l border-zinc-800/80'
-                  } ${
-                    isExpanded
-                      ? 'w-[460px] sm:w-[645px] md:w-[765px] opacity-100'
-                      : 'w-0 max-w-0 opacity-0 pointer-events-none'
-                  }`}
+                  className={`transition-all duration-500 ease-in-out flex flex-row min-w-0 flex-1 overflow-hidden ${isExpanded
+                    ? 'opacity-100'
+                    : 'w-0 max-w-0 opacity-0 pointer-events-none'
+                    }`}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {/* LEFT HALF: entry rules, prize money, license */}
+                  {/* MIDDLE COLUMN: Regulation, Tires Restrictions, License, Prize Table */}
                   <div
-                    className={`flex w-1/2 shrink-0 flex-col gap-4 overflow-y-auto px-6 py-6 text-left scrollbar-thin ${
-                      isLightTheme
-                        ? 'scrollbar-thumb-zinc-200 text-zinc-800'
-                        : 'scrollbar-thumb-zinc-800 text-zinc-200'
-                    }`}
+                    className="flex-1 flex flex-col justify-between px-6 sm:px-8 py-6 bg-[#8f9ca8] text-slate-950 select-none overflow-y-auto scrollbar-none min-w-[320px]"
+                    style={{
+                      WebkitMaskImage:
+                        'radial-gradient(circle 14px at 100% 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 100% 100%, transparent 13.5px, black 14px)',
+                      maskImage:
+                        'radial-gradient(circle 14px at 100% 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 100% 100%, transparent 13.5px, black 14px)',
+                      WebkitMaskComposite: 'destination-in',
+                      maskComposite: 'intersect'
+                    }}
                   >
-                    {/* Regulation */}
-                    <section className="flex flex-col gap-2.5">
-                      <SectionLabel
-                        title="Regulation"
-                        accent={event.accentColor}
-                        light={isLightTheme}
-                      />
-                      {regulations.length > 1 ? (
-                        <ul className="flex flex-col gap-2">
-                          {regulations.map((condition, rIdx) => (
-                            <li key={rIdx} className="flex items-start gap-2.5">
-                              <span
-                                aria-hidden
-                                className="mt-[7px] h-1.5 w-1.5 shrink-0 rotate-45"
-                                style={{ backgroundColor: event.accentColor }}
-                              />
-                              <span
-                                className={`text-[13px] font-bold leading-snug ${
-                                  isLightTheme ? 'text-zinc-900' : 'text-zinc-100'
-                                }`}
-                              >
-                                {condition.label}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p
-                          className={`text-[15px] font-black leading-snug tracking-tight ${
-                            isLightTheme ? 'text-zinc-900' : 'text-white'
-                          }`}
-                        >
-                          {regulations[0]?.label ?? 'Open Regulation'}
-                        </p>
-                      )}
-                    </section>
-
-                    <HairLine light={isLightTheme} />
-
-                    {/* Tires Restriction — compound swatches come from the tire data */}
-                    <section className="flex flex-col gap-2.5">
-                      <SectionLabel
-                        title="Tires Restriction"
-                        accent={event.accentColor}
-                        light={isLightTheme}
-                      />
-                      <div className="flex flex-wrap gap-1.5">
-                        {tireRestriction.allowed.map((compoundId) => {
-                          const compound = TIRE_COMPOUNDS[compoundId];
-                          return (
-                            <span
-                              key={compoundId}
-                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${
-                                isLightTheme
-                                  ? 'border-zinc-200 bg-zinc-50 text-zinc-700'
-                                  : 'border-zinc-800 bg-zinc-900/70 text-zinc-300'
-                              }`}
-                            >
-                              <span
-                                aria-hidden
-                                className="h-2 w-2 rounded-full ring-1 ring-black/10"
-                                style={{ backgroundColor: compound.colorHex }}
-                              />
-                              {compound.name}
-                            </span>
-                          );
-                        })}
+                    {/* 1. Regulation */}
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                        <SlidersHorizontal className="w-4 h-4" />
                       </div>
-                      <p
-                        className={`text-[11px] font-semibold ${
-                          isLightTheme ? 'text-zinc-500' : 'text-zinc-400'
-                        }`}
-                      >
-                        {tireRestriction.label}
-                      </p>
-                    </section>
+                      <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
+                          REGULATION
+                        </h4>
+                        <ul className="flex flex-col gap-0.5">
+                          {regulations.map((condition, rIdx) => {
+                            const labelText = condition.label.toLowerCase().includes('only')
+                              ? condition.label
+                              : `${condition.label} only`;
+                            return (
+                              <li key={rIdx} className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                                <span className="text-slate-950 text-[10px]">•</span>
+                                <span>{labelText}</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    </div>
 
-                    <HairLine light={isLightTheme} />
+                    {/* 50% brightness divider line */}
+                    <div className="h-px w-full bg-[#758491] my-1.5" />
 
-                    {/* Prize */}
-                    <section className="flex flex-col gap-2.5">
-                      <SectionLabel
-                        title="Prize"
-                        accent={event.accentColor}
-                        light={isLightTheme}
-                      />
-                      <table className="w-full border-collapse text-left">
-                        <thead>
-                          <tr
-                            className={`text-[9px] font-black uppercase tracking-[0.2em] ${
-                              isLightTheme ? 'text-zinc-400' : 'text-zinc-500'
-                            }`}
-                          >
-                            <th className="pb-1.5 pr-2 font-black">Place</th>
-                            <th className="pb-1.5 pr-4 text-right font-black">Prize</th>
-                            <th className="pb-1.5 pr-2 font-black">Place</th>
-                            <th className="pb-1.5 text-right font-black">Prize</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {prizeRows.map(([left, right]) => (
-                            <tr
-                              key={left.rank}
-                              className={`border-t ${
-                                isLightTheme ? 'border-zinc-100' : 'border-zinc-800/70'
-                              }`}
-                            >
-                              {[left, right].map((payout, cellIdx) => (
-                                <React.Fragment key={payout.rank}>
-                                  <td className="py-1.5 pr-2 align-middle">
-                                    <span className="flex items-center gap-1.5 whitespace-nowrap">
-                                      <span
-                                        aria-hidden
-                                        className="h-1.5 w-1.5 rounded-full"
-                                        style={{ backgroundColor: payout.trophyColor }}
-                                      />
-                                      <span
-                                        className={`text-[11px] font-bold ${
-                                          isLightTheme ? 'text-zinc-600' : 'text-zinc-400'
-                                        }`}
-                                      >
-                                        {payout.place}
-                                      </span>
-                                    </span>
-                                  </td>
-                                  <td
-                                    className={`whitespace-nowrap py-1.5 text-right font-mono text-[12px] font-black tabular-nums ${
-                                      cellIdx === 0 ? 'pr-4' : ''
-                                    } ${
-                                      payout.rank === 1
-                                        ? 'text-amber-600'
-                                        : isLightTheme
-                                          ? 'text-zinc-900'
-                                          : 'text-white'
-                                    }`}
-                                  >
-                                    ${payout.amount.toLocaleString()}
-                                  </td>
-                                </React.Fragment>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </section>
+                    {/* 2. Tires Restrictions */}
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                        <Disc className="w-4 h-4" />
+                      </div>
+                      <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
+                          TIRES RESTRICTIONS
+                        </h4>
+                        <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <span className="text-slate-950 text-[10px]">•</span>
+                          <span>{tireRestriction.label}</span>
+                        </div>
+                      </div>
+                    </div>
 
-                    <HairLine light={isLightTheme} />
+                    {/* 50% brightness divider line */}
+                    <div className="h-px w-full bg-[#758491] my-1.5" />
 
-                    {/* License required */}
-                    <section className="flex flex-col gap-2.5">
-                      <SectionLabel
-                        title="License Required"
-                        accent={event.accentColor}
-                        light={isLightTheme}
-                      />
-                      <span
-                        className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] ${
-                          licenseRequirement.tier
-                            ? isLightTheme
-                              ? LICENSE_TINTS[licenseRequirement.tier]
-                              : LICENSE_TINTS_DARK[licenseRequirement.tier]
-                            : isLightTheme
-                              ? 'border-zinc-200 bg-zinc-50 text-zinc-500'
-                              : 'border-zinc-800 bg-zinc-900/70 text-zinc-400'
-                        }`}
-                      >
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        {licenseRequirement.label}
-                      </span>
-                    </section>
-                  </div>
+                    {/* 3. License */}
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                        <CreditCard className="w-4 h-4" />
+                      </div>
+                      <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
+                          LICENSE
+                        </h4>
+                        <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <span className="text-slate-950 text-[10px]">•</span>
+                          <span>{licenseRequirement.tier ? licenseRequirement.label : 'No Required'}</span>
+                        </div>
+                      </div>
+                    </div>
 
-                  {/* RIGHT HALF: one ticket per track, scrolled for up to ten stages */}
-                  <div
-                    className={`flex w-1/2 shrink-0 flex-col gap-3 overflow-y-auto border-l px-5 py-6 scrollbar-thin ${
-                      isLightTheme
-                        ? 'border-zinc-200 scrollbar-thumb-zinc-200'
-                        : 'border-zinc-800/80 scrollbar-thumb-zinc-800'
-                    }`}
-                    style={
-                      isLightTheme
-                        ? {
-                            // Faint paper weave, so the ticket column reads as a stub book.
-                            backgroundImage:
-                              'repeating-linear-gradient(135deg, rgba(24,24,27,0.028) 0 1px, transparent 1px 7px)',
-                            backgroundColor: '#f6f6f6'
-                          }
-                        : {
-                            backgroundImage:
-                              'repeating-linear-gradient(135deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 7px)',
-                            backgroundColor: 'rgba(24,24,27,0.55)'
-                          }
-                    }
-                  >
-                    {eventStages.map((stage, sIdx) => {
-                      const placement = getStagePlacement(eventPlacements, event.id, stage.id);
-                      const isStageLocked = event.requiresLicense && !hasLicense;
-                      const isPodium = placement !== null && placement <= 3;
-                      const notchColor = isLightTheme ? '#f6f6f6' : 'rgb(24 24 27)';
+                    {/* 50% brightness divider line */}
+                    <div className="h-px w-full bg-[#758491] my-1.5" />
 
-                      return (
-                        <div
-                          key={stage.id}
-                          className={`group/ticket relative flex shrink-0 overflow-hidden rounded-2xl border transition-all duration-300 ${
-                            isLightTheme
-                              ? `border-zinc-200 bg-[#f6f6f6] shadow-[0_1px_2px_rgba(24,24,27,0.06)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(24,24,27,0.12)] ${
-                                  isPodium ? 'border-amber-200' : 'hover:border-zinc-300'
-                                }`
-                              : `border-zinc-800 bg-zinc-950/85 hover:-translate-y-0.5 hover:border-zinc-700 hover:shadow-[0_10px_24px_rgba(0,0,0,0.45)] ${
-                                  isPodium ? 'border-amber-900/60' : ''
-                                }`
-                          }`}
-                        >
-                          {/* Ticket stub: medal plus round number, split off by a perforation */}
-                          <div
-                            className={`relative flex w-[74px] shrink-0 flex-col items-center justify-center gap-1.5 py-3.5 ${
-                              isPodium
-                                ? isLightTheme
-                                  ? 'bg-[linear-gradient(160deg,#fffbeb,#fef3c7)]'
-                                  : 'bg-[linear-gradient(160deg,rgba(69,26,3,0.55),rgba(24,24,27,0.2))]'
-                                : isLightTheme
-                                  ? 'bg-[#f6f6f6]/80'
-                                  : 'bg-zinc-900/40'
-                            }`}
-                          >
-                            <StagePlacementBadge placement={placement} light={isLightTheme} />
-                            <span
-                              className={`font-mono text-[9px] font-black uppercase tracking-[0.18em] ${
-                                isLightTheme ? 'text-zinc-400' : 'text-zinc-500'
-                              }`}
-                            >
-                              R{sIdx + 1}
-                            </span>
-
-                            {/* Perforation line with punched notches top and bottom */}
-                            <span
-                              aria-hidden
-                              className={`absolute inset-y-2 right-0 w-px ${
-                                isLightTheme
-                                  ? 'bg-[repeating-linear-gradient(to_bottom,rgb(212,212,216)_0_3px,transparent_3px_7px)]'
-                                  : 'bg-[repeating-linear-gradient(to_bottom,rgb(63,63,70)_0_3px,transparent_3px_7px)]'
-                              }`}
-                            />
-                            <span
-                              aria-hidden
-                              className="absolute -top-[7px] right-[-7px] h-3.5 w-3.5 rounded-full"
-                              style={{ backgroundColor: notchColor }}
-                            />
-                            <span
-                              aria-hidden
-                              className="absolute -bottom-[7px] right-[-7px] h-3.5 w-3.5 rounded-full"
-                              style={{ backgroundColor: notchColor }}
-                            />
+                    {/* 4. Prize Table */}
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                        <Trophy className="w-4 h-4" />
+                      </div>
+                      <div className="flex flex-col gap-1.5 min-w-0 flex-1 text-left">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-950">
+                          PRIZE
+                        </h4>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-0.5">
+                          {/* Left Column: 1st, 2nd, 3rd */}
+                          <div className="flex flex-col gap-1">
+                            {prizeRows.map(([left]) => (
+                              <div
+                                key={left.rank}
+                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-[#7a8b98] border border-[#697986]"
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-black text-slate-950 w-5">
+                                    {left.place.split(' ')[0]}
+                                  </span>
+                                  <img
+                                    src={
+                                      left.rank === 1
+                                        ? '/images/gold.png'
+                                        : left.rank === 2
+                                          ? '/images/silver.png'
+                                          : '/images/bronze.png'
+                                    }
+                                    alt=""
+                                    className="h-4 w-4 object-contain inline-block"
+                                    onError={(e) => {
+                                      const target = e.currentTarget as HTMLElement;
+                                      target.style.display = 'none';
+                                      const fallback = target.nextElementSibling as HTMLElement;
+                                      if (fallback) fallback.style.display = 'inline-block';
+                                    }}
+                                  />
+                                  <span className="hidden text-xs leading-none">
+                                    {left.rank === 1 ? '🏆' : left.rank === 2 ? '🥈' : '🥉'}
+                                  </span>
+                                </div>
+                                <span className="text-xs font-black font-mono text-cyan-950 tabular-nums">
+                                  {left.amount.toLocaleString()}
+                                </span>
+                              </div>
+                            ))}
                           </div>
 
-                          {/* Ticket face: circuit, distance, and the way in */}
-                          <div className="relative flex min-w-0 flex-1 items-center gap-3 pl-4 pr-3.5 py-3.5">
-                            <div className="flex min-w-0 flex-1 flex-col gap-1">
-                              <span
-                                className={`truncate text-[13px] font-black leading-tight tracking-tight ${
-                                  isLightTheme ? 'text-zinc-900' : 'text-white'
-                                }`}
-                                title={trackNameFor(stage)}
+                          {/* Right Column: 4th, 5th, 6th */}
+                          <div className="flex flex-col gap-1">
+                            {prizeRows.map(([, right]) => (
+                              <div
+                                key={right.rank}
+                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-[#7a8b98] border border-[#697986]"
                               >
-                                {trackNameFor(stage)}
-                              </span>
-                              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                <span
-                                  className={`inline-flex items-center gap-1 whitespace-nowrap font-mono text-[10px] font-black uppercase tracking-[0.14em] ${
-                                    isLightTheme ? 'text-zinc-500' : 'text-zinc-400'
-                                  }`}
-                                >
-                                  <Flag className="h-3 w-3" />
-                                  {stage.laps} Laps
+                                <span className="text-xs font-black text-slate-950">
+                                  {right.place.split(' ')[0]}
                                 </span>
-                                <span
-                                  aria-hidden
-                                  className={`h-2.5 w-px ${
-                                    isLightTheme ? 'bg-zinc-200' : 'bg-zinc-700'
-                                  }`}
-                                />
-                                <span className="whitespace-nowrap font-mono text-[10px] font-black tabular-nums text-amber-600">
-                                  +{stage.reward.toLocaleString()} CR
+                                <span className="text-xs font-black font-mono text-cyan-950 tabular-nums">
+                                  {right.amount.toLocaleString()}
                                 </span>
-                              </span>
-                            </div>
-
-                            {/* Translucent overlay join button */}
-                            <button
-                              disabled={isStageLocked}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleLaunchStage(event, stage);
-                              }}
-                              title={isStageLocked ? 'License required' : 'Join this race'}
-                              className={`group/join relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-xl border px-3.5 py-2 text-[10px] font-black uppercase tracking-[0.18em] backdrop-blur-md transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 ${
-                                isStageLocked
-                                  ? 'cursor-not-allowed opacity-45 ' +
-                                    (isLightTheme
-                                      ? 'border-zinc-200 bg-zinc-100 text-zinc-400'
-                                      : 'border-zinc-800 bg-zinc-900 text-zinc-600')
-                                  : 'cursor-pointer active:scale-[0.97] ' +
-                                    (isLightTheme
-                                      ? 'border-zinc-900/12 bg-zinc-900/[0.06] text-zinc-800 hover:border-zinc-900/25 hover:bg-zinc-900/12 focus-visible:ring-zinc-400'
-                                      : 'border-white/15 bg-white/10 text-white hover:border-white/30 hover:bg-white/20 focus-visible:ring-white/40')
-                              }`}
-                            >
-                              {/* Sheen sweep on hover, the same trick the garage buttons use */}
-                              {!isStageLocked && (
-                                <span
-                                  aria-hidden
-                                  className={`pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent to-transparent transition-transform duration-500 group-hover/join:translate-x-full ${
-                                    isLightTheme ? 'via-zinc-900/10' : 'via-white/25'
-                                  }`}
-                                />
-                              )}
-                              {isStageLocked ? (
-                                <Lock className="relative h-3 w-3" />
-                              ) : (
-                                <Play className="relative h-3 w-3 fill-current" />
-                              )}
-                              <span className="relative">Join</span>
-                            </button>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      );
-                    })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Vertical Ticket Perforation Divider */}
+                  <div className="relative w-0 flex items-stretch border-r-2 border-dashed border-[#697986] my-3.5 z-10" />
+
+                  {/* RIGHT COLUMN: Ticket Stub (Stages List + Barcode + ADMIT ONE) */}
+                  <div
+                    className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-5 bg-[#8f9ca8] select-none rounded-r-[32px] overflow-hidden"
+                    style={{
+                      WebkitMaskImage:
+                        'radial-gradient(circle 14px at 0 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 0 100%, transparent 13.5px, black 14px)',
+                      maskImage:
+                        'radial-gradient(circle 14px at 0 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 0 100%, transparent 13.5px, black 14px)',
+                      WebkitMaskComposite: 'destination-in',
+                      maskComposite: 'intersect'
+                    }}
+                  >
+                    {/* Soft ambient cyan glow in background top right */}
+                    <div
+                      aria-hidden
+                      className="absolute -top-16 -right-16 w-44 h-44 rounded-full bg-cyan-400/15 blur-xl pointer-events-none"
+                    />
+
+                    {/* Top: Flag Icon + Series Title + Dash */}
+                    <div className="relative z-10 flex flex-col text-left">
+                      <div className="w-8 h-8 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center text-slate-950 mb-1.5 shadow-sm">
+                        <Flag className="w-4 h-4 fill-slate-950/20" />
+                      </div>
+                      <h3 className="text-base sm:text-lg font-black text-slate-950 uppercase tracking-wide leading-tight">
+                        {event.name}
+                      </h3>
+                      <div className="w-5 h-1 bg-[#0e7490] rounded-full mt-1.5 mb-2 shadow-sm" />
+                    </div>
+
+                    {/* Middle: Stage list (Canopy Speedway, Sprint Circuit, etc.) */}
+                    <div className="relative z-10 flex-1 flex flex-col gap-2 overflow-y-auto scrollbar-none my-1">
+                      {eventStages.map((stage) => {
+                        const isStageLocked = event.requiresLicense && !hasLicense;
+
+                        return (
+                          <div
+                            key={stage.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!isStageLocked) handleLaunchStage(event, stage);
+                            }}
+                            className={`flex items-center gap-2.5 p-1.5 rounded-xl border border-[#697986] bg-[#7a8b98] hover:border-[#529eaf] hover:bg-[#6e7f8c] transition-all cursor-pointer group/stage ${isStageLocked ? 'opacity-40 cursor-not-allowed' : ''
+                              }`}
+                            title={isStageLocked ? 'License required' : `Race ${trackNameFor(stage)}`}
+                          >
+                            {/* Curved circuit path icon in cyan ring */}
+                            <div className="w-8 h-8 rounded-xl bg-[#67b4c4] border border-[#529eaf] flex items-center justify-center shrink-0 text-slate-950 group-hover/stage:bg-cyan-600 group-hover/stage:text-white transition-colors shadow-sm">
+                              <svg className="w-4 h-4 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
+                                <path d="M4 12a8 8 0 0 1 16 0c0 4-3 7-8 7s-8-3-8-7z" />
+                              </svg>
+                            </div>
+                            <div className="flex flex-col min-w-0 flex-1 text-left">
+                              <span className="text-[11px] font-black text-slate-950 uppercase truncate leading-tight group-hover/stage:text-cyan-950 transition-colors">
+                                {trackNameFor(stage)}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-800 mt-0.5">
+                                {stage.laps} Laps
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Bottom: Barcode + ADMIT ONE */}
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (eventStages[0]) handleLaunchStage(event, eventStages[0]);
+                      }}
+                      className="relative z-10 pt-2.5 border-t border-[#758491] flex flex-col items-center gap-1.5 cursor-pointer group/barcode hover:opacity-90 transition-opacity"
+                      title="Enter Event Race"
+                    >
+                      {/* Crisp vertical barcode bars */}
+                      <div className="flex items-center justify-center gap-[2px] h-8 w-full px-1">
+                        <span className="w-[2px] h-full bg-slate-950" />
+                        <span className="w-[1px] h-full bg-slate-950" />
+                        <span className="w-[3px] h-full bg-slate-950" />
+                        <span className="w-[1px] h-full bg-slate-950" />
+                        <span className="w-[2px] h-full bg-slate-950" />
+                        <span className="w-[1px] h-full bg-slate-950" />
+                        <span className="w-[3.5px] h-full bg-slate-950" />
+                        <span className="w-[1.5px] h-full bg-slate-950" />
+                        <span className="w-[2px] h-full bg-slate-950" />
+                        <span className="w-[3px] h-full bg-slate-950" />
+                        <span className="w-[1px] h-full bg-slate-950" />
+                        <span className="w-[2px] h-full bg-slate-950" />
+                        <span className="w-[1.5px] h-full bg-slate-950" />
+                        <span className="w-[3px] h-full bg-slate-950" />
+                        <span className="w-[1px] h-full bg-slate-950" />
+                        <span className="w-[2px] h-full bg-slate-950" />
+                        <span className="w-[3.5px] h-full bg-slate-950" />
+                        <span className="w-[1px] h-full bg-slate-950" />
+                        <span className="w-[2px] h-full bg-slate-950" />
+                        <span className="w-[1.5px] h-full bg-slate-950" />
+                        <span className="w-[3px] h-full bg-slate-950" />
+                        <span className="w-[1px] h-full bg-slate-950" />
+                        <span className="w-[2px] h-full bg-slate-950" />
+                        <span className="w-[3.5px] h-full bg-slate-950" />
+                        <span className="w-[1.5px] h-full bg-slate-950" />
+                        <span className="w-[2px] h-full bg-slate-950" />
+                      </div>
+
+                      <div className="flex items-center gap-1 text-[9px] font-black text-cyan-950 tracking-widest uppercase group-hover/barcode:text-cyan-900 transition-colors">
+                        <span>›</span>
+                        <span>ADMIT ONE</span>
+                        <span>‹</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1056,8 +927,8 @@ export default function EventTierScreen({
         </div>
       </div>
 
-      {/* 5. MOVIE-STYLE BOTTOM BAR (Appears ONLY when hovering an event box, news ticker marquee overflow, no badge) */}
-      <EventSubtitleBar event={hoveredEvent} />
+      {/* 5. MOVIE-STYLE BOTTOM BAR (Always shows active event description) */}
+      <EventSubtitleBar event={activeDisplayEvent} />
     </div>
   );
 }
