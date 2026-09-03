@@ -2066,10 +2066,24 @@ export default function Game() {
     }, 1050);
   };
 
-  const startRace = (trackId: string = 'sprint_circuit', layoutId?: string) => {
+  const startRace = (trackId: string = 'sprint_circuit', layoutId?: string, entryFee: number = 0): boolean => {
     const track = TRACKS_DATABASE.find(t => t.id === trackId);
-    if (!track) return;
-    if (track.requiresLicense && !hasLicense) return; // Prevent unauthorized entry
+    if (!track) return false;
+    if (track.requiresLicense && !hasLicense) return false; // Prevent unauthorized entry
+
+    const normalizedEntryFee = Number.isFinite(entryFee)
+      ? Math.max(0, Math.round(entryFee))
+      : 0;
+    if (normalizedEntryFee > playerCredits) return false;
+
+    if (normalizedEntryFee > 0) {
+      const nextCredits = playerCredits - normalizedEntryFee;
+      setPlayerCredits(nextCredits);
+      localStorage.setItem('cyberdrive_credits', nextCredits.toString());
+      if (engineRef.current) {
+        engineRef.current.playerCredits = nextCredits;
+      }
+    }
 
     clearRacePresentationTimer();
     setRacePresentation('racing');
@@ -2102,6 +2116,8 @@ export default function Game() {
     setTimeout(() => {
       setIsTransitioningDrive(false);
     }, 1050);
+
+    return true;
   };
 
   const startQuickPlayRace = (carId: string, trackId: string, lapCount: number = 3, difficulty: RaceDifficulty = 'normal', quickPlayDrivingMode: DrivingMode = 'simulation', opponentCount: number = 5, layoutId?: string) => {

@@ -44,7 +44,7 @@ export interface CareerMapProps {
   hasLicense: boolean;
   licenseProgress: LicenseProgress;
   onBackToGarage: () => void;
-  startRace: (trackId: string, layoutId?: string) => void;
+  startRace: (trackId: string, layoutId?: string, entryFee?: number) => boolean;
   startFreeRoam: () => void;
   startTutorial: () => void;
   startLicenseTest: (testId?: string) => void;

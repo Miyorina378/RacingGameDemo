@@ -1931,7 +1931,7 @@ interface GarageProps {
   equipLevelUpgrade: (item: any, lvl: number) => void;
   buyUpgrade: (item: any, cost: number) => void;
   toggleUpgrade: (item: any) => void;
-  startRace: (trackId?: string) => void;
+  startRace: (trackId?: string, layoutId?: string, entryFee?: number) => boolean;
   startQuickPlayRace: (carId: string, trackId: string, lapCount?: number, difficulty?: QuickPlayDifficulty, drivingMode?: DrivingMode, opponentCount?: number, layoutId?: string) => void;
   drivingMode: DrivingMode;
   setDrivingMode: (mode: DrivingMode) => void;

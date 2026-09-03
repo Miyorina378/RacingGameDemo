@@ -29,6 +29,7 @@ import {
   getEventTireRestriction,
   getEventPrizeTable,
   getEventLicenseRequirement,
+  getEventEntryFee,
   getStagePlacement,
   CareerEventProgress,
   CareerEventPlacements
@@ -41,7 +42,7 @@ export interface EventTierScreenProps {
   playerCredits: number;
   hasLicense: boolean;
   onBackToMap: () => void;
-  startRace: (trackId: string, layoutId?: string) => void;
+  startRace: (trackId: string, layoutId?: string, entryFee?: number) => boolean;
   brightness?: number;
 }
 
@@ -571,17 +572,25 @@ export default function EventTierScreen({
   };
 
   const handleLaunchStage = (event: CareerEvent, stage: CareerStage) => {
+    const entryFee = getEventEntryFee(event);
+    if ((event.requiresLicense && !hasLicense) || playerCredits < entryFee) return;
+
     playSoundBlip('launch');
-    // Save current active event & stage so race victory records it
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('cyberdrive_current_career_event', JSON.stringify({
-        eventId: event.id,
-        stageId: stage.id
-      }));
-    }
     setIsScreenExiting(true);
     setTimeout(() => {
-      startRace(stage.trackId, stage.layoutId);
+      const accepted = startRace(stage.trackId, stage.layoutId, entryFee);
+      if (!accepted) {
+        setIsScreenExiting(false);
+        return;
+      }
+
+      // Save current active event & stage so race victory records it.
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('cyberdrive_current_career_event', JSON.stringify({
+          eventId: event.id,
+          stageId: stage.id
+        }));
+      }
     }, 380);
   };
   const content = (
@@ -687,6 +696,7 @@ export default function EventTierScreen({
             const tireRestriction = getEventTireRestriction(event);
             const prizeTable = getEventPrizeTable(event);
             const licenseRequirement = getEventLicenseRequirement(event);
+            const entryFee = getEventEntryFee(event);
             const eventStages = event.stages;
             const prizeRows = [
               [prizeTable[0], prizeTable[3]],
@@ -862,18 +872,33 @@ export default function EventTierScreen({
                     {/* Divider line */}
                     <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
 
-                    {/* 3. License */}
+                    {/* 3. License and Entry Fee */}
                     <div className="flex items-start gap-3.5">
                       <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
                         <CreditCard className="w-4 h-4" />
                       </div>
-                      <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
-                        <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
-                          LICENSE
-                        </h4>
-                        <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                          <span className="text-slate-950 text-[10px]">•</span>
-                          <span>{licenseRequirement.tier ? licenseRequirement.label : 'No Required'}</span>
+                      <div className="relative grid grid-cols-2 gap-4 min-w-0 flex-1 text-left">
+                        <div
+                          className="pointer-events-none absolute inset-y-[-17] left-45 w-px bg-[#b4c3d0]"
+                          aria-hidden="true"
+                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
+                            LICENSE
+                          </h4>
+                          <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                            <span className="text-slate-950 text-[10px]">•</span>
+                            <span>{licenseRequirement.tier ? licenseRequirement.label : 'Not Required'}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
+                            ENTRY FEE
+                          </h4>
+                          <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                            <span className="text-slate-950 text-[10px]">•</span>
+                            <span>{entryFee.toLocaleString()} CR</span>
+                          </div>
                         </div>
                       </div>
                     </div>

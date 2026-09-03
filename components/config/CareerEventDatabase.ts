@@ -72,6 +72,8 @@ export interface CareerEvent {
   tier: CareerTierId;
   description: string;
   requiresLicense: boolean;
+  /** Credit cost to enter this event. Defaults to DEFAULT_EVENT_ENTRY_FEE when omitted. */
+  entryFee?: number;
   totalLaps: number;
   bonusReward: number;
   bgImage: string;
@@ -263,6 +265,15 @@ export function getEventPrizeTable(event: CareerEvent): PrizeCreditPayout[] {
         : Math.max(5, Math.round((topReward * ratios[index]) / 5) * 5),
     trophyColor: trophyColors[index]
   }));
+}
+
+/** Default credit cost to enter an event when its config omits `entryFee`. */
+export const DEFAULT_EVENT_ENTRY_FEE = 1000;
+
+/** Credit cost an event demands at the gate. */
+export function getEventEntryFee(event: CareerEvent): number {
+  const fee = event.entryFee ?? DEFAULT_EVENT_ENTRY_FEE;
+  return Number.isFinite(fee) ? Math.max(0, Math.round(fee)) : DEFAULT_EVENT_ENTRY_FEE;
 }
 
 /** License an event demands at the gate. */
