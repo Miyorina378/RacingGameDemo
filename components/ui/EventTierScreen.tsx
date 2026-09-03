@@ -879,7 +879,7 @@ export default function EventTierScreen({
                       </div>
                       <div className="relative grid grid-cols-2 gap-4 min-w-0 flex-1 text-left">
                         <div
-                          className="pointer-events-none absolute inset-y-[-17] left-45 w-px bg-[#b4c3d0]"
+                          className="pointer-events-none absolute inset-y-[-17s] left-45 w-px bg-[#b4c3d0]"
                           aria-hidden="true"
                         />
                         <div className="flex flex-col gap-1 min-w-0">
