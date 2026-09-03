@@ -3965,6 +3965,7 @@ export default function Game() {
       {activeMode === 'garage' && (
         <div className="absolute inset-0 pointer-events-none z-[70]">
           <Garage
+            brightness={brightness}
             activeGarageTab={activeGarageTab}
             tuningState={tuningState}
             setActiveGarageTab={setActiveGarageTab}

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Trophy,
   Lock,
@@ -41,6 +42,7 @@ export interface EventTierScreenProps {
   hasLicense: boolean;
   onBackToMap: () => void;
   startRace: (trackId: string, layoutId?: string) => void;
+  brightness?: number;
 }
 
 // Helper for synthesized sci-fi sound effects
@@ -157,19 +159,22 @@ const ordinal = (place: number): string => {
   return `${place}th`;
 };
 
-/** Struck-metal medal faces. Only the podium gets one. */
-const MEDALS: Record<number, { face: string; glow: string; label: string }> = {
+/** Podium trophy assets. Only the top three placements get one. */
+const MEDALS: Record<number, { asset: string; face: string; glow: string; label: string }> = {
   1: {
+    asset: '/images/gold_trophy.svg',
     face: 'bg-[linear-gradient(145deg,#fef3c7_0%,#fbbf24_45%,#b45309_100%)]',
     glow: 'shadow-[0_2px_10px_rgba(180,83,9,0.45)]',
     label: 'Gold'
   },
   2: {
+    asset: '/images/silver_trophy.svg',
     face: 'bg-[linear-gradient(145deg,#f8fafc_0%,#cbd5e1_45%,#64748b_100%)]',
     glow: 'shadow-[0_2px_10px_rgba(100,116,139,0.4)]',
     label: 'Silver'
   },
   3: {
+    asset: '/images/bronze_trophy.svg',
     face: 'bg-[linear-gradient(145deg,#fed7aa_0%,#c2703a_45%,#7c3f14_100%)]',
     glow: 'shadow-[0_2px_10px_rgba(124,63,20,0.4)]',
     label: 'Bronze'
@@ -213,9 +218,20 @@ const StagePlacementBadge = ({
         title={`${medal.label} — finished ${ordinal(placement)}`}
         aria-label={`Finished ${ordinal(placement)}`}
       >
-        {/* Highlight arc, so the medal reads as metal rather than a flat disc */}
+        {/* Highlight arc, so the trophy reads as polished metal rather than a flat disc */}
         <span className="pointer-events-none absolute inset-[3px] rounded-full bg-[radial-gradient(circle_at_32%_26%,rgba(255,255,255,0.85),transparent_58%)]" />
-        <Trophy className="relative h-[18px] w-[18px] fill-white/95 text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]" />
+        <img
+          src={medal.asset}
+          alt=""
+          className="relative h-10 w-10 object-contain drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]"
+          onError={(e) => {
+            const target = e.currentTarget as HTMLElement;
+            target.style.display = 'none';
+            const fallback = target.nextElementSibling as HTMLElement;
+            if (fallback) fallback.style.display = 'inline-block';
+          }}
+        />
+        <Trophy className="relative hidden h-[20px] w-[20px] fill-white/95 text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]" />
       </div>
     );
   }
@@ -291,8 +307,19 @@ export default function EventTierScreen({
   playerCredits,
   hasLicense,
   onBackToMap,
-  startRace
+  startRace,
+  brightness
 }: EventTierScreenProps) {
+  const [isClientMounted, setIsClientMounted] = useState(false);
+  useEffect(() => {
+    setIsClientMounted(true);
+  }, []);
+
+  const effectiveBrightness =
+    brightness ??
+    (typeof window !== 'undefined'
+      ? parseFloat(localStorage.getItem('cyberdrive_brightness') || '5')
+      : 5);
   const [activeTier] = useState<CareerTierId>(initialTier);
   const [hoveredEvent, setHoveredEvent] = useState<CareerEvent | null>(null);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
@@ -309,11 +336,12 @@ export default function EventTierScreen({
 
   // Trigger screen fade-in on mount
   useEffect(() => {
+    if (!isClientMounted) return;
     const frame = requestAnimationFrame(() => {
       setIsScreenMounted(true);
     });
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [isClientMounted]);
 
   // Reload progress when mounting
   useEffect(() => {
@@ -342,19 +370,20 @@ export default function EventTierScreen({
     tierEvents[0] ||
     null;
 
-  // Seamless bottom-to-top staggered reveal (0% to 100% opacity, ease-in-out)
+  // Staggered slide-up transition from below the screen
   useEffect(() => {
+    if (!isClientMounted) return;
     setVisibleCount(0);
     const timers: NodeJS.Timeout[] = [];
     for (let i = 0; i < tierEvents.length; i++) {
       const t = setTimeout(() => {
         setVisibleCount((prev) => Math.max(prev, i + 1));
         playSoundBlip('pop');
-      }, 120 + i * 140);
+      }, 100 + i * 140);
       timers.push(t);
     }
     return () => timers.forEach(clearTimeout);
-  }, [activeTier, tierEvents.length]);
+  }, [isClientMounted, activeTier, tierEvents.length]);
 
   // Handle Fade-Out Transition on Back Click
   const handleBackClick = () => {
@@ -375,9 +404,10 @@ export default function EventTierScreen({
 
     playSoundBlip('slide');
     const targetCard = cards[index];
-    const containerCenter = container.clientWidth / 2;
-    const cardCenter = targetCard.offsetLeft + targetCard.clientWidth / 2;
-    const scrollTarget = cardCenter - containerCenter;
+    const containerRect = container.getBoundingClientRect();
+    const cardRect = targetCard.getBoundingClientRect();
+    const cardLeftInScroll = cardRect.left - containerRect.left + container.scrollLeft;
+    const scrollTarget = cardLeftInScroll + targetCard.clientWidth / 2 - containerRect.width / 2;
 
     container.scrollTo({
       left: Math.max(0, scrollTarget),
@@ -386,15 +416,97 @@ export default function EventTierScreen({
     setActiveSlideIndex(index);
   }, []);
 
+  // Center expanded card so the entire ticket is fully visible in the camera viewport.
+  const centerExpandedCard = useCallback((
+    index: number,
+    options: { assumeExpanded?: boolean; behavior?: ScrollBehavior } = {}
+  ) => {
+    if (!carouselRef.current) return;
+    const container = carouselRef.current;
+    const cards = container.querySelectorAll<HTMLElement>('.event-card-item');
+    if (!cards || !cards[index]) return;
+
+    const { assumeExpanded = false, behavior = 'smooth' } = options;
+    const targetCard = cards[index];
+    const containerRect = container.getBoundingClientRect();
+    const cardRect = targetCard.getBoundingClientRect();
+    const currentPaddingLeft = parseFloat(window.getComputedStyle(container).paddingLeft) || 0;
+    const targetPaddingLeft = assumeExpanded ? containerRect.width * 0.25 : currentPaddingLeft;
+
+    // Predict the final left edge while the expansion transition is still starting.
+    const cardLeftInScroll =
+      cardRect.left - containerRect.left + container.scrollLeft + targetPaddingLeft - currentPaddingLeft;
+
+    let targetWidth = targetCard.clientWidth;
+    if (assumeExpanded || targetWidth < 500) {
+      if (containerRect.width >= 1280) targetWidth = 1140;
+      else if (containerRect.width >= 1024) targetWidth = 1080;
+      else if (containerRect.width >= 768) targetWidth = 980;
+      else targetWidth = 820;
+    }
+    targetWidth = Math.min(targetWidth, containerRect.width - 48);
+
+    const targetCenter = cardLeftInScroll + targetWidth / 2;
+    const scrollTarget = targetCenter - containerRect.width / 2;
+
+    container.scrollTo({
+      left: Math.max(0, scrollTarget),
+      behavior
+    });
+    setActiveSlideIndex(index);
+  }, []);
+
+  const [collapsingEventId, setCollapsingEventId] = useState<string | null>(null);
+
+  const handleMinimizeCard = useCallback(() => {
+    if (!expandedEventId || collapsingEventId) return;
+    playSoundBlip('select');
+    const eventToCollapse = expandedEventId;
+    setCollapsingEventId(eventToCollapse);
+
+    const currentIdx = tierEvents.findIndex((e) => e.id === eventToCollapse);
+
+    setTimeout(() => {
+      setExpandedEventId(null);
+      setCollapsingEventId(null);
+      if (currentIdx !== -1) {
+        requestAnimationFrame(() => {
+          scrollToSlide(currentIdx);
+        });
+      }
+    }, 500);
+  }, [expandedEventId, collapsingEventId, tierEvents, scrollToSlide]);
+
   const handlePrevSlide = () => {
+    if (expandedEventId) handleMinimizeCard();
     const nextIdx = Math.max(0, activeSlideIndex - 1);
     scrollToSlide(nextIdx);
   };
 
   const handleNextSlide = () => {
+    if (expandedEventId) handleMinimizeCard();
     const nextIdx = Math.min(tierEvents.length - 1, activeSlideIndex + 1);
     scrollToSlide(nextIdx);
   };
+
+  // Start centering immediately after expansion commits, then make one settled correction.
+  useEffect(() => {
+    if (!expandedEventId) return;
+    const idx = tierEvents.findIndex((e) => e.id === expandedEventId);
+    if (idx === -1) return;
+
+    const frame = requestAnimationFrame(() => {
+      centerExpandedCard(idx, { assumeExpanded: true });
+    });
+    const settleTimer = setTimeout(() => {
+      centerExpandedCard(idx);
+    }, 520);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(settleTimer);
+    };
+  }, [expandedEventId, centerExpandedCard, tierEvents]);
 
   // Mouse wheel and touchpad horizontal scrolling support
   useEffect(() => {
@@ -417,8 +529,7 @@ export default function EventTierScreen({
       if (e.key === 'Escape') {
         if (expandedEventId) {
           e.preventDefault();
-          playSoundBlip('select');
-          setExpandedEventId(null);
+          handleMinimizeCard();
         }
         return;
       }
@@ -432,7 +543,7 @@ export default function EventTierScreen({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeSlideIndex, expandedEventId, tierEvents.length]);
+  }, [activeSlideIndex, expandedEventId, tierEvents.length, handleMinimizeCard]);
 
   // Track active slide on scroll
   const handleScroll = () => {
@@ -473,19 +584,23 @@ export default function EventTierScreen({
       startRace(stage.trackId, stage.layoutId);
     }, 380);
   };
-  return (
+  const content = (
     <div
-      className={`relative inset-0 w-full h-full flex flex-col bg-zinc-950 text-white select-none overflow-hidden font-sans transition-opacity duration-500 ease-in-out ${isScreenMounted && !isScreenExiting ? 'opacity-100' : 'opacity-0'
-        }`}
+      className={`fixed inset-0 z-[9999] w-screen h-screen flex flex-col bg-zinc-950 text-white select-none overflow-hidden font-sans transition-opacity duration-400 ease-out ${
+        isScreenExiting ? 'opacity-0 pointer-events-none' : 'opacity-100'
+      }`}
     >
       {/* 1. DYNAMIC BACKGROUND IMAGE MATCHING EVENT CARD LIGHTING */}
-      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+      <div
+        className="absolute inset-0 z-0 overflow-hidden pointer-events-none"
+        style={{ filter: `brightness(${0.4 + (effectiveBrightness / 5.0) * 0.6})` }}
+      >
         <img
           src={tierConfig.bgImage}
           alt={tierConfig.name}
-          className="w-full h-full object-cover object-center scale-105 filter brightness-[0.95] contrast-[1.05] transition-all duration-700 ease-in-out"
+          className="w-full h-full object-cover object-center scale-105 filter blur-[3px] brightness-[0.92] saturate-[1.05]"
         />
-        {/* Subtle dark ambient scrim matching event card */}
+        {/* Soft ambient lighting: bright sky preserved, smooth and gentle on eyes */}
         <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/40 via-transparent to-zinc-950/50" />
       </div>
 
@@ -515,12 +630,12 @@ export default function EventTierScreen({
       </div>
 
       {/* 3. INTERACTIVE HORIZONTAL CAROUSEL OF EVENT CARDS */}
-      <div className="relative z-10 flex-1 flex flex-col justify-center items-center overflow-hidden pointer-events-auto w-full -translate-y-6 sm:-translate-y-10">
+      <div className="relative z-10 flex-1 flex flex-col justify-center items-center pointer-events-auto w-full -top-12">
         {/* Left Floating Carousel Button */}
         <button
           disabled={activeSlideIndex === 0}
           onClick={handlePrevSlide}
-          className={`absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all shadow-2xl backdrop-blur-md cursor-pointer ${activeSlideIndex === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
+          className={`absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all duration-300 shadow-2xl backdrop-blur-md cursor-pointer ${expandedEventId ? 'opacity-0 pointer-events-none' : activeSlideIndex === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
             }`}
         >
           <ChevronLeft className="w-6 h-6 text-zinc-200" />
@@ -530,22 +645,32 @@ export default function EventTierScreen({
         <button
           disabled={activeSlideIndex === tierEvents.length - 1}
           onClick={handleNextSlide}
-          className={`absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all shadow-2xl backdrop-blur-md cursor-pointer ${activeSlideIndex === tierEvents.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
+          className={`absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all duration-300 shadow-2xl backdrop-blur-md cursor-pointer ${expandedEventId ? 'opacity-0 pointer-events-none' : activeSlideIndex === tierEvents.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
             }`}
         >
           <ChevronRight className="w-6 h-6 text-zinc-200" />
         </button>
 
-        {/* Carousel Scroll Container with larger gap and higher positioning */}
+        {/* Carousel Scroll Container with balanced vertical padding */}
         <div
           ref={carouselRef}
           onScroll={handleScroll}
-          className="w-full flex items-center gap-12 sm:gap-16 overflow-x-auto scroll-smooth snap-x snap-mandatory px-16 md:px-36 py-8 scrollbar-none"
+          onClick={(e) => {
+            if (expandedEventId && e.target === carouselRef.current) {
+              handleMinimizeCard();
+            }
+          }}
+          className={`relative w-full h-full flex items-center gap-12 sm:gap-16 overflow-x-auto scroll-smooth ${expandedEventId ? '' : 'snap-x snap-mandatory'
+            } py-8 pb-8 scrollbar-none`}
           style={{
+            paddingLeft: expandedEventId ? '25vw' : '10vw',
+            paddingRight: expandedEventId ? '38vw' : '10vw',
+            transition: 'padding 500ms ease-out',
             scrollbarWidth: 'none',
+            overflowAnchor: 'none',
             msOverflowStyle: 'none',
-            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 80px, black calc(100% - 80px), transparent 100%)',
-            maskImage: 'linear-gradient(to right, transparent 0%, black 80px, black calc(100% - 80px), transparent 100%)'
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 50px, black calc(100% - 50px), transparent 100%)',
+            maskImage: 'linear-gradient(to right, transparent 0%, black 50px, black calc(100% - 50px), transparent 100%)'
           }}
         >
           {tierEvents.map((event, idx) => {
@@ -555,7 +680,9 @@ export default function EventTierScreen({
             const isLocked = event.requiresLicense && !hasLicense;
             const isActiveSlide = idx === activeSlideIndex;
             const isRevealed = idx < visibleCount;
-            const isExpanded = expandedEventId === event.id;
+            const isThisExpanded = expandedEventId === event.id;
+            const isThisCollapsing = collapsingEventId === event.id;
+            const isVisibleExpanded = isThisExpanded && !isThisCollapsing;
             const regulations = getEventRegulations(event);
             const tireRestriction = getEventTireRestriction(event);
             const prizeTable = getEventPrizeTable(event);
@@ -571,46 +698,68 @@ export default function EventTierScreen({
               <div
                 key={event.id}
                 onClick={() => {
-                  if (!isExpanded) {
+                  if (!isThisExpanded) {
                     playSoundBlip('select');
                     setExpandedEventId(event.id);
-                    scrollToSlide(idx);
+                    setActiveSlideIndex(idx);
+                  } else if (isVisibleExpanded) {
+                    handleMinimizeCard();
                   }
                 }}
                 onMouseEnter={() => {
                   setHoveredEvent(event);
-                  if (!isExpanded) {
+                  if (!isThisExpanded) {
                     playSoundBlip('hover');
                   }
                 }}
                 onMouseLeave={() => setHoveredEvent(null)}
-                className={`event-card-item snap-center shrink-0 group relative flex flex-row h-[500px] sm:h-[530px] rounded-[32px] overflow-hidden transition-all duration-500 ease-in-out ${isExpanded
-                  ? 'w-[820px] sm:w-[980px] md:w-[1080px] lg:w-[1140px] z-20 cursor-default'
-                  : 'w-[240px] sm:w-[255px] cursor-pointer hover:scale-[1.035] hover:-translate-y-2.5'
+                className={`event-card-item shrink-0 group relative flex flex-row h-[500px] sm:h-[530px] rounded-[32px] overflow-hidden ${isVisibleExpanded
+                  ? 'w-[820px] sm:w-[980px] md:w-[1080px] lg:w-[1140px] max-w-[calc(100vw-48px)] z-20 cursor-default'
+                  : 'w-[240px] sm:w-[270px] cursor-pointer hover:scale-105 hover:-translate-y-2 snap-center'
                   } ${isRevealed && isScreenMounted && !isScreenExiting
-                    ? 'opacity-100 translate-y-0 pointer-events-auto'
-                    : 'opacity-0 translate-y-[120vh] pointer-events-none'
-                  } bg-transparent`}
+                    ? 'translate-y-0 pointer-events-auto'
+                    : 'translate-y-[650px] pointer-events-none'
+                  } opacity-100 bg-transparent`}
+                style={{
+                  transition: isVisibleExpanded
+                    ? 'translate 500ms cubic-bezier(0.32, 0.72, 0, 1), width 500ms cubic-bezier(0.32, 0.72, 0, 1)'
+                    : 'translate 650ms cubic-bezier(0.22, 1, 0.36, 1), width 500ms cubic-bezier(0.32, 0.72, 0, 1)'
+                }}
               >
-                {/* Left Column: Event Artwork Poster Card */}
+                {/* Left Column: Event Artwork Poster Card (Front Sleeve) */}
                 <div
                   onClick={(e) => {
-                    if (isExpanded) {
+                    if (isVisibleExpanded) {
                       e.stopPropagation();
-                      playSoundBlip('select');
-                      setExpandedEventId(null);
+                      handleMinimizeCard();
                     }
                   }}
-                  className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none cursor-pointer rounded-l-[32px] bg-zinc-950"
-                  title={isExpanded ? 'Click poster to collapse' : undefined}
+                  className={`relative z-20 w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none cursor-pointer bg-zinc-950 shadow-[8px_0_24px_rgba(0,0,0,0.65)] transition-[border-radius] duration-400 ease-in-out ${isVisibleExpanded ? 'rounded-l-[32px]' : 'rounded-[32px]'
+                    }`}
+                  title={isVisibleExpanded ? 'Click to collapse into card' : undefined}
                 >
+                  {/* Minimize badge when expanded */}
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleMinimizeCard();
+                    }}
+                    className={`absolute top-4 right-4 z-30 flex items-center gap-1.5 px-3 py-1.5 bg-black/65 hover:bg-black/90 backdrop-blur-md rounded-full text-[10px] font-black text-white uppercase tracking-wider transition-all duration-300 shadow-xl border border-white/25 cursor-pointer hover:scale-105 active:scale-95 ${isVisibleExpanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+                      }`}
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5 text-[#38ecff]" />
+                    <span>Minimize</span>
+                  </div>
+
                   {/* Inner Box Artwork Image */}
                   <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
                     <img
                       src={event.bgImage}
                       alt={event.name}
-                      className="w-full h-full object-cover object-center filter brightness-[0.90] transition-all duration-700 ease-in-out"
+                      className="w-full h-full object-cover object-center filter brightness-[0.96] saturate-[1.05] transition-all duration-700 ease-in-out"
                     />
+                    {/* Subtle soft top vignette only for title legibility, keeping poster bright */}
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/20 pointer-events-none" />
                   </div>
 
                   {/* Top: Event Title + Dash */}
@@ -646,11 +795,11 @@ export default function EventTierScreen({
                   </div>
                 </div>
 
-                {/* Right Expanded Block: Middle Details + Seam + Ticket Stub (50% brightness white paper tone) */}
+                {/* Right Details Block: Physically shifts to the left into event card like a sleeve, NO OPACITY CHANGE */}
                 <div
-                  className={`transition-all duration-500 ease-in-out flex flex-row min-w-0 flex-1 overflow-hidden ${isExpanded
-                    ? 'opacity-100'
-                    : 'w-0 max-w-0 opacity-0 pointer-events-none'
+                  className={`relative z-10 w-[580px] sm:w-[710px] md:w-[810px] lg:w-[870px] shrink-0 flex flex-row h-full overflow-hidden transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisibleExpanded
+                    ? 'translate-x-0 pointer-events-auto'
+                    : '-translate-x-full pointer-events-none'
                     }`}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -673,7 +822,7 @@ export default function EventTierScreen({
                       </div>
                       <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
                         <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
-                           REGULATION
+                          REGULATION
                         </h4>
                         <ul className="flex flex-col gap-0.5">
                           {regulations.map((condition, rIdx) => {
@@ -743,26 +892,31 @@ export default function EventTierScreen({
                         </h4>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-0.5">
                           {/* Left Column: 1st, 2nd, 3rd */}
-                          <div className="flex flex-col gap-1">
+                          <div className="flex min-w-0 flex-col gap-1">
                             {prizeRows.map(([left]) => (
                               <div
                                 key={left.rank}
-                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
+                                className="relative flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
                               >
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center">
                                   <span className="text-xs font-black text-slate-950 w-5">
                                     {left.place.split(' ')[0]}
                                   </span>
+                                </div>
+                                <span
+                                  className="pointer-events-none absolute left-4 top-1/2 z-0 h-15 w-15 -translate-y-1/2"
+                                  aria-hidden="true"
+                                >
                                   <img
                                     src={
                                       left.rank === 1
-                                        ? '/images/gold.png'
+                                        ? '/images/gold_trophy.svg'
                                         : left.rank === 2
-                                          ? '/images/silver.png'
-                                          : '/images/bronze.png'
+                                          ? '/images/silver_trophy.svg'
+                                          : '/images/bronze_trophy.svg'
                                     }
                                     alt=""
-                                    className="h-4 w-4 object-contain inline-block"
+                                    className="pointer-events-none h-full w-full object-contain"
                                     onError={(e) => {
                                       const target = e.currentTarget as HTMLElement;
                                       target.style.display = 'none';
@@ -770,11 +924,11 @@ export default function EventTierScreen({
                                       if (fallback) fallback.style.display = 'inline-block';
                                     }}
                                   />
-                                  <span className="hidden text-xs leading-none">
+                                  <span className="pointer-events-none absolute inset-0 hidden text-center text-xl leading-none">
                                     {left.rank === 1 ? '🏆' : left.rank === 2 ? '🥈' : '🥉'}
                                   </span>
-                                </div>
-                                <span className="text-xs font-black font-mono text-cyan-950 tabular-nums">
+                                </span>
+                                <span className="relative z-10 text-xs font-black font-mono text-cyan-950 tabular-nums">
                                   {left.amount.toLocaleString()}
                                 </span>
                               </div>
@@ -782,7 +936,7 @@ export default function EventTierScreen({
                           </div>
 
                           {/* Right Column: 4th, 5th, 6th */}
-                          <div className="flex flex-col gap-1">
+                          <div className="flex min-w-0 flex-col gap-1">
                             {prizeRows.map(([, right]) => (
                               <div
                                 key={right.rank}
@@ -823,15 +977,30 @@ export default function EventTierScreen({
                       className="absolute -top-16 -right-16 w-44 h-44 rounded-full bg-[#38ecff]/25 blur-xl pointer-events-none"
                     />
 
-                    {/* Top: Flag Icon + Series Title + Dash */}
-                    <div className="relative z-10 flex flex-col text-left">
-                      <div className="w-8 h-8 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 mb-1.5 shadow-sm">
-                        <Flag className="w-4 h-4 fill-slate-950/20" />
+                    {/* Top: Flag Icon + Series Title + Dash & Close Button */}
+                    <div className="relative z-10 flex items-start justify-between gap-2">
+                      <div className="flex flex-col text-left">
+                        <div className="w-8 h-8 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 mb-1.5 shadow-sm">
+                          <Flag className="w-4 h-4 fill-slate-950/20" />
+                        </div>
+                        <h3 className="text-base sm:text-lg font-black text-slate-950 uppercase tracking-wide leading-tight">
+                          {event.name}
+                        </h3>
+                        <div className="w-5 h-1 bg-[#38ecff] rounded-full mt-1.5 mb-2 shadow-sm" />
                       </div>
-                      <h3 className="text-base sm:text-lg font-black text-slate-950 uppercase tracking-wide leading-tight">
-                        {event.name}
-                      </h3>
-                      <div className="w-5 h-1 bg-[#38ecff] rounded-full mt-1.5 mb-2 shadow-sm" />
+
+                      {/* Close / Minimize Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleMinimizeCard();
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900/10 hover:bg-slate-900/20 text-slate-800 hover:text-slate-950 text-[10px] font-black tracking-wider uppercase transition-all cursor-pointer border border-slate-900/15 active:scale-95 shadow-sm shrink-0"
+                        title="Minimize event card"
+                      >
+                        <span>✕</span>
+                        <span>Close</span>
+                      </button>
                     </div>
 
                     {/* Middle: Stage list (Canopy Speedway, Sprint Circuit, etc.) */}
@@ -926,4 +1095,7 @@ export default function EventTierScreen({
       <EventSubtitleBar event={activeDisplayEvent} />
     </div>
   );
+
+  if (!isClientMounted || typeof document === 'undefined') return null;
+  return createPortal(content, document.body);
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map as MapIcon, Trophy, Building2, Trees, FlagTriangleRight, Route, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map as MapIcon, Trophy, Building2, Trees, FlagTriangleRight, Route, ChevronLeft, ChevronRight, Flag } from 'lucide-react';
 import * as THREE from 'three';
 import { CARS_DATABASE, CarConfig } from '../config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig } from '../config/TrackDatabase';
@@ -1907,6 +1907,7 @@ const isTogglePurchased = (carUpgradesForCar: any, itemId: string) => {
 };
 
 interface GarageProps {
+  brightness?: number;
   activeGarageTab: null | 'drive' | 'dealer' | 'tuning' | 'setting';
   tuningState: 'closed' | 'entering' | 'open' | 'exiting';
   setActiveGarageTab: (tab: null | 'drive' | 'dealer' | 'tuning' | 'setting') => void;
@@ -1952,6 +1953,7 @@ interface GarageProps {
 }
 
 export default function Garage({
+  brightness,
   activeGarageTab,
   tuningState,
   setActiveGarageTab,
@@ -2772,6 +2774,30 @@ export default function Garage({
                       {dealerHoverConfig.name}
                     </div>
                   )}
+                  {/* Seamless Portal to Career Motorsport Resort on the Left */}
+                  <div className="pointer-events-auto absolute left-8 top-1/2 -translate-y-1/2 z-30">
+                    <button
+                      onClick={() => {
+                        setActiveGarageTab('drive');
+                        setDriveSubMode('career');
+                      }}
+                      className="group flex flex-col items-center gap-2 p-3.5 rounded-3xl bg-slate-950/90 hover:bg-slate-900 border-2 border-cyan-400/60 hover:border-cyan-400 text-white shadow-2xl backdrop-blur-xl transition-all duration-300 hover:scale-105 cursor-pointer"
+                      title="Seamlessly move to Career Motorsport World Map"
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-cyan-400/40 border border-cyan-400/60 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500 group-hover:text-black transition-colors shadow-lg">
+                        <Flag className="w-6 h-6" />
+                      </div>
+                      <div className="flex flex-col text-center">
+                        <span className="text-[8px] font-black tracking-widest text-cyan-400 uppercase">
+                          WEST DISTRICT
+                        </span>
+                        <span className="text-xs font-black text-white uppercase tracking-wider flex items-center justify-center gap-0.5 mt-0.5">
+                          <ChevronLeft className="w-3.5 h-3.5 text-cyan-400 group-hover:-translate-x-0.5 transition-transform" />
+                          CAREER RESORT
+                        </span>
+                      </div>
+                    </button>
+                  </div>
                   <DealerHoverBar city={dealerHoverConfig || null} />
                 </>
               )}
@@ -4751,6 +4777,7 @@ export default function Garage({
             })()}            {/* 3. Career Mode 3D Map Screen */}
             {driveSubMode === 'career' && (
               <CareerMap
+                brightness={brightness}
                 playerCredits={playerCredits}
                 hasLicense={hasLicense}
                 licenseProgress={licenseProgress}
@@ -4762,6 +4789,10 @@ export default function Garage({
                 onOpenMapEditor={() => {
                   setActiveMode('editor');
                   setActiveGarageTab(null);
+                }}
+                onNavigateToDealer={() => {
+                  setDriveSubMode(null);
+                  setActiveGarageTab('dealer');
                 }}
               />
             )}
