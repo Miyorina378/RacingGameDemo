@@ -824,12 +824,12 @@ export default function EventTierScreen({
                   >
                     {/* 1. Regulation */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5 overflow-hidden">
                         <img
                           src="/icon/regulation.svg"
                           alt=""
                           aria-hidden="true"
-                          className="h-4 w-4 object-contain"
+                          className="w-full h-full object-cover scale-110"
                           draggable={false}
                         />
                       </div>
@@ -858,12 +858,12 @@ export default function EventTierScreen({
 
                     {/* 2. Tires Restrictions */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5 overflow-hidden">
                         <img
                           src="/icon/tires.svg"
                           alt=""
                           aria-hidden="true"
-                          className="h-4 w-4 object-contain"
+                          className="w-full h-full object-cover scale-110"
                           draggable={false}
                         />
                       </div>
@@ -883,12 +883,12 @@ export default function EventTierScreen({
 
                     {/* 3. License and Entry Fee */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5 overflow-hidden">
                         <img
                           src="/icon/license.svg"
                           alt=""
                           aria-hidden="true"
-                          className="h-4 w-4 object-contain"
+                          className="w-full h-full object-cover scale-110"
                           draggable={false}
                         />
                       </div>
@@ -922,73 +922,70 @@ export default function EventTierScreen({
                     <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
 
                     {/* 4. Prize Table */}
-                    <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5" />
-                      <div className="flex flex-col gap-1.5 min-w-0 flex-1 text-left">
-                        <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
-                          PRIZE
-                        </h4>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-0.5">
-                          {/* Left Column: 1st, 2nd, 3rd */}
-                          <div className="flex min-w-0 flex-col gap-1">
-                            {prizeRows.map(([left]) => (
-                              <div
-                                key={left.rank}
-                                className="relative flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
-                              >
-                                <div className="flex items-center">
-                                  <span className="text-xs font-black text-slate-950 w-5">
-                                    {left.place.split(' ')[0]}
-                                  </span>
-                                </div>
-                                <span
-                                  className="pointer-events-none absolute left-4 top-1/2 z-0 h-15 w-15 -translate-y-1/2"
-                                  aria-hidden="true"
-                                >
-                                  <img
-                                    src={
-                                      left.rank === 1
-                                        ? '/images/gold_trophy.svg'
-                                        : left.rank === 2
-                                          ? '/images/silver_trophy.svg'
-                                          : '/images/bronze_trophy.svg'
-                                    }
-                                    alt=""
-                                    className="pointer-events-none h-full w-full object-contain"
-                                    onError={(e) => {
-                                      const target = e.currentTarget as HTMLElement;
-                                      target.style.display = 'none';
-                                      const fallback = target.nextElementSibling as HTMLElement;
-                                      if (fallback) fallback.style.display = 'inline-block';
-                                    }}
-                                  />
-                                  <span className="pointer-events-none absolute inset-0 hidden text-center text-xl leading-none">
-                                    {left.rank === 1 ? '🏆' : left.rank === 2 ? '🥈' : '🥉'}
-                                  </span>
-                                </span>
-                                <span className="relative z-10 text-xs font-black font-mono text-cyan-950 tabular-nums">
-                                  {left.amount.toLocaleString()}
+                    <div className="flex flex-col gap-1.5 min-w-0 w-full text-left pt-0.5">
+                      <h4 className="text-xl font-black uppercase tracking-wider text-slate-950 px-0.5">
+                        PRIZE
+                      </h4>
+                      <div className="grid grid-cols-2 gap-x-3.5 gap-y-1 mt-0.5">
+                        {/* Left Column: 1st, 2nd, 3rd */}
+                        <div className="flex min-w-0 flex-col gap-1">
+                          {prizeRows.map(([left]) => (
+                            <div
+                              key={left.rank}
+                              className="relative flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
+                            >
+                              <div className="flex items-center">
+                                <span className="text-xs font-black text-slate-950 w-5">
+                                  {left.place.split(' ')[0]}
                                 </span>
                               </div>
-                            ))}
-                          </div>
+                              <span
+                                className="pointer-events-none absolute left-4 top-1/2 z-0 h-15 w-15 -translate-y-1/2"
+                                aria-hidden="true"
+                              >
+                                <img
+                                  src={
+                                    left.rank === 1
+                                      ? '/images/gold_trophy.svg'
+                                      : left.rank === 2
+                                        ? '/images/silver_trophy.svg'
+                                        : '/images/bronze_trophy.svg'
+                                  }
+                                  alt=""
+                                  className="pointer-events-none h-full w-full object-contain"
+                                  onError={(e) => {
+                                    const target = e.currentTarget as HTMLElement;
+                                    target.style.display = 'none';
+                                    const fallback = target.nextElementSibling as HTMLElement;
+                                    if (fallback) fallback.style.display = 'inline-block';
+                                  }}
+                                />
+                                <span className="pointer-events-none absolute inset-0 hidden text-center text-xl leading-none">
+                                  {left.rank === 1 ? '🏆' : left.rank === 2 ? '🥈' : '🥉'}
+                                </span>
+                              </span>
+                              <span className="relative z-10 text-xs font-black font-mono text-cyan-950 tabular-nums">
+                                {left.amount.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
 
-                          {/* Right Column: 4th, 5th, 6th */}
-                          <div className="flex min-w-0 flex-col gap-1">
-                            {prizeRows.map(([, right]) => (
-                              <div
-                                key={right.rank}
-                                className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
-                              >
-                                <span className="text-xs font-black text-slate-950">
-                                  {right.place.split(' ')[0]}
-                                </span>
-                                <span className="text-xs font-black font-mono text-cyan-950 tabular-nums">
-                                  {right.amount.toLocaleString()}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
+                        {/* Right Column: 4th, 5th, 6th */}
+                        <div className="flex min-w-0 flex-col gap-1">
+                          {prizeRows.map(([, right]) => (
+                            <div
+                              key={right.rank}
+                              className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
+                            >
+                              <span className="text-xs font-black text-slate-950">
+                                {right.place.split(' ')[0]}
+                              </span>
+                              <span className="text-xs font-black font-mono text-cyan-950 tabular-nums">
+                                {right.amount.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>
