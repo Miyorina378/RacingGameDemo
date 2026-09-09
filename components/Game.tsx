@@ -3581,27 +3581,31 @@ export default function Game() {
         </div>
       )}
 
-      {/* TOP-RIGHT DEFLATE / INFLATE UI BUTTON */}
-      <div className="absolute top-5 right-5 z-40 pointer-events-auto select-none">
-        <button
-          type="button"
-          onClick={() => setUiHidden((prev) => !prev)}
-          title={uiHidden ? 'Inflate Full UI (H)' : 'Deflate / Minimize UI (H)'}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-purple-500/40 bg-slate-950/85 hover:bg-slate-900 text-purple-200 hover:text-white shadow-[0_0_20px_rgba(0,0,0,0.6)] backdrop-blur-md text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer hover:border-purple-400 active:scale-95"
-        >
-          <span className="text-xs font-mono">{uiHidden ? '🗖' : '🗕'}</span>
-          <span>{uiHidden ? 'Inflate UI' : 'Deflate UI'}</span>
-          <span className="text-[9px] font-mono text-purple-400/80 bg-purple-950/60 border border-purple-500/30 px-1 py-0.5 rounded">H</span>
-        </button>
-      </div>
+      {activeMode === 'editor' && (
+        <>
+          {/* TOP-RIGHT DEFLATE / INFLATE UI BUTTON */}
+          <div className="absolute top-5 right-5 z-40 pointer-events-auto select-none">
+            <button
+              type="button"
+              onClick={() => setUiHidden((prev) => !prev)}
+              title={uiHidden ? 'Inflate Full UI (H)' : 'Deflate / Minimize UI (H)'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-purple-500/40 bg-slate-950/85 hover:bg-slate-900 text-purple-200 hover:text-white shadow-[0_0_20px_rgba(0,0,0,0.6)] backdrop-blur-md text-[10px] font-bold tracking-wider uppercase transition-all cursor-pointer hover:border-purple-400 active:scale-95"
+            >
+              <span className="text-xs font-mono">{uiHidden ? '🗖' : '🗕'}</span>
+              <span>{uiHidden ? 'Inflate UI' : 'Deflate UI'}</span>
+              <span className="text-[9px] font-mono text-purple-400/80 bg-purple-950/60 border border-purple-500/30 px-1 py-0.5 rounded">H</span>
+            </button>
+          </div>
 
-      {/* UI hidden indicator */}
-      {uiHidden && (
-        <div className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 z-30 border border-white/15 bg-zinc-950/70 px-3 py-1.5 backdrop-blur-md rounded-lg">
-          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-400">
-            UI Deflated · Press H or click top-right button
-          </span>
-        </div>
+          {/* UI hidden indicator */}
+          {uiHidden && (
+            <div className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 z-30 border border-white/15 bg-zinc-950/70 px-3 py-1.5 backdrop-blur-md rounded-lg">
+              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-400">
+                UI Deflated · Press H or click top-right button
+              </span>
+            </div>
+          )}
+        </>
       )}
 
       {/* DRIVING HUD: Speedometer, Timers, Checkpoints, Drift */}

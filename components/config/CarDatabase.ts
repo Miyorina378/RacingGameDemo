@@ -93,6 +93,8 @@ export interface CarConfig {
   maxRpm?: number;
   baseMass?: number;
   visualScale?: number;
+  /** Physical display length used when fitting imported models. */
+  visualLength?: number;
   driverCameraOffset?: { x: number; y: number; z: number };
 
   // Visuals
@@ -664,6 +666,82 @@ export const CARS_DATABASE: CarConfig[] = [
     visualScale: 3,
     driverCameraOffset: { x: 0, y: 0.5, z: 0.3 },
     character: { weightDistribution: 0.50, rearGripMultiplier: 0.92, yawInertia: 0.85, oversteerResistance: 0.48 }
+  },
+  {
+    id: 'honda_accord_2026',
+    name: 'Accord Sport Hybrid',
+    brand: 'Honda',
+    speed: 6.3,
+    acceleration: 6.1,
+    handling: 7.0,
+    price: 4200,
+    color: '#b7c1c9',
+    tier: 'Sport Tier',
+    requiresLicense: false,
+    maxSpeed: 220,
+    accelerationRate: 0.20,
+    handlingRate: 0.052,
+    brakingRate: 0.82,
+    dragCoeff: 0.000009,
+    driveType: 'FWD',
+    powertrainType: 'combustion',
+    // Accord Hybrid uses an e-CVT/direct hybrid drive, not a normal 1→2 gearbox.
+    // Vehicle's single_speed path is the closest current engine approximation.
+    transmissionType: 'single_speed',
+    engineDisplacementLiters: 2.0,
+    throttleResponse: 8.5,
+    engineCoolingEfficiency: 1.05,
+    fuelCapacityLiters: 48.45,
+    fuelTankLongitudinalPosition: -0.10,
+    fuelTankHeight: 0.30,
+    brakeSpecificFuelConsumption: 275,
+    maxRpm: 6100,
+    baseMass: 1577,
+    wheelbase: 2.82956,
+    trackWidth: 1.60147,
+    cgHeight: 0.55,
+    engineLayout: 'front',
+    massConcentration: 1.02,
+    frontWeightDistribution: 0.61,
+    dragCoefficient: 0.26,
+    liftCoefficient: 0.14,
+    aeroBalanceFront: 0.46,
+    frontalArea: 2.30,
+    tireGripFront: 1.02,
+    tireGripRear: 1.05,
+    corneringStiffnessFront: 6.0,
+    corneringStiffnessRear: 6.1,
+    frontCamberDegrees: -1.0,
+    rearCamberDegrees: -0.8,
+    tireColdPressurePsi: 35,
+    brakeForce: 15500,
+    maxSteeringAngle: 0.54,
+    steeringRackRatio: 13.9,
+    powerSteeringType: 'electric',
+    pneumaticTrail: 0.064,
+    casterTrail: 0.038,
+    rollingResistanceCoefficient: 0.013,
+    differential: {
+      accelLock: 0.22,
+      decelLock: 0.14,
+      preload: 0.04
+    },
+    gearRatios: [0, 1.0],
+    torqueCurve: [
+      { rpm: 1000, torque: 240 },
+      { rpm: 2000, torque: 335 },
+      { rpm: 3500, torque: 320 },
+      { rpm: 5000, torque: 270 },
+      { rpm: 6100, torque: 235 }
+    ],
+    wheelRadius: 0.3353,
+    // Official 2026 Accord length; do not shrink the sedan to the generic 4.8m target.
+    visualLength: 4.97078,
+    visualScale: 1.0,
+    driverCameraOffset: { x: 0, y: 0.65, z: 0.85 },
+    hasSpoiler: false,
+    boosterColor: 0x48b8ff,
+    character: { weightDistribution: 0.61, rearGripMultiplier: 1.08, yawInertia: 1.08, oversteerResistance: 0.88 }
   },
   {
     id: 'ford_gt_2006',

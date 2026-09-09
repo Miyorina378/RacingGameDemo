@@ -10,10 +10,7 @@ import {
   Sparkles,
   ShieldCheck,
   ChevronLeft,
-  ChevronRight,
-  SlidersHorizontal,
-  Disc,
-  CreditCard
+  ChevronRight
 } from 'lucide-react';
 import {
   CareerTierId,
@@ -828,7 +825,13 @@ export default function EventTierScreen({
                     {/* 1. Regulation */}
                     <div className="flex items-start gap-3.5">
                       <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
-                        <SlidersHorizontal className="w-4 h-4" />
+                        <img
+                          src="/icon/regulation.svg"
+                          alt=""
+                          aria-hidden="true"
+                          className="h-4 w-4 object-contain"
+                          draggable={false}
+                        />
                       </div>
                       <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
                         <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
@@ -856,7 +859,13 @@ export default function EventTierScreen({
                     {/* 2. Tires Restrictions */}
                     <div className="flex items-start gap-3.5">
                       <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
-                        <Disc className="w-4 h-4" />
+                        <img
+                          src="/icon/tires.svg"
+                          alt=""
+                          aria-hidden="true"
+                          className="h-4 w-4 object-contain"
+                          draggable={false}
+                        />
                       </div>
                       <div className="flex flex-col gap-1 min-w-0 flex-1 text-left">
                         <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
@@ -875,11 +884,17 @@ export default function EventTierScreen({
                     {/* 3. License and Entry Fee */}
                     <div className="flex items-start gap-3.5">
                       <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
-                        <CreditCard className="w-4 h-4" />
+                        <img
+                          src="/icon/license.svg"
+                          alt=""
+                          aria-hidden="true"
+                          className="h-4 w-4 object-contain"
+                          draggable={false}
+                        />
                       </div>
                       <div className="relative grid grid-cols-2 gap-4 min-w-0 flex-1 text-left">
                         <div
-                          className="pointer-events-none absolute inset-y-0 left-[45px] z-10 w-px bg-[#b4c3d0]"
+                          className="pointer-events-none absolute top-0 bottom-0 left-[175px] z-20 w-0.5 bg-[#b4c3d0]"
                           aria-hidden="true"
                         />
                         <div className="flex flex-col gap-1 min-w-0">
@@ -908,9 +923,7 @@ export default function EventTierScreen({
 
                     {/* 4. Prize Table */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5">
-                        <Trophy className="w-4 h-4" />
-                      </div>
+                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5" />
                       <div className="flex flex-col gap-1.5 min-w-0 flex-1 text-left">
                         <h4 className="text-xl font-black uppercase tracking-wider text-slate-950">
                           PRIZE

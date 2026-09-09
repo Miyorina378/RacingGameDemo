@@ -101,7 +101,9 @@ const DealerThreeCarIcon = ({
   isSliderIcon?: boolean;
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const cacheKey = `${car.id}_${car.color}_${car.hasSpoiler || false}_${centerModel || false}`;
+  // Store cards and dealer action-menu previews have separate caches and styling.
+  // A dealer logo/accent change must never reuse a store image.
+  const cacheKey = `${isSliderIcon ? 'store-native-v2' : 'dealer-silhouette-v2'}_${car.id}_${car.color}_${car.hasSpoiler || false}_${centerModel || false}`;
   const [staticImageUrl, setStaticImageUrl] = useState<string | null>(() => CAR_ICON_CACHE.get(cacheKey) || null);
 
   useEffect(() => {
@@ -129,29 +131,44 @@ const DealerThreeCarIcon = ({
       mount.appendChild(renderer.domElement);
     }
 
-    const paint = new THREE.Color('#ff0258');
-    const silhouetteMat = new THREE.MeshStandardMaterial({
+    // Dealer presentation is intentionally stylized. Store cards keep the car's
+    // own body color/materials, so dealer branding cannot recolor the store.
+    const paint = isSliderIcon ? new THREE.Color(car.color) : new THREE.Color('#ff0258');
+    const dealerSilhouetteMat = new THREE.MeshStandardMaterial({
       color: paint,
-      roughness: 0.28,
-      metalness: 0.42,
+      roughness: 0.46,
+      metalness: 0.24,
       emissive: paint,
-      emissiveIntensity: 0.18,
+      emissiveIntensity: 0.1,
+      transparent: false,
+      opacity: 1,
+      depthWrite: true,
+      depthTest: true,
     });
-    const blackMat = new THREE.MeshStandardMaterial({
+    const dealerBlackMat = new THREE.MeshStandardMaterial({
       color: 0x050507,
-      roughness: 0.32,
-      metalness: 0.18,
+      roughness: 0.5,
+      metalness: 0.05,
+      transparent: false,
+      opacity: 1,
+      depthWrite: true,
+      depthTest: true,
     });
     const displayRoot = new THREE.Group();
     displayRoot.rotation.y = isSliderIcon ? -Math.PI / 4 : -0.55;
     displayRoot.rotation.x = -0.08;
     scene.add(displayRoot);
 
-    let isGltfLoaded = car.id !== 'honda_s2000' && car.id !== 'ford_gt_2006' && car.id !== 'cybertruck';
+    let isGltfReady = car.id !== 'honda_s2000' && car.id !== 'honda_accord_2026' && car.id !== 'ford_gt_2006' && car.id !== 'cybertruck';
     const iconVehicle = new Vehicle(car.id, car.color, undefined, undefined, () => {
-      isGltfLoaded = true;
+      isGltfReady = true;
     });
-    iconVehicle.mesh.rotation.y = 269.8 + (isSliderIcon ? (130 * Math.PI) / 180 : 0);
+    // Dealer used to receive 269.8 radians. Keep its normalized equivalent so
+    // the dealer icon shows the full side again, while store cards keep their
+    // separate front/three-quarter angle.
+    const dealerSideRotation = THREE.MathUtils.degToRad(338.4013);
+    const storeCardRotation = THREE.MathUtils.degToRad(269.8) + (130 * Math.PI) / 180;
+    iconVehicle.mesh.rotation.y = isSliderIcon ? storeCardRotation : dealerSideRotation;
     displayRoot.add(iconVehicle.mesh);
 
     const localBox = new THREE.Box3();
@@ -160,7 +177,7 @@ const DealerThreeCarIcon = ({
     const relativeMatrix = new THREE.Matrix4();
     const blackPartByMesh = new WeakMap<THREE.Mesh, boolean>();
 
-    const applySilhouetteMaterials = () => {
+    const applyDealerMaterials = () => {
       iconVehicle.mesh.traverse((object) => {
         if (!(object instanceof THREE.Mesh)) return;
 
@@ -205,9 +222,26 @@ const DealerThreeCarIcon = ({
         const isBlackPart = blackPartByMesh.get(object) ?? (isTire || isWindow || hasDarkSourceColor);
         blackPartByMesh.set(object, isBlackPart);
 
-        object.material = isBlackPart ? blackMat : silhouetteMat;
+        object.material = isBlackPart ? dealerBlackMat : dealerSilhouetteMat;
       });
     };
+
+    const applyStoreMaterials = () => {
+      // Restore the original store-card treatment: use each Vehicle's own
+      // color/materials, only flattening highlights for the tiny static image.
+      iconVehicle.mesh.traverse((object) => {
+        if (!(object instanceof THREE.Mesh) || !object.material) return;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => {
+          if ('metalness' in material) material.metalness = 0.0;
+          if ('roughness' in material) material.roughness = 0.85;
+          if ('clearcoat' in material) material.clearcoat = 0.0;
+          if ('clearcoatRoughness' in material) material.clearcoatRoughness = 1.0;
+        });
+      });
+    };
+
+    const applyPreviewMaterials = isSliderIcon ? applyStoreMaterials : applyDealerMaterials;
 
     const getVehicleLocalBox = () => {
       localBox.makeEmpty();
@@ -236,22 +270,8 @@ const DealerThreeCarIcon = ({
 
       iconVehicle.mesh.scale.setScalar(1);
       iconVehicle.mesh.position.set(0, 0, 0);
-      if (!isSliderIcon) {
-        applySilhouetteMaterials();
-      } else {
-        iconVehicle.mesh.traverse((object) => {
-          if (!(object instanceof THREE.Mesh)) return;
-          if (object.material) {
-            const materials = Array.isArray(object.material) ? object.material : [object.material];
-            materials.forEach((mat) => {
-              if ('metalness' in mat) mat.metalness = 0.0;
-              if ('roughness' in mat) mat.roughness = 0.85;
-              if ('clearcoat' in mat) mat.clearcoat = 0.0;
-              if ('clearcoatRoughness' in mat) mat.clearcoatRoughness = 1.0;
-            });
-          }
-        });
-      }
+      // Dealer icon styling and store-card styling are intentionally separate.
+      applyPreviewMaterials();
       iconVehicle.mesh.updateMatrixWorld(true);
       const box = getVehicleLocalBox();
       if (box.isEmpty()) return;
@@ -259,8 +279,10 @@ const DealerThreeCarIcon = ({
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
 
-      const maxSize = Math.max(size.x, size.y, size.z, 0.1);
-      const scale = 5.25 / maxSize;
+      // Game car axis is +Z front. Fit dealer previews by longitudinal length,
+      // not width/roof height, so Accord matches the other cars physically.
+      const longitudinalSize = size.z > 0.1 ? size.z : Math.max(size.x, size.y, 0.1);
+      const scale = 5.25 / longitudinalSize;
       iconVehicle.mesh.scale.setScalar(scale);
       if (isSliderIcon) {
         iconVehicle.mesh.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
@@ -278,14 +300,6 @@ const DealerThreeCarIcon = ({
     const rim = new THREE.DirectionalLight(paint, 2.2);
     rim.position.set(-3, 1.5, -2.5);
     scene.add(rim);
-
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(2.35, 40),
-      new THREE.MeshBasicMaterial({ color: paint, transparent: true, opacity: 0.12 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = isSliderIcon ? -999 : -0.02;
-    scene.add(floor);
 
     const resize = () => {
       const width = isSliderIcon ? (mount.clientWidth || 112) : 112;
@@ -306,7 +320,7 @@ const DealerThreeCarIcon = ({
         fitVehicleToIcon();
         renderer.render(scene, camera);
 
-        if (isFitted && isGltfLoaded && sliderRetryCount > 3) {
+        if (isFitted && isGltfReady && sliderRetryCount > 3) {
           // Model is loaded and fitted, capture the image
           const dataUrl = renderer.domElement.toDataURL('image/png');
           CAR_ICON_CACHE.set(cacheKey, dataUrl);

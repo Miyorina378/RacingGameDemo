@@ -312,7 +312,8 @@ export class Vehicle {
   public rpm = 1000;
   public gearRatios = [0, 3.60, 2.10, 1.50, 1.10, 0.90, 0.80]; // เกียร์ 1-6 (index 0 ว่างไว้)
   public finalDrive = 3.42;
-  public wheelRadius = 0.48; // อิงตามรัศมี Cylinder ที่สร้างในโปรแกรม (0.48)
+  public wheelRadius = 0.48; // Physical tire radius used by the simulation
+  private visualWheelRadius = 0.48; // Imported visual radius after model scaling
 
   // Shifting and transmission state variables
   public isShifting = false;
@@ -362,7 +363,7 @@ export class Vehicle {
   public color: string;
   public drivingMode: any = 'arcade';
 
-  constructor(carId: string = 'starter', color: string = '#f43f5e', bodyKit?: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
+  constructor(carId: string = 'starter', color: string = '#f43f5e', bodyKit?: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: (success?: boolean) => void) {
     this.carId = carId;
     this.color = color;
     this.mesh = new THREE.Group();
@@ -896,7 +897,7 @@ export class Vehicle {
     this.resetVisualReferences();
   }
 
-  public rebuild(carId: string, color: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: () => void) {
+  public rebuild(carId: string, color: string, onLoadProgress?: (progress: number) => void, onLoadComplete?: (success?: boolean) => void) {
     const generation = ++this.visualGeneration;
     const isSameCommittedCar = this.committedVisualCarId === carId;
     this.carId = carId;
@@ -909,7 +910,7 @@ export class Vehicle {
       this.paintMaterials.forEach((mat) => {
         mat.color.copy(paintColor);
       });
-      onLoadComplete?.();
+      onLoadComplete?.(true);
       return;
     }
 
@@ -917,13 +918,14 @@ export class Vehicle {
     // their owned generation finishes, preventing an empty frame while loading.
     if (
       carId !== 'honda_s2000' &&
+      carId !== 'honda_accord_2026' &&
       carId !== 'ford_gt_2006' &&
       carId !== 'cybertruck'
     ) {
       this.clearCurrentVisual();
       this.buildProceduralMesh();
       this.committedVisualCarId = carId;
-      onLoadComplete?.();
+      onLoadComplete?.(true);
     } else {
       this.buildMesh(onLoadProgress, onLoadComplete, generation, carId, color);
     }
@@ -931,13 +933,15 @@ export class Vehicle {
  
   private buildMesh(
     onLoadProgress: ((progress: number) => void) | undefined,
-    onLoadComplete: (() => void) | undefined,
+    onLoadComplete: ((success?: boolean) => void) | undefined,
     generation: number,
     carId: string,
     color: string
   ) {
     if (carId === 'honda_s2000') {
       this.buildGltfMesh('/models/honda_s2000.glb', generation, carId, color, onLoadProgress, onLoadComplete);
+    } else if (carId === 'honda_accord_2026') {
+      this.buildGltfMesh('/models/honda_accord_2026.glb', generation, carId, color, onLoadProgress, onLoadComplete);
     } else if (carId === 'ford_gt_2006') {
       this.buildGltfMesh('/models/ford_gt_2006.glb', generation, carId, color, onLoadProgress, onLoadComplete);
     } else if (carId === 'cybertruck') {
@@ -946,7 +950,7 @@ export class Vehicle {
       this.clearCurrentVisual();
       this.buildProceduralMesh();
       this.committedVisualCarId = carId;
-      onLoadComplete?.();
+      onLoadComplete?.(true);
     }
   }
 
@@ -954,10 +958,12 @@ export class Vehicle {
     const paintColor = new THREE.Color(color);
     const mat = new THREE.MeshPhysicalMaterial({
       color: paintColor,
-      roughness: 0.18,
-      metalness: 0.82,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.04
+      // Keep paint glossy, but avoid mirror-like highlights that shimmer on
+      // small previews and low-resolution gameplay surfaces.
+      roughness: 0.38,
+      metalness: 0.32,
+      clearcoat: 0.65,
+      clearcoatRoughness: 0.14
     });
     this.paintMaterials.push(mat);
     return mat;
@@ -965,14 +971,16 @@ export class Vehicle {
 
   private createWindshieldMaterial(): THREE.MeshPhysicalMaterial {
     const mat = new THREE.MeshPhysicalMaterial({
-      color: 0x334455,
-      roughness: 0.08,
-      metalness: 0.05,
-      transmission: 0.9,
-      ior: 1.5,
-      thickness: 0.5,
-      transparent: true,
-      opacity: 0.45
+      // Accord cabin parts overlap in the authored GLB. Opaque dark glass
+      // avoids unstable transparent sorting and transmission shimmer.
+      color: 0x1b2733,
+      roughness: 0.3,
+      metalness: 0.02,
+      transmission: 0,
+      transparent: false,
+      opacity: 1,
+      depthWrite: true,
+      depthTest: true
     });
     this.windshieldMaterials.push(mat);
     return mat;
@@ -1150,7 +1158,7 @@ export class Vehicle {
     requestedCarId: string,
     requestedColor: string,
     onLoadProgress?: (progress: number) => void,
-    onLoadComplete?: () => void
+    onLoadComplete?: (success?: boolean) => void
   ) {
     // If there is no previous car visible, build a temporary placeholder. It is
     // owned by the current visual and is disposed when an active request commits.
@@ -1202,15 +1210,17 @@ export class Vehicle {
         const box = hasMeshes ? meshBox : new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
 
-        // Target length is 4.8m to match collision bounds
-        const targetLength = 4.8;
-        const carLength = Math.max(size.x, size.y, size.z);
-        const scaleFactor = targetLength / Math.max(0.1, carLength);
-
-        // Apply config visualScale override if defined
+        // Fit imported visuals to the car's physical display length. Accord uses
+        // its official 4.97078m length instead of the generic 4.8m fallback.
         const config = CARS_DATABASE.find(c => c.id === requestedCarId) || CARS_DATABASE[0];
+        const targetLength = config.visualLength ?? 4.8;
+        const carLength = size.z > 0.1 ? size.z : Math.max(size.x, size.y, 0.1);
+        const scaleFactor = targetLength / carLength;
+
+        // Keep existing per-asset calibration for the older imported cars.
         const dbScale = config.visualScale !== undefined ? config.visualScale : 1.0;
         const finalScale = scaleFactor * dbScale;
+        this.visualWheelRadius = this.wheelRadius * finalScale;
         model.scale.set(finalScale, finalScale, finalScale);
 
         const center = box.getCenter(new THREE.Vector3());
@@ -1313,14 +1323,23 @@ export class Vehicle {
         if (requestedCarId === 'ford_gt_2006') {
           this.buildFordGtWheels(model, finalScale);
         } else {
-          // Search for wheel groups/nodes by name
+          // Search for wheel groups/nodes by name. Accord has decorative objects
+          // named with "wheel" and "trim"; only its authored hub parents are
+          // valid wheel pivots. Keep the broad heuristic for legacy cars.
           const candidates: THREE.Object3D[] = [];
-          const posRegex = /\b(front|rear|back|left|right|fl|fr|rl|rr|lf|rf|lr|rr)\b|[_ -](l|r|f|b)(?:\b|[_ -]|\d)/i;
+          const posRegex = /(?:^|[_ -])(front|rear|back|left|right|fl|fr|rl|rr|lf|rf|lr|f|b|l|r)(?:$|[_ -]|\d)/i;
+          const accordWheelNames = new Set([
+            'wheel_front_left',
+            'wheel_front_right',
+            'wheel_rear_left',
+            'wheel_rear_right',
+          ]);
 
           model.traverse((child: THREE.Object3D) => {
             const name = child.name.toLowerCase();
-            const isWheelTireRim = name.includes('wheel') || name.includes('tire') || name.includes('rim');
-            if (isWheelTireRim && posRegex.test(child.name)) {
+            const isAccordWheel = requestedCarId === 'honda_accord_2026' && accordWheelNames.has(name);
+            const isLegacyWheel = name.includes('wheel') || name.includes('tire') || name.includes('rim');
+            if (isAccordWheel || (requestedCarId !== 'honda_accord_2026' && isLegacyWheel && posRegex.test(child.name))) {
               candidates.push(child);
             }
           });
@@ -1338,152 +1357,132 @@ export class Vehicle {
           });
 
           // Process collected wheels with a 2-level pivot hierarchy:
-          //   steerPivot (position + steering Y) → spinNode (rolling X) → wheel mesh
-          // This separates steering from spin, preventing axis interference.
+          //   steerPivot (position + steering Y) → spinNode (rolling X) → wheel parent
+          // Accord wheel parents are authored at hub center, so preserve their local
+          // hierarchy and transform instead of recentering their child geometry again.
+          const wheelCorner = (name: string): 'frontLeft' | 'frontRight' | 'rearLeft' | 'rearRight' => {
+            const lower = name.toLowerCase();
+            const isFront = /(?:^|[_ -])(front|fore|f|fl|fr)(?:$|[_ -]|\d)/i.test(lower);
+            const isLeft = /(?:^|[_ -])(left|l|fl|rl)(?:$|[_ -]|\d)/i.test(lower);
+            return isFront
+              ? isLeft ? 'frontLeft' : 'frontRight'
+              : isLeft ? 'rearLeft' : 'rearRight';
+          };
           const wheelNodes: THREE.Object3D[] = [];
           originalWheels.forEach((child) => {
             child.updateMatrixWorld(true);
 
-            // Use the bounding-box center as the pivot position, NOT the mesh origin.
-            // GLTF models often have mesh origins at the car center, not the wheel center.
-            // Using the visual center ensures the spin axis passes through the wheel hub.
             const bbox = new THREE.Box3().setFromObject(child);
-            const visualCenter = bbox.getCenter(new THREE.Vector3());
+            const isHubCentered =
+              child.userData.origin_is_hub_center === true ||
+              (requestedCarId === 'honda_accord_2026' && accordWheelNames.has(child.name.toLowerCase()));
+            const pivotCenter = isHubCentered
+              ? child.getWorldPosition(new THREE.Vector3())
+              : bbox.getCenter(new THREE.Vector3());
 
-            // Outer group: handles position + steering (Y rotation only)
+            // Outer group handles position + steering (Y rotation only).
             const steerPivot = new THREE.Group();
             steerPivot.name = child.name + '_steer';
             this.mesh.add(steerPivot);
-            steerPivot.position.copy(this.mesh.worldToLocal(visualCenter.clone()));
-
-            // Apply model visual scale directly to steerPivot since it's now under this.mesh
+            steerPivot.position.copy(this.mesh.worldToLocal(pivotCenter.clone()));
             steerPivot.scale.set(finalScale, finalScale, finalScale);
 
-            // Inner group: handles rolling spin (X rotation only)
+            // Inner group handles rolling spin (X rotation only).
             const spinNode = new THREE.Group();
             steerPivot.add(spinNode);
             steerPivot.userData.spinNode = spinNode;
-
-            // Update matrices so attach() can calculate local transforms correctly using updated world matrices
+            steerPivot.userData.wheelCorner = wheelCorner(child.name);
             steerPivot.updateMatrixWorld(true);
 
-            // Reparent the wheel mesh into spinNode, preserving its world transform.
+            // Preserve the authored hub transform. This prevents orbiting wheels and
+            // keeps local-X tire spin aligned with the Accord GLB contract.
             spinNode.attach(child);
 
-            // --- Eliminate orbital offset ---
-            // Update matrices after attachment to ensure world positions are accurate.
-            child.updateMatrixWorld(true);
-
-            // Compute local bounding box of child (including its own geometry and all descendants) in child's local space.
-            const localBox = new THREE.Box3();
-            child.traverse((node) => {
-              if (node instanceof THREE.Mesh && node.geometry) {
-                if (!node.geometry.boundingBox) {
-                  node.geometry.computeBoundingBox();
-                }
+            if (!isHubCentered) {
+              // Legacy imported wheels may have origins at the model center. Recenter
+              // only those assets; never apply this destructive path to hub-centered wheels.
+              child.updateMatrixWorld(true);
+              const localBox = new THREE.Box3();
+              child.traverse((node) => {
+                if (!(node instanceof THREE.Mesh) || !node.geometry) return;
+                if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+                if (!node.geometry.boundingBox) return;
                 const nodeBox = node.geometry.boundingBox.clone();
                 node.updateMatrixWorld(true);
-                // Compute transform matrix from node to child
-                const m = new THREE.Matrix4().multiplyMatrices(child.matrixWorld.clone().invert(), node.matrixWorld);
-                nodeBox.applyMatrix4(m);
-                localBox.union(nodeBox);
+                const relative = new THREE.Matrix4().multiplyMatrices(
+                  child.matrixWorld.clone().invert(),
+                  node.matrixWorld
+                );
+                localBox.union(nodeBox.applyMatrix4(relative));
+              });
+              if (!localBox.isEmpty()) {
+                const localCenter = localBox.getCenter(new THREE.Vector3());
+                if (child instanceof THREE.Mesh && child.geometry) {
+                  const sourceGeometry = child.geometry;
+                  child.geometry = sourceGeometry.clone();
+                  this.visualOrphanedGeometries.add(sourceGeometry);
+                  child.geometry.translate(-localCenter.x, -localCenter.y, -localCenter.z);
+                }
+                child.children.forEach((part) => part.position.sub(localCenter));
+                child.position.set(0, 0, 0);
               }
-            });
-
-            const localCenter = localBox.getCenter(new THREE.Vector3());
-
-            // Shift child's own geometry if it is a Mesh
-            if (child instanceof THREE.Mesh && child.geometry) {
-              const sourceGeometry = child.geometry;
-              child.geometry = sourceGeometry.clone();
-              this.visualOrphanedGeometries.add(sourceGeometry);
-              child.geometry.translate(-localCenter.x, -localCenter.y, -localCenter.z);
             }
 
-            // Shift all immediate children's positions
-            child.children.forEach((c) => {
-              c.position.sub(localCenter);
-            });
-
-            // Reset child's local position to exactly (0, 0, 0) relative to spinNode
-            child.position.set(0, 0, 0);
-
-            console.log(`[Wheel] ${child.name} type=${child.type} pos=[${child.position.toArray().map(v => v.toFixed(4))}] quat=[${child.quaternion.toArray().map(v => v.toFixed(4))}] children=${child.children.length}`);
-
+            console.log(`[Wheel] ${child.name} corner=${steerPivot.userData.wheelCorner} hub=${isHubCentered} children=${child.children.length}`);
             wheelNodes.push(steerPivot);
           });
 
           this.wheels = wheelNodes;
 
-          // Search for caliper nodes by name and attach them to the corresponding steerPivot
+          // Collect calipers first, then reparent them. Mutating the model during
+          // traverse can skip sibling nodes and leave one corner unbound.
+          const calipers: THREE.Object3D[] = [];
           model.traverse((child: THREE.Object3D) => {
             const name = child.name.toLowerCase();
-            if (name.includes('caliper') || name.includes('calliper')) {
-              // Avoid adding submeshes of calipers we already processed
-              let hasParentInList = false;
-              let p = child.parent;
-              while (p && p !== model) {
-                const pName = p.name.toLowerCase();
-                if (pName.includes('caliper') || pName.includes('calliper')) {
-                  hasParentInList = true;
-                  break;
-                }
-                p = p.parent;
+            if (!name.includes('caliper') && !name.includes('calliper')) return;
+            let hasCaliperAncestor = false;
+            let parent = child.parent;
+            while (parent && parent !== model) {
+              const parentName = parent.name.toLowerCase();
+              if (parentName.includes('caliper') || parentName.includes('calliper')) {
+                hasCaliperAncestor = true;
+                break;
               }
-              if (hasParentInList) return;
-
-              // Identify its position
-              const isFront = name.includes('front') || name.includes('fl') || name.includes('fr') || name.includes('_f');
-              const isLeft = /left|\b(l)\b|[_ -]l(?:\b|[_ -]|\d)/i.test(name);
-              
-              // Find the matching steerPivot
-              const matchingWheel = wheelNodes.find(w => {
-                const wName = w.name.toLowerCase();
-                const wFront = wName.includes('front') || wName.includes('fl') || wName.includes('fr') || wName.includes('_f');
-                const wLeft = /left|\b(l)\b|[_ -]l(?:\b|[_ -]|\d)/i.test(wName);
-                return wFront === isFront && wLeft === isLeft;
-              });
-              
-              if (matchingWheel) {
-                child.updateMatrixWorld(true);
-                matchingWheel.updateMatrixWorld(true);
-                // Reparent the caliper to steerPivot (not spinNode, so it steers but doesn't spin)
-                matchingWheel.attach(child);
-                console.log(`[Caliper] Reparented ${child.name} to steerPivot ${matchingWheel.name}`);
-              }
+              parent = parent.parent;
             }
+            if (!hasCaliperAncestor) calipers.push(child);
           });
 
-          console.log(`[GLTF Load Success] S2000 loaded. Size:`, size, `Scale factor:`, scaleFactor, `Final scale:`, finalScale, `Wheel nodes detected:`, wheelNodes.map(w => w.name));
-
-          // Map front steering wheels
-          this.wheels.forEach((wheel) => {
-            const name = wheel.name.toLowerCase();
-            const isFront = /front|fore|\b(f)\b|[_ -]f(?:\b|[_ -]|\d)/i.test(name);
-            const isLeft = /left|\b(l)\b|[_ -]l(?:\b|[_ -]|\d)/i.test(name);
-
-            if (isFront) {
-              if (isLeft) {
-                this.leftFrontWheel = wheel;
-              } else {
-                this.rightFrontWheel = wheel;
-              }
-            } else if (isLeft) {
-              this.leftRearWheel = wheel;
-            } else {
-              this.rightRearWheel = wheel;
-            }
+          const wheelByCorner = new Map<string, THREE.Object3D>();
+          wheelNodes.forEach((wheel) => {
+            wheelByCorner.set(String(wheel.userData.wheelCorner), wheel);
+          });
+          calipers.forEach((caliper) => {
+            const matchingWheel = wheelByCorner.get(wheelCorner(caliper.name));
+            if (!matchingWheel) return;
+            caliper.updateMatrixWorld(true);
+            matchingWheel.updateMatrixWorld(true);
+            // Calipers steer with the wheel but remain outside spinNode.
+            matchingWheel.attach(caliper);
+            console.log(`[Caliper] Reparented ${caliper.name} to ${matchingWheel.name}`);
           });
 
-          // Fallback: If no wheel nodes found in the model, build procedural ones
+          console.log(`[GLTF Load Success] ${requestedCarId} loaded. Size:`, size, `Scale factor:`, scaleFactor, `Final scale:`, finalScale, `Wheel nodes detected:`, wheelNodes.map(w => w.name));
+
+          // Map wheel pivots from their explicit corner metadata. Do not infer the
+          // Accord right side from a broad substring search.
+          this.leftFrontWheel = wheelByCorner.get('frontLeft');
+          this.rightFrontWheel = wheelByCorner.get('frontRight');
+          this.leftRearWheel = wheelByCorner.get('rearLeft');
+          this.rightRearWheel = wheelByCorner.get('rearRight');
+
+          // Fallback: If no wheel nodes found in the model, build procedural ones.
           if (this.wheels.length === 0) {
             this.buildFallbackWheels();
-          } else {
-            // If we couldn't properly classify left/right front, assign fallback references
-            if (!this.leftFrontWheel || !this.rightFrontWheel) {
-              this.leftFrontWheel = this.wheels[0];
-              this.rightFrontWheel = this.wheels[1] || this.wheels[0];
-            }
+          } else if (!this.leftFrontWheel || !this.rightFrontWheel) {
+            // Keep older assets driveable if their names are incomplete.
+            this.leftFrontWheel = this.wheels[0];
+            this.rightFrontWheel = this.wheels[1] || this.wheels[0];
           }
         }
 
@@ -1493,7 +1492,7 @@ export class Vehicle {
 
         if (generation === this.visualGeneration) {
           onLoadProgress?.(100);
-          onLoadComplete?.();
+          onLoadComplete?.(true);
         }
       },
       (xhr: ProgressEvent) => {
@@ -1506,7 +1505,7 @@ export class Vehicle {
       (err: unknown) => {
         if (generation !== this.visualGeneration) return;
         console.error(`Failed to load ${requestedCarId} model:`, err);
-        onLoadComplete?.();
+        onLoadComplete?.(false);
       }
     );
   }
@@ -1936,6 +1935,7 @@ export class Vehicle {
       ? [...config.gearRatios]
       : [0, 3.60, 2.10, 1.50, 1.10, 0.90, 0.80];
     this.wheelRadius = config.wheelRadius ?? 0.48;
+    this.visualWheelRadius = this.wheelRadius;
     this.hasSpoiler = config.hasSpoiler;
     this.boosterColor = config.boosterColor;
 
@@ -3871,7 +3871,7 @@ export class Vehicle {
     // Wheel spin. A single shared angle avoids per-wheel floating-point drift.
     const directionSign = this.speed >= 0 ? 1 : -1;
     this.wheelSpinAngle +=
-      ((this.wheelSpeed * directionSign) / this.wheelRadius) * deltaTime;
+      ((this.wheelSpeed * directionSign) / Math.max(this.visualWheelRadius, 0.01)) * deltaTime;
     if (this.wheelSpinAngle > Math.PI * 2) this.wheelSpinAngle -= Math.PI * 2;
     if (this.wheelSpinAngle < -Math.PI * 2) this.wheelSpinAngle += Math.PI * 2;
 

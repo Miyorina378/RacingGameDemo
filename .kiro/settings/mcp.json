@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "blender": {
+      "command": "C:\\Python313\\python.exe",
+      "args": [
+        "D:\\trifilpla\\.kiro\\blender_mcp_launcher.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "9876"
+      ],
+      "disabled": false,
+      "autoApprove": [],
+      "disabledTools": []
+    }
+  }
+}
