@@ -339,8 +339,8 @@ def build_master_body_with_wheel_wells():
     y_slices = [
         -2.440, -2.380, -2.280, -2.160, -2.040, -1.900, -1.780,
         -1.750, -1.700, -1.620, -1.520, -1.415, -1.310, -1.210, -1.130, -1.080, -1.050,
-        -0.920, -0.670, -0.380, -0.180, -0.040, 0.040, 0.360, 0.680, 0.950,
-        1.080, 1.180, 1.260, 1.340, 1.415, 1.520, 1.620, 1.700, 1.780,
+        -0.920, -0.670, -0.380, -0.180, -0.040, 0.040, 0.360, 0.680, 0.880, 0.980, 1.080,
+        1.180, 1.260, 1.340, 1.415, 1.520, 1.620, 1.700, 1.780,
         1.880, 1.980, 2.080, 2.150, 2.240, 2.320, 2.390, 2.460
     ]
 
@@ -490,11 +490,11 @@ def build_master_body_with_wheel_wells():
             ]
         else:
             if in_cab:
-                if y <= 0.95:
+                if y <= 0.70:
                     w_top_z = rail_z - 0.015
                     w_top_x = rail_x * 1.02
-                elif y <= 1.26:
-                    t_kink = (y - 0.95) / (1.26 - 0.95)
+                elif y <= 1.08:
+                    t_kink = (y - 0.70) / (1.08 - 0.70)
                     target_z = belt_z + 0.004
                     target_x = belt_x - 0.004
                     w_top_z = (rail_z - 0.015) * (1.0 - t_kink) + target_z * t_kink
@@ -574,12 +574,9 @@ def build_master_body_with_wheel_wells():
             # Rear fastback window glass: from roof trailing cut to base of rear glass (center only)
             elif 0.80 <= y_curr < 1.78 and i in (0, 1, 16, 17):
                 mat_idx = 2  # MATS['glass']
-            # Side window glass & B-pillar flush sash (sweeping back to 1.26 Hofmeister kink)
-            elif -0.92 <= y_curr < 1.26 and i in (3, 14):
-                if -0.04 <= y_curr < 0.04:
-                    mat_idx = 3  # B-pillar flush gloss black sash
-                else:
-                    mat_idx = 2  # side window glass (tapering to sharp Hofmeister kink at 1.26!)
+            # Side window glass ending precisely at Hofmeister kink (1.08)
+            elif -0.92 <= y_curr < 1.08 and i in (3, 14):
+                mat_idx = 2  # side window glass MATS['glass']
             # Underbody floor
             elif i in (7, 8, 9, 10):
                 mat_idx = 4  # dark_metal floor
@@ -1183,60 +1180,123 @@ def build_rear_fascia():
 
 def build_side_details():
     for sign, side in ((1.0, 'right'), (-1.0, 'left')):
-        # 1. Front Door Leading Cut Line (Hugs unibody curvature from sill to beltline)
-        fd_pts = [
-            (sign * 0.856, -0.92, 0.195),
-            (sign * 0.892, -0.92, 0.745),
-            (sign * 0.845, -0.92, 0.880),
+        # 1. Authentic 3D B-Pillar Assembly (Dimensioned, Beveled, Flush Automotive Post)
+        # B-pillar center at Y = +0.020.
+        # Spans from beltline (Z = 0.868, X = 0.846) to roof rail (Z = 1.412, X = 0.672).
+        # Width in Y = 0.078m (from Y = -0.019 to Y = +0.059).
+        dz = 1.412 - 0.868
+        dx = 0.672 - 0.846
+        tumble_angle = math.atan2(dx, dz)
+        rot_y = sign * tumble_angle
+        mid_z = (0.868 + 1.412) * 0.5
+        mid_x = sign * ((0.846 + 0.672) * 0.5 + 0.007)
+        length_pillar = math.sqrt(dx * dx + dz * dz)
+
+        # Dimensional gloss black B-pillar outer applique (standing proud of glass)
+        box_object(f"B-pillar applique {side}",
+                   (mid_x, 0.020, mid_z),
+                   (0.011, 0.078, length_pillar),
+                   MATS['black'], parent=ROOT, bevel=0.002,
+                   rotation=(0, rot_y, 0))
+
+        # Base rubber seal cushion underneath
+        box_object(f"B-pillar base cushion {side}",
+                   (sign * ((0.846 + 0.672) * 0.5 + 0.002), 0.020, mid_z),
+                   (0.006, 0.084, length_pillar + 0.006),
+                   MATS['door_seam'], parent=ROOT,
+                   rotation=(0, rot_y, 0))
+
+        # 2. Continuous Beltline Weatherstrip / Waist Seal (Anchors window base)
+        bw_pts = [
+            (sign * 0.845, -0.92, 0.875),
+            (sign * 0.846, -0.38, 0.874),
+            (sign * 0.848,  0.02, 0.872),
+            (sign * 0.846,  0.68, 0.868),
+            (sign * 0.842,  0.88, 0.866),
+            (sign * 0.838,  1.08, 0.865),
         ]
-        for k in range(len(fd_pts) - 1):
-            cylinder_between(f"front door shutline {side}_{k}", fd_pts[k], fd_pts[k + 1], 0.0025, MATS['door_seam'], parent=ROOT)
+        for k in range(len(bw_pts) - 1):
+            cylinder_between(f"beltline weatherstrip {side}_{k}",
+                             bw_pts[k], bw_pts[k + 1], 0.0045, MATS['black'], parent=ROOT)
 
-        # 2. B-Pillar Division Cut Line (Flush center shutline at Y = 0.00)
-        bp_pts = [
-            (sign * 0.858, 0.00, 0.195),
-            (sign * 0.895, 0.00, 0.745),
-            (sign * 0.846, 0.00, 0.875),
-        ]
-        for k in range(len(bp_pts) - 1):
-            cylinder_between(f"B-pillar shutline {side}_{k}", bp_pts[k], bp_pts[k + 1], 0.0025, MATS['door_seam'], parent=ROOT)
-
-        # 3. Rear Door Trailing Cut Line (At Y = 0.95, following rear passenger door boundary)
-        rd_pts = [
-            (sign * 0.865, 0.98, 0.205),
-            (sign * 0.890, 0.96, 0.745),
-            (sign * 0.840, 0.95, 0.865),
-        ]
-        for k in range(len(rd_pts) - 1):
-            cylinder_between(f"rear door shutline {side}_{k}", rd_pts[k], rd_pts[k + 1], 0.0025, MATS['door_seam'], parent=ROOT)
-
-        # Slim Flush Rear Quarter Glass Division Bar (At Y = 0.95, flush with window glass)
-        q_p1 = (sign * 0.840, 0.95, 0.865)
-        q_p2 = (sign * 0.672, 0.95, 1.250)
-        cylinder_between(f"quarter glass divider {side}", q_p1, q_p2, 0.003, MATS['black'], parent=ROOT)
-
-        # 4. Signature Chrome Window Arch & Hofmeister Kink Hockey Stick Trim
+        # 3. Signature Chrome Window Arch & Hofmeister Kink (Kinks precisely at 1.08!)
         chrome_pts = [
             (sign * 0.672, -0.38, 1.390),
             (sign * 0.672, -0.18, 1.415),
-            (sign * 0.672,  0.00, 1.410),
+            (sign * 0.672,  0.02, 1.410),
             (sign * 0.650,  0.36, 1.390),
             (sign * 0.630,  0.68, 1.345),
-            (sign * 0.615,  0.95, 1.270),
-            (sign * 0.700,  1.08, 1.070),
-            (sign * 0.775,  1.18, 0.930),
-            (sign * 0.835,  1.26, 0.865),
-            (sign * 0.835,  1.21, 0.865),
+            (sign * 0.615,  0.88, 1.280),
+            (sign * 0.700,  0.98, 1.120),
+            (sign * 0.775,  1.05, 0.980),
+            (sign * 0.838,  1.08, 0.865),
+            (sign * 0.842,  1.03, 0.865),
         ]
         for k in range(len(chrome_pts) - 1):
             cylinder_between(f"chrome roof arch {side}_{k}", chrome_pts[k], chrome_pts[k + 1], 0.0035, MATS['chrome'], parent=ROOT)
 
-        # 5. Horizontal Lower Rocker Sill Crease
-        sk1 = (sign * 0.865, -0.92, 0.250)
-        sk2 = (sign * 0.865, 0.98, 0.250)
-        cylinder_between(f"door rocker crease {side}", sk1, sk2, 0.0025, MATS['door_seam'], parent=ROOT)
+        # Upper window frame header seal under chrome arch
+        for k in range(len(chrome_pts) - 2):
+            cylinder_between(f"window header seal {side}_{k}", chrome_pts[k], chrome_pts[k + 1], 0.0028, MATS['black'], parent=ROOT)
 
-        # 5. Side Mirrors
+        # 4. Sculpted Rear Quarter Glass Division Bar (At Y = 0.74, connects beltline to roof rail)
+        q_p1 = (sign * 0.846, 0.74, 0.868)
+        q_p2 = (sign * 0.690, 0.74, 1.255)
+        cylinder_between(f"quarter glass divider {side}", q_p1, q_p2, 0.0055, MATS['black'], parent=ROOT)
+
+        # 5. Proportioned Door Cut Lines (7mm crisp visible panel shutlines)
+        r_seam = 0.0035
+
+        # 5a. Front Door Leading Cut Line (From sill, up fender, past cowl, up A-pillar to roof)
+        fd_pts = [
+            (sign * 0.858, -0.94, 0.195),
+            (sign * 0.868, -0.94, 0.250),
+            (sign * 0.898, -0.93, 0.500),
+            (sign * 0.894, -0.92, 0.745),
+            (sign * 0.848, -0.90, 0.880),
+            (sign * 0.760, -0.66, 1.135),
+            (sign * 0.674, -0.38, 1.390),
+            (sign * 0.674, -0.18, 1.415),
+            (sign * 0.674,  0.02, 1.410),
+        ]
+        for k in range(len(fd_pts) - 1):
+            cylinder_between(f"front door shutline {side}_{k}", fd_pts[k], fd_pts[k + 1], r_seam, MATS['door_seam'], parent=ROOT)
+
+        # 5b. B-Pillar Center Door Division Cut Line (From sill, through door skin and B-pillar to roof)
+        bp_pts = [
+            (sign * 0.860, 0.02, 0.195),
+            (sign * 0.868, 0.02, 0.250),
+            (sign * 0.898, 0.02, 0.745),
+            (sign * 0.850, 0.02, 0.875),
+            (sign * 0.765, 0.02, 1.140),
+            (sign * 0.676, 0.02, 1.412),
+        ]
+        for k in range(len(bp_pts) - 1):
+            cylinder_between(f"B-pillar shutline {side}_{k}", bp_pts[k], bp_pts[k + 1], r_seam, MATS['door_seam'], parent=ROOT)
+
+        # 5c. Rear Door Trailing Cut Line (Curving around rear wheel arch flare in authentic dogleg!)
+        rd_pts = [
+            (sign * 0.866, 0.82, 0.195),
+            (sign * 0.870, 0.84, 0.250),
+            (sign * 0.888, 0.92, 0.420),
+            (sign * 0.900, 1.01, 0.620),
+            (sign * 0.894, 1.04, 0.745),
+            (sign * 0.840, 1.04, 0.865),
+            (sign * 0.760, 1.01, 1.050),
+            (sign * 0.674, 0.94, 1.250),
+            (sign * 0.674, 0.68, 1.345),
+            (sign * 0.674, 0.36, 1.390),
+            (sign * 0.674, 0.02, 1.410),
+        ]
+        for k in range(len(rd_pts) - 1):
+            cylinder_between(f"rear door shutline {side}_{k}", rd_pts[k], rd_pts[k + 1], r_seam, MATS['door_seam'], parent=ROOT)
+
+        # 5d. Horizontal Lower Rocker Sill Crease
+        sk1 = (sign * 0.868, -0.94, 0.250)
+        sk2 = (sign * 0.870,  0.84, 0.250)
+        cylinder_between(f"door rocker crease {side}", sk1, sk2, r_seam, MATS['door_seam'], parent=ROOT)
+
+        # 6. Side Mirrors
         stem_p1 = (sign * 0.80, -0.68, 0.93)
         stem_p2 = (sign * 0.93, -0.66, 0.94)
         cylinder_between(f"Accord mirror stem {side}", stem_p1, stem_p2, 0.016, MATS['black'], parent=ROOT)
@@ -1246,9 +1306,10 @@ def build_side_details():
         m_led_p2 = (sign * 1.06, -0.67, 0.945)
         cylinder_between(f"Accord mirror indicator {side}", m_led_p1, m_led_p2, 0.005, MATS['amber'], parent=ROOT)
 
-        # 6. Sculpted Door Handles (100% FLUSH with door skin - ZERO floating gap!)
-        # Front handle at Y = -0.22, Rear handle at Y = +0.68 (perfectly centered on each door!)
-        for dy, h_name, x_skin in ((-0.22, 'front', 0.860), (0.68, 'rear', 0.858)):
+        # 7. Sculpted Flush Door Handles (Perfect proportions & aligned with quarter divider!)
+        # Front door span: -0.94 to +0.02 (0.96m). Front handle at Y = -0.22.
+        # Rear door span: +0.02 to +1.04 (1.02m). Rear handle at Y = +0.74.
+        for dy, h_name, x_skin in ((-0.22, 'front', 0.862), (0.74, 'rear', 0.860)):
             # Recessed shadow pocket inside door skin
             box_object(f"{h_name} handle pocket {side}",
                        (sign * (x_skin - 0.002), dy, 0.840),
@@ -1616,17 +1677,17 @@ BUILD_SUMMARY = {
 }
 print(json.dumps(BUILD_SUMMARY, indent=2))
 
-SCRATCH_DIR = r"C:\Users\User\.gemini\antigravity-ide\brain\339a3aac-10d1-4257-b74b-3d82d46c1f3d\scratch"
+SCRATCH_DIR = r"C:\Users\User\.gemini\antigravity-ide\brain\6752b76f-5dd7-44fd-976f-afe4c61bccdc\scratch"
 os.makedirs(SCRATCH_DIR, exist_ok=True)
 
 views = [
-    ("accord_v34_front34.png", (3.8, -4.2, 1.35), (0.0, -1.2, 0.55), 52),
-    ("accord_v34_nose.png", (0.0, -4.8, 0.55), (0.0, -1.8, 0.48), 50),
-    ("accord_v34_grille_cu.png", (0.0, -3.6, 0.60), (0.0, -2.48, 0.58), 65),
-    ("accord_v34_hood_top.png", (0.0, -3.4, 3.4), (0.0, -1.8, 0.55), 48),
-    ("accord_v34_side.png", (6.6, 0.0, 0.72), (0.0, 0.0, 0.65), 48),
-    ("accord_v34_rear34.png", (4.2, 4.8, 1.5), (0.0, 0.4, 0.65), 60),
-    ("accord_v34_headlight_cu.png", (1.6, -3.4, 0.95), (0.48, -2.1, 0.64), 65),
+    ("accord_v39_front34.png", (3.8, -4.2, 1.35), (0.0, -1.2, 0.55), 52),
+    ("accord_v39_nose.png", (0.0, -4.8, 0.55), (0.0, -1.8, 0.48), 50),
+    ("accord_v39_grille_cu.png", (0.0, -3.6, 0.60), (0.0, -2.48, 0.58), 65),
+    ("accord_v39_hood_top.png", (0.0, -3.4, 3.4), (0.0, -1.8, 0.55), 48),
+    ("accord_v39_side.png", (6.6, 0.0, 0.72), (0.0, 0.0, 0.65), 48),
+    ("accord_v39_rear34.png", (4.2, 4.8, 1.5), (0.0, 0.4, 0.65), 60),
+    ("accord_v39_headlight_cu.png", (1.6, -3.4, 0.95), (0.48, -2.1, 0.64), 65),
 ]
 
 for img_name, loc, tgt, lens in views:
