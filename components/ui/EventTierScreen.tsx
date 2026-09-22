@@ -824,12 +824,12 @@ export default function EventTierScreen({
                   >
                     {/* 1. Regulation */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5 overflow-hidden">
+                      <div className="h-9 w-9 flex items-center justify-center shrink-0 mt-1.5">
                         <img
                           src="/icon/regulation.svg"
                           alt=""
                           aria-hidden="true"
-                          className="w-full h-full object-cover scale-110"
+                          className="h-9 w-9 object-contain scale-[3.5]"
                           draggable={false}
                         />
                       </div>
@@ -844,7 +844,7 @@ export default function EventTierScreen({
                               : `${condition.label} only`;
                             return (
                               <li key={rIdx} className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                                <span className="text-slate-950 text-[10px]">•</span>
+                                <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-950" />
                                 <span>{labelText}</span>
                               </li>
                             );
@@ -858,12 +858,12 @@ export default function EventTierScreen({
 
                     {/* 2. Tires Restrictions */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5 overflow-hidden">
+                      <div className="h-9 w-9 flex items-center justify-center shrink-0 mt-0.5 mr-1">
                         <img
                           src="/icon/tires.svg"
                           alt=""
                           aria-hidden="true"
-                          className="w-full h-full object-cover scale-110"
+                          className="h-9 w-9 object-contain scale-[3]"
                           draggable={false}
                         />
                       </div>
@@ -872,7 +872,7 @@ export default function EventTierScreen({
                           TIRES RESTRICTIONS
                         </h4>
                         <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                          <span className="text-slate-950 text-[10px]">•</span>
+                          <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-950" />
                           <span>{tireRestriction.label}</span>
                         </div>
                       </div>
@@ -883,12 +883,12 @@ export default function EventTierScreen({
 
                     {/* 3. License and Entry Fee */}
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-xl bg-[#38ecff] border border-[#28cee0] flex items-center justify-center text-slate-950 shadow-sm shrink-0 mt-0.5 overflow-hidden">
+                      <div className="h-9 w-9 flex items-center justify-center shrink-0 ml-1.5">
                         <img
                           src="/icon/license.svg"
                           alt=""
                           aria-hidden="true"
-                          className="w-full h-full object-cover scale-110"
+                          className="h-9 w-9 object-contain scale-[2.5]"
                           draggable={false}
                         />
                       </div>
@@ -902,7 +902,7 @@ export default function EventTierScreen({
                             LICENSE
                           </h4>
                           <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                            <span className="text-slate-950 text-[10px]">•</span>
+                            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-950" />
                             <span>{licenseRequirement.tier ? licenseRequirement.label : 'Not Required'}</span>
                           </div>
                         </div>
@@ -911,7 +911,7 @@ export default function EventTierScreen({
                             ENTRY FEE
                           </h4>
                           <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                            <span className="text-slate-950 text-[10px]">•</span>
+                            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-950" />
                             <span>{entryFee.toLocaleString()} CR</span>
                           </div>
                         </div>
@@ -922,11 +922,11 @@ export default function EventTierScreen({
                     <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
 
                     {/* 4. Prize Table */}
-                    <div className="flex flex-col gap-1.5 min-w-0 w-full text-left pt-0.5">
-                      <h4 className="text-xl font-black uppercase tracking-wider text-slate-950 px-0.5">
+                    <div className="flex flex-col gap-1.5 min-w-0 w-full text-left pt-0.25">
+                      <h4 className="text-xl font-black uppercase tracking-wider text-slate-950 px-0.5 -mt-2 -translate-y-[6px]">
                         PRIZE
                       </h4>
-                      <div className="grid grid-cols-2 gap-x-3.5 gap-y-1 mt-0.5">
+                      <div className="grid grid-cols-2 gap-x-3.5 gap-y-2 mt-0.5">
                         {/* Left Column: 1st, 2nd, 3rd */}
                         <div className="flex min-w-0 flex-col gap-1">
                           {prizeRows.map(([left]) => (

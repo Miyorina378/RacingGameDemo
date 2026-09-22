@@ -38,6 +38,10 @@ import {
 } from '../config/LicenseDatabase';
 import EventTierScreen from './EventTierScreen';
 import { CareerTierId } from '../config/CareerEventDatabase';
+import { CARS_DATABASE, CarConfig } from '../config/CarDatabase';
+import { CareerConcoursHud } from './CareerConcoursHud';
+import { buildCareerValley, VALLEY_CENTER } from '../objects/CareerValley';
+import { sampleDayNight } from '../engine/dayNight';
 
 export interface CareerMapProps {
   playerCredits: number;
@@ -51,6 +55,9 @@ export interface CareerMapProps {
   onOpenMapEditor: () => void;
   onNavigateToDealer?: () => void;
   brightness?: number;
+  activeCarId?: string;
+  activeCarName?: string;
+  selectedColor?: string;
 }
 
 export type CareerSectorId =
@@ -87,7 +94,7 @@ const SECTORS: SectorMeta[] = [
     color: '#38bdf8', // Sky Blue
     themeHex: 0x38bdf8,
     icon: Flag,
-    position: [-22, 3.8, 20],
+    position: [20, 2.6, 70],
     cameraOffset: [-10, 14, 36],
     description: 'Entry-level competitive circuit events designed for beginner racing. Perfect for honing cornering lines and earning starter prize money.',
     thumbnail: '/images/amateur_sky_bg.jpg',
@@ -101,7 +108,7 @@ const SECTORS: SectorMeta[] = [
     color: '#a855f7', // Purple
     themeHex: 0xa855f7,
     icon: Zap,
-    position: [-42, 5.0, 4],
+    position: [-123, 7.6, 34],
     cameraOffset: [-28, 15, 20],
     description: 'Demanding mid-tier circuits featuring the high-speed Tokyo Megaloop and the twisty curves of Driver Dojo. Higher horsepower recommended.',
     thumbnail: '/images/intermediate_forest_bg.jpg',
@@ -115,7 +122,7 @@ const SECTORS: SectorMeta[] = [
     color: '#f43f5e', // Rose
     themeHex: 0xf43f5e,
     icon: Trophy,
-    position: [-54, 7.5, 26],
+    position: [-167.4, 33.7, -83],
     cameraOffset: [-38, 18, 42],
     description: 'High-stakes championship races against elite motorsport competitors on championship arenas. Requires verified driver license certification.',
     thumbnail: '/images/professional_racetrack_bg.jpg',
@@ -129,7 +136,7 @@ const SECTORS: SectorMeta[] = [
     color: '#06b6d4', // Cyan
     themeHex: 0x06b6d4,
     icon: Award,
-    position: [-48, 4.2, -18],
+    position: [57, 11.6, -18],
     cameraOffset: [-34, 14, -2],
     description: 'Master apex control, threshold braking, and racecraft across 4 license tiers. Complete exams to unlock high-tier championships and prototype race cars.',
     thumbnail: '/images/amateur_sky_bg.jpg',
@@ -143,7 +150,7 @@ const SECTORS: SectorMeta[] = [
     color: '#f59e0b', // Amber
     themeHex: 0xf59e0b,
     icon: Hammer,
-    position: [-16, 4.0, -14],
+    position: [25, 21.6, -95],
     cameraOffset: [-4, 13, 2],
     description: 'Design custom circuits with 3D terrain sculpting, road elevation, banking angles, curb placement, and scenery. Test drive your creations instantly.',
     thumbnail: '/images/amateur_sky_bg.jpg',
@@ -157,7 +164,7 @@ const SECTORS: SectorMeta[] = [
     color: '#10b981', // Emerald
     themeHex: 0x10b981,
     icon: Compass,
-    position: [-36, 4.6, -34],
+    position: [-87, 9.6, 92],
     cameraOffset: [-22, 16, -18],
     description: 'Cruise the boundless open highway, hit jump ramps, test top speeds, and link continuous drift combos to earn passive credit payouts.',
     thumbnail: '/images/amateur_sky_bg.jpg',
@@ -234,9 +241,21 @@ export default function CareerMap({
   startLicenseTest,
   onOpenMapEditor,
   onNavigateToDealer,
-  brightness
+  brightness,
+  activeCarId,
+  activeCarName,
+  selectedColor
 }: CareerMapProps) {
   const mountRef = useRef<HTMLDivElement>(null);
+  const currentCar = useMemo(() => {
+    if (activeCarId) {
+      const found = CARS_DATABASE.find((c) => c.id === activeCarId);
+      if (found) {
+        return selectedColor ? { ...found, color: selectedColor } : found;
+      }
+    }
+    return CARS_DATABASE[0];
+  }, [activeCarId, selectedColor]);
   const [selectedSectorId, setSelectedSectorId] = useState<CareerSectorId>('overview');
   const [hoveredSectorId, setHoveredSectorId] = useState<CareerSectorId | null>(null);
   const [activeAcademyTier, setActiveAcademyTier] = useState<LicenseTier>('bronze');
@@ -246,6 +265,52 @@ export default function CareerMap({
   const [pinPositions, setPinPositions] = useState<
     Record<string, { x: number; y: number; visible: boolean }>
   >({});
+
+  // Dynamic Live Time & Date for GT7 Header (e.g. 23:25 \n 23 Sep 26)
+  const [currentDateTime, setCurrentDateTime] = useState<{ time: string; date: string }>(() => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[now.getMonth()];
+    const year = String(now.getFullYear()).slice(-2);
+    return {
+      time: `${hours}:${minutes}`,
+      date: `${day} ${month} ${year}`
+    };
+  });
+
+  useEffect(() => {
+    const updateDateTime = () => {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[now.getMonth()];
+      const year = String(now.getFullYear()).slice(-2);
+      setCurrentDateTime({
+        time: `${hours}:${minutes}`,
+        date: `${day} ${month} ${year}`
+      });
+    };
+
+    updateDateTime();
+    const timer = setInterval(updateDateTime, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Keyboard shortcut to return to garage (ESC)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onBackToGarage();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onBackToGarage]);
 
   // License completion count
   const completedLicenseCount = useMemo(() => {
@@ -265,6 +330,15 @@ export default function CareerMap({
     if (licenseProgress.bronze.every(Boolean))
       return { name: 'Bronze License', color: 'text-amber-600 border-amber-600 bg-amber-950/40' };
     return { name: 'Novice Driver', color: 'text-zinc-400 border-zinc-700 bg-zinc-900/50' };
+  }, [licenseProgress]);
+
+  // Highest fully-completed licence tier, engraved on the concours HUD seal
+  const licenseSealTier = useMemo(() => {
+    if (licenseProgress.platinum.every(Boolean)) return 'Platinum';
+    if (licenseProgress.gold.every(Boolean)) return 'Gold';
+    if (licenseProgress.silver.every(Boolean)) return 'Silver';
+    if (licenseProgress.bronze.every(Boolean)) return 'Bronze';
+    return 'Novice';
   }, [licenseProgress]);
 
   // Handle Sector Navigation & Focus
@@ -312,13 +386,15 @@ export default function CareerMap({
     let width = container.clientWidth || window.innerWidth;
     let height = container.clientHeight || window.innerHeight;
 
-    // 1. Scene & Atmosphere (Sunny Gran Turismo 7 Daylight Sky)
+    // 1. Scene & Atmosphere
+    //    Colours are not fixed here: section 4a reads the player's clock and
+    //    repaints sky, fog and every light to match the hour.
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb); // Sunny azure sky
-    scene.fog = new THREE.FogExp2(0xcde5f7, 0.004); // Soft coastal morning haze
+    scene.background = new THREE.Color(0x7fb4dd);
+    scene.fog = new THREE.FogExp2(0xa8cbe4, 0.0011);
 
     // 2. Camera Setup (Elevated 3/4 Isometric Perspective)
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.5, 600);
+    const camera = new THREE.PerspectiveCamera(42, width / height, 0.5, 1600);
     const overviewCamPos = new THREE.Vector3(-24, 62, 78);
     const overviewTarget = new THREE.Vector3(-30, 2, 0);
     camera.position.copy(overviewCamPos);
@@ -331,420 +407,107 @@ export default function CareerMap({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = 0.94;
     renderer.domElement.style.touchAction = 'none';
     container.appendChild(renderer.domElement);
 
-    // 4. Natural Sunny Lighting
-    const hemiLight = new THREE.HemisphereLight(0x9bd8ff, 0x3d7042, 1.4);
+    // 4. Valley Lighting Rig
+    //    Four lights, all driven by the clock in section 5a: a key that stands
+    //    in for the sun (or the moon), a hemisphere for the sky, a cool fill
+    //    from the far side and a faint bounce off the grass. Intensities are
+    //    deliberately modest - a rig summing over 4 flattens everything white.
+    const hemiLight = new THREE.HemisphereLight(0xbfe4ff, 0x33632f, 0.62);
     scene.add(hemiLight);
 
-    const sunLight = new THREE.DirectionalLight(0xfffaed, 2.5);
-    sunLight.position.set(-20, 110, 65);
+    const sunLight = new THREE.DirectionalLight(0xffe9c4, 1.55);
+    sunLight.position.set(-95, 95, 130);
+    // Shadows are cast around the valley, not around the world origin, so the
+    // box can stay tight enough to keep 4096 map pixels worth using.
+    sunLight.target.position.set(VALLEY_CENTER.x, 0, VALLEY_CENTER.z);
+    scene.add(sunLight.target);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.mapSize.width = 4096;
+    sunLight.shadow.mapSize.height = 4096;
     sunLight.shadow.camera.near = 10;
-    sunLight.shadow.camera.far = 300;
-    sunLight.shadow.camera.left = -110;
-    sunLight.shadow.camera.right = 110;
-    sunLight.shadow.camera.top = 110;
-    sunLight.shadow.camera.bottom = -110;
+    sunLight.shadow.camera.far = 900;
+    sunLight.shadow.camera.left = -260;
+    sunLight.shadow.camera.right = 260;
+    sunLight.shadow.camera.top = 260;
+    sunLight.shadow.camera.bottom = -260;
     sunLight.shadow.bias = -0.0004;
     scene.add(sunLight);
 
-    const coastalFillLight = new THREE.DirectionalLight(0x88ccee, 0.8);
-    coastalFillLight.position.set(60, 40, -40);
-    scene.add(coastalFillLight);
+    // Cool shadow fill from the opposite side, plus a faint bounce off the
+    // valley floor so shadowed slopes keep a little green in them.
+    const skyFillLight = new THREE.DirectionalLight(0x9ec4e8, 0.34);
+    skyFillLight.position.set(80, 50, -70);
+    scene.add(skyFillLight);
 
-    // 5. Sparkling Ocean Water Floor
-    const waterGeom = new THREE.PlaneGeometry(700, 700, 32, 32);
-    const waterMat = new THREE.MeshStandardMaterial({
-      color: 0x166e88,
-      roughness: 0.18,
-      metalness: 0.45,
-      transparent: true,
-      opacity: 0.94
-    });
-    const waterMesh = new THREE.Mesh(waterGeom, waterMat);
-    waterMesh.rotation.x = -Math.PI / 2;
-    waterMesh.position.y = 0.05;
-    waterMesh.receiveShadow = true;
-    scene.add(waterMesh);
+    const groundBounce = new THREE.DirectionalLight(0x86b36a, 0.2);
+    groundBounce.position.set(0, -40, 30);
+    scene.add(groundBounce);
 
-    // 6. Sculpted Resort Island Terrain (Left Half: X = -75 to X = 5)
-    const islandGroup = new THREE.Group();
-    scene.add(islandGroup);
+    // 5. Inland Valley World
+    //    Terrain, roads, trees and the colosseum arenas all arrive as one
+    //    Blender-authored model. Venue coordinates here must stay in step with
+    //    the VENUES table in scripts/build_career_valley.py.
+    const valley = buildCareerValley(scene);
 
-    // Island Materials
-    const grassMat = new THREE.MeshStandardMaterial({
-      color: 0x2e7d32,
-      roughness: 0.75,
-      metalness: 0.1,
-      flatShading: true
-    });
-    const grassHillMat = new THREE.MeshStandardMaterial({
-      color: 0x388e3c,
-      roughness: 0.7,
-      metalness: 0.1,
-      flatShading: true
-    });
-    const sandBeachMat = new THREE.MeshStandardMaterial({
-      color: 0xe5d4a7,
-      roughness: 0.9,
-      metalness: 0.05,
-      flatShading: true
-    });
-    const rockCliffMat = new THREE.MeshStandardMaterial({
-      color: 0x546e7a,
-      roughness: 0.85,
-      metalness: 0.2,
-      flatShading: true
-    });
+    // 5a. Day & Night, from the player's own clock
+    //     One sample of the local time decides sky, fog, the direction and
+    //     colour of the key light - so shadows swing east to west through the
+    //     day - and whether the street lamps are lit. The sample carries the
+    //     previous lamp answer back in, which is what stops them flickering
+    //     while the sun sits on the switching point.
+    const SUN_DISTANCE = 420;
+    let lampsLit = false;
 
-    // Sandy Shoreline Base Terrace
-    const beachGeom = new THREE.CylinderGeometry(46, 52, 1.8, 32);
-    beachGeom.scale(1.2, 1, 0.95);
-    const beachMesh = new THREE.Mesh(beachGeom, sandBeachMat);
-    beachMesh.position.set(-35, 0.9, 0);
-    beachMesh.receiveShadow = true;
-    islandGroup.add(beachMesh);
+    const applyDayNight = (now: Date) => {
+      const sky = sampleDayNight(now, lampsLit);
+      lampsLit = sky.lampsOn;
 
-    // Main Emerald Green Island Landmass
-    const mainGrassGeom = new THREE.CylinderGeometry(42, 46, 3.2, 32);
-    mainGrassGeom.scale(1.18, 1, 0.92);
-    const mainGrass = new THREE.Mesh(mainGrassGeom, grassMat);
-    mainGrass.position.set(-35, 2.4, 0);
-    mainGrass.receiveShadow = true;
-    islandGroup.add(mainGrass);
+      (scene.background as THREE.Color).copy(sky.sky);
+      const fog = scene.fog as THREE.FogExp2;
+      fog.color.copy(sky.fog);
+      fog.density = sky.fogDensity;
 
-    // Rolling Hills & Mountain Ridges
-    const hillConfigs = [
-      { x: -55, z: 28, r: 16, h: 5.5, mat: rockCliffMat },
-      { x: -44, z: 6, r: 14, h: 4.0, mat: grassHillMat },
-      { x: -48, z: -20, r: 13, h: 3.5, mat: grassHillMat },
-      { x: -22, z: 20, r: 14, h: 3.0, mat: grassMat },
-      { x: -16, z: -14, r: 12, h: 3.2, mat: grassMat },
-      { x: -36, z: -34, r: 13, h: 4.2, mat: rockCliffMat }
-    ];
+      sunLight.position
+        .copy(sky.sunDirection)
+        .multiplyScalar(SUN_DISTANCE)
+        .add(sunLight.target.position);
+      sunLight.color.copy(sky.sunColor);
+      sunLight.intensity = sky.sunIntensity;
 
-    hillConfigs.forEach((h) => {
-      const hGeom = new THREE.CylinderGeometry(h.r * 0.8, h.r, h.h, 16);
-      const hMesh = new THREE.Mesh(hGeom, h.mat);
-      hMesh.position.set(h.x, 2.2 + h.h * 0.5, h.z);
-      hMesh.receiveShadow = true;
-      hMesh.castShadow = true;
-      islandGroup.add(hMesh);
-    });
+      hemiLight.color.copy(sky.hemiSky);
+      hemiLight.groundColor.copy(sky.hemiGround);
+      hemiLight.intensity = sky.hemiIntensity;
 
-    // 7. Winding Scenic Asphalt Roadways with Red/White Curbs
-    const roadsGroup = new THREE.Group();
-    scene.add(roadsGroup);
-
-    const roadMat = new THREE.MeshStandardMaterial({
-      color: 0x27272a,
-      roughness: 0.6,
-      metalness: 0.2
-    });
-
-    // Main Island Circuit Spline connecting all venues
-    const circuitPoints = [
-      new THREE.Vector3(-22, 4.0, 20),
-      new THREE.Vector3(-34, 4.5, 28),
-      new THREE.Vector3(-54, 7.6, 26),
-      new THREE.Vector3(-48, 5.8, 14),
-      new THREE.Vector3(-42, 5.2, 4),
-      new THREE.Vector3(-48, 4.4, -18),
-      new THREE.Vector3(-36, 4.8, -34),
-      new THREE.Vector3(-24, 4.2, -26),
-      new THREE.Vector3(-16, 4.2, -14),
-      new THREE.Vector3(-14, 4.0, 4),
-      new THREE.Vector3(-22, 4.0, 20)
-    ];
-    const circuitCurve = new THREE.CatmullRomCurve3(circuitPoints, true);
-    const circuitTube = new THREE.Mesh(
-      new THREE.TubeGeometry(circuitCurve, 64, 0.75, 8, true),
-      roadMat
-    );
-    circuitTube.receiveShadow = true;
-    roadsGroup.add(circuitTube);
-
-    // 8. Sweeping Highway Suspension Bridge to Dealer District (East / Right)
-    const bridgePoints = [
-      new THREE.Vector3(-14, 4.0, 4),
-      new THREE.Vector3(4, 3.8, 4),
-      new THREE.Vector3(26, 3.8, 2),
-      new THREE.Vector3(52, 3.6, 0)
-    ];
-    const bridgeCurve = new THREE.CatmullRomCurve3(bridgePoints);
-    const bridgeTube = new THREE.Mesh(
-      new THREE.TubeGeometry(bridgeCurve, 24, 0.85, 8, false),
-      roadMat
-    );
-    bridgeTube.receiveShadow = true;
-    roadsGroup.add(bridgeTube);
-
-    // Bridge Concrete Support Pillars
-    [6, 20, 36, 48].forEach((bx) => {
-      const p = bridgeCurve.getPointAt((bx + 14) / 66);
-      const pillar = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.5, 0.65, 4.5, 8),
-        new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.5 })
+      // The fill sits opposite the key, so it swings with it.
+      skyFillLight.position.set(
+        -sky.sunDirection.x * 300,
+        180,
+        -sky.sunDirection.z * 300
       );
-      pillar.position.set(p.x, 1.8, p.z);
-      pillar.castShadow = true;
-      roadsGroup.add(pillar);
-    });
+      skyFillLight.intensity = sky.fillIntensity;
+      groundBounce.intensity = sky.bounceIntensity;
 
-    // 9. Distant Dealer District Skyline (Far Right: X = 50 to X = 80)
-    const dealerSkylineGroup = new THREE.Group();
-    dealerSkylineGroup.position.set(58, 2.5, 0);
-    scene.add(dealerSkylineGroup);
+      renderer.toneMappingExposure = sky.exposure;
+      valley.setLampsOn(sky.lampsOn);
+    };
 
-    // Dealer Island Base in the distance
-    const dealerBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(20, 24, 2.5, 24),
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6, flatShading: true })
-    );
-    dealerBase.receiveShadow = true;
-    dealerSkylineGroup.add(dealerBase);
+    applyDayNight(new Date());
 
-    // Stylized Architectural Towers of the 4 Dealer Cities
-    const towerMat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
-      roughness: 0.3,
-      metalness: 0.7
-    });
-    const towerConfigs = [
-      { x: -4, z: -3, w: 3, h: 12, color: 0x06b6d4 }, // West City (Cyan)
-      { x: 2, z: -6, w: 3.5, h: 16, color: 0x3b82f6 }, // North Tower (Blue)
-      { x: 5, z: 3, w: 3, h: 14, color: 0xff0258 }, // East City (Rose)
-      { x: -2, z: 5, w: 4, h: 10, color: 0xf59e0b } // South City (Amber)
-    ];
-    towerConfigs.forEach((t) => {
-      const tw = new THREE.Mesh(new THREE.BoxGeometry(t.w, t.h, t.w), towerMat);
-      tw.position.set(t.x, t.h * 0.5 + 1.2, t.z);
-      tw.castShadow = true;
-      dealerSkylineGroup.add(tw);
-
-      // Crown beacon light
-      const beacon = new THREE.Mesh(
-        new THREE.BoxGeometry(t.w * 0.9, 0.6, t.w * 0.9),
-        new THREE.MeshBasicMaterial({ color: t.color })
-      );
-      beacon.position.set(t.x, t.h + 1.5, t.z);
-      dealerSkylineGroup.add(beacon);
-    });
-
-    // 10. Low-Poly 3D Trees on the Island
-    const foliageGroup = new THREE.Group();
-    scene.add(foliageGroup);
-
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.9 });
-    const pineMat = new THREE.MeshStandardMaterial({ color: 0x1e4620, roughness: 0.8, flatShading: true });
-    const canopyMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.7, flatShading: true });
-
-    const treeLocations = [
-      [-30, 2.5, 12], [-32, 2.5, -8], [-20, 2.5, 2], [-40, 4.5, 18],
-      [-48, 5.0, -6], [-52, 6.0, 16], [-28, 3.0, -22], [-44, 4.0, -26],
-      [-18, 3.5, 12], [-26, 3.0, 32], [-38, 3.5, 36], [-12, 2.5, -4]
-    ];
-
-    treeLocations.forEach(([tx, ty, tz], i) => {
-      const tree = new THREE.Group();
-      tree.position.set(tx, ty, tz);
-
-      // Trunk
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 1.4, 6), trunkMat);
-      trunk.position.y = 0.7;
-      trunk.castShadow = true;
-      tree.add(trunk);
-
-      // Leaves
-      if (i % 2 === 0) {
-        const pine = new THREE.Mesh(new THREE.ConeGeometry(1.2, 2.6, 7), pineMat);
-        pine.position.y = 2.4;
-        pine.castShadow = true;
-        tree.add(pine);
-      } else {
-        const sphere = new THREE.Mesh(new THREE.DodecahedronGeometry(1.1), canopyMat);
-        sphere.position.y = 2.2;
-        sphere.castShadow = true;
-        tree.add(sphere);
-      }
-      foliageGroup.add(tree);
-    });
-
-    // 11. Architectural 3D Models for Gran Turismo Pavilions
-    const pavilionsGroup = new THREE.Group();
-    scene.add(pavilionsGroup);
-
-    SECTORS.forEach((sec) => {
-      const hub = new THREE.Group();
-      hub.position.set(...sec.position);
-      pavilionsGroup.add(hub);
-
-      // Base Foundation Plinth
-      const plinth = new THREE.Mesh(
-        new THREE.CylinderGeometry(5.2, 5.6, 0.6, 24),
-        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3, metalness: 0.1 })
-      );
-      plinth.position.y = 0.3;
-      plinth.receiveShadow = true;
-      hub.add(plinth);
-
-      // Colored Accent Ring
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(4.8, 5.3, 32),
-        new THREE.MeshBasicMaterial({ color: sec.themeHex, side: THREE.DoubleSide })
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.y = 0.62;
-      hub.add(ring);
-
-      if (sec.id === 'amateur') {
-        // Coastal Speedway Stadium with Grandstand
-        const trackLoop = new THREE.Mesh(
-          new THREE.TorusGeometry(3.2, 0.45, 12, 32),
-          new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 })
-        );
-        trackLoop.rotation.x = Math.PI / 2;
-        trackLoop.position.y = 0.7;
-        hub.add(trackLoop);
-
-        // Curved Grandstand
-        const grandstand = new THREE.Mesh(
-          new THREE.CylinderGeometry(3.8, 4.2, 1.6, 16, 1, false, 0, Math.PI),
-          new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.4 })
-        );
-        grandstand.position.y = 1.4;
-        grandstand.castShadow = true;
-        hub.add(grandstand);
-
-        // Race Flags
-        [-2.5, 2.5].forEach((fx) => {
-          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.2, 6), trunkMat);
-          pole.position.set(fx, 1.6, -1.8);
-          hub.add(pole);
-
-          const flag = new THREE.Mesh(
-            new THREE.BoxGeometry(0.9, 0.55, 0.05),
-            new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
-          );
-          flag.position.set(fx + 0.45, 2.8, -1.8);
-          hub.add(flag);
-        });
-      } else if (sec.id === 'intermediate') {
-        // Forest Circuit Arena with Sloped Pavilion Roof
-        const building = new THREE.Mesh(
-          new THREE.BoxGeometry(4.2, 1.8, 3.4),
-          new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25 })
-        );
-        building.position.y = 1.2;
-        building.castShadow = true;
-        hub.add(building);
-
-        const roof = new THREE.Mesh(
-          new THREE.ConeGeometry(3.2, 1.5, 4),
-          new THREE.MeshStandardMaterial({ color: 0xa855f7, roughness: 0.4 })
-        );
-        roof.rotation.y = Math.PI / 4;
-        roof.position.y = 2.8;
-        roof.castShadow = true;
-        hub.add(roof);
-      } else if (sec.id === 'professional') {
-        // Grand Prix Apex Stadium Arena
-        const dome = new THREE.Mesh(
-          new THREE.SphereGeometry(3.4, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5),
-          new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2, metalness: 0.3 })
-        );
-        dome.position.y = 0.6;
-        dome.castShadow = true;
-        hub.add(dome);
-
-        // Surrounding Championship Gold Arch
-        const arch = new THREE.Mesh(
-          new THREE.TorusGeometry(3.8, 0.25, 12, 32, Math.PI),
-          new THREE.MeshStandardMaterial({ color: 0xf43f5e, metalness: 0.6, roughness: 0.2 })
-        );
-        arch.position.y = 0.6;
-        hub.add(arch);
-      } else if (sec.id === 'academy') {
-        // Modern Automotive Campus with Glass Facade
-        const campus = new THREE.Mesh(
-          new THREE.BoxGeometry(4.4, 1.4, 3.2),
-          new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 })
-        );
-        campus.position.y = 1.0;
-        campus.castShadow = true;
-        hub.add(campus);
-
-        const glass = new THREE.Mesh(
-          new THREE.BoxGeometry(3.8, 1.0, 0.2),
-          new THREE.MeshPhysicalMaterial({
-            color: 0x06b6d4,
-            transmission: 0.85,
-            opacity: 0.8,
-            transparent: true,
-            roughness: 0.1
-          })
-        );
-        glass.position.set(0, 1.0, 1.62);
-        hub.add(glass);
-
-        // Slanted Solar Roof
-        const roof = new THREE.Mesh(
-          new THREE.BoxGeometry(4.8, 0.2, 3.6),
-          new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.3 })
-        );
-        roof.position.set(0, 1.9, 0);
-        roof.rotation.x = 0.08;
-        roof.castShadow = true;
-        hub.add(roof);
-      } else if (sec.id === 'editor') {
-        // High-Tech Fabrication Studio & Drafting Deck
-        const studio = new THREE.Mesh(
-          new THREE.BoxGeometry(3.8, 1.8, 3.8),
-          new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.4 })
-        );
-        studio.position.y = 1.2;
-        studio.castShadow = true;
-        hub.add(studio);
-
-        // Steel Truss Frame
-        [-1.8, 1.8].forEach((tx) => {
-          [-1.8, 1.8].forEach((tz) => {
-            const beam = new THREE.Mesh(
-              new THREE.CylinderGeometry(0.12, 0.12, 3.2, 6),
-              new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4 })
-            );
-            beam.position.set(tx, 1.9, tz);
-            hub.add(beam);
-          });
-        });
-      } else if (sec.id === 'free_roam') {
-        // Coastal Lookout Overpass & Mountain Tunnel Portal
-        const tunnelArch = new THREE.Mesh(
-          new THREE.TorusGeometry(2.4, 0.6, 12, 24, Math.PI),
-          new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.7 })
-        );
-        tunnelArch.position.y = 0.6;
-        hub.add(tunnelArch);
-
-        const lookOutDeck = new THREE.Mesh(
-          new THREE.BoxGeometry(3.6, 0.3, 2.4),
-          new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.4 })
-        );
-        lookOutDeck.position.set(0, 2.6, 0.5);
-        hub.add(lookOutDeck);
-      }
-    });
-
-    // 12. True 360-Degree Mouse Drag Orbit & Zoom Controls
-    const islandCenter = new THREE.Vector3(-35, 3.5, 0);
-    let orbitRadius = 95;
-    let orbitAzimuth = 0.35;
-    let orbitElevation = 0.62;
+    // 12. Constrained Valley-Facing Orbit & Zoom Controls
+    //     The bowl is only open toward the camera, so the view swings through a
+    //     narrow arc (+/- 35 degrees) instead of a full 360 orbit - you can
+    //     never end up looking at the back of the mountain ring.
+    const islandCenter = new THREE.Vector3(VALLEY_CENTER.x, 4.0, VALLEY_CENTER.z);
+    const AZIMUTH_LIMIT = Math.PI * (35 / 180);
+    const ELEVATION_MIN = 0.3;
+    const ELEVATION_MAX = 0.82;
+    let orbitRadius = 268;
+    let orbitAzimuth = 0;
+    let orbitElevation = 0.5;
 
     let isDragging = false;
     let previousPosition = { x: 0, y: 0 };
@@ -771,11 +534,17 @@ export default function CareerMap({
       const deltaX = e.clientX - previousPosition.x;
       const deltaY = e.clientY - previousPosition.y;
 
-      // Full 360-degree horizontal azimuth rotation around island
-      orbitAzimuth -= deltaX * 0.006;
+      // Horizontal swing, clamped to the mouth of the valley
+      orbitAzimuth = Math.max(
+        -AZIMUTH_LIMIT,
+        Math.min(AZIMUTH_LIMIT, orbitAzimuth - deltaX * 0.005)
+      );
 
-      // Vertical elevation pitch (constrained to pleasant viewing angles)
-      orbitElevation = Math.max(0.12, Math.min(1.35, orbitElevation + deltaY * 0.005));
+      // Vertical pitch, kept between a low valley view and a high ridge view
+      orbitElevation = Math.max(
+        ELEVATION_MIN,
+        Math.min(ELEVATION_MAX, orbitElevation + deltaY * 0.004)
+      );
 
       previousPosition = { x: e.clientX, y: e.clientY };
     };
@@ -786,7 +555,7 @@ export default function CareerMap({
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      orbitRadius = Math.max(45, Math.min(160, orbitRadius + e.deltaY * 0.08));
+      orbitRadius = Math.max(90, Math.min(360, orbitRadius + e.deltaY * 0.16));
     };
 
     window.addEventListener('mousedown', handlePointerDown);
@@ -810,11 +579,20 @@ export default function CareerMap({
     const currentCamTarget = new THREE.Vector3().copy(islandCenter);
     let clock = new THREE.Clock();
 
+    let nextSkyUpdate = 0;
+
     const renderLoop = () => {
       animationFrameId = requestAnimationFrame(renderLoop);
       const elapsedTime = clock.getElapsedTime();
 
-      // Camera Target Position Handling (Full 360-degree Orbit)
+      // The sun moves a quarter of a degree a minute, so re-reading the clock
+      // once a second is smooth to the eye and free next to a shadow pass.
+      if (elapsedTime >= nextSkyUpdate) {
+        nextSkyUpdate = elapsedTime + 1;
+        applyDayNight(new Date());
+      }
+
+      // Camera Target Position Handling (Constrained Valley Arc)
       const desiredCamPos = new THREE.Vector3();
       const desiredLookAt = new THREE.Vector3();
 
@@ -828,7 +606,7 @@ export default function CareerMap({
         const sec = SECTORS.find((s) => s.id === selectedSectorId);
         if (sec) {
           const secPos = new THREE.Vector3(...sec.position);
-          const closeRadius = 28;
+          const closeRadius = 46;
           const x = secPos.x + closeRadius * Math.cos(orbitElevation) * Math.sin(orbitAzimuth);
           const y = secPos.y + closeRadius * Math.sin(orbitElevation);
           const z = secPos.z + closeRadius * Math.cos(orbitElevation) * Math.cos(orbitAzimuth);
@@ -846,7 +624,7 @@ export default function CareerMap({
       const updatedPins: Record<string, { x: number; y: number; visible: boolean }> = {};
       SECTORS.forEach((sec) => {
         const pos = new THREE.Vector3(...sec.position);
-        pos.y += 5.4; // float above pavilion roof
+        pos.y += 13; // float clear of the scaled colosseum crown
         pos.project(camera);
 
         const screenX = (pos.x * 0.5 + 0.5) * width;
@@ -877,6 +655,7 @@ export default function CareerMap({
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
+      valley.dispose();
       renderer.dispose();
       scene.clear();
     };
@@ -920,55 +699,20 @@ export default function CareerMap({
       {/* 3D WEBGL VIEWPORT CANVAS CONTAINER */}
       <div ref={mountRef} className="absolute inset-0 z-0 cursor-grab active:cursor-grabbing" style={{ touchAction: 'none' }} />
 
-      {/* GRAN TURISMO 7 LUXURY TOP STATUS & NAVIGATION BAR */}
-      <div className="relative z-20 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-slate-950/90 via-slate-950/70 to-transparent pointer-events-auto backdrop-blur-md border-b border-white/10">
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col">
-            <span className="text-[10px] font-black tracking-[0.35em] text-cyan-400 uppercase flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              AUTODRIVE MOTORSPORT RESORT // OVERWORLD
-            </span>
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-wider uppercase flex items-center gap-2">
-              WORLD MAP
-            </h1>
-          </div>
-        </div>
-
-        {/* Player Stats Dashboard & Back Button */}
-        <div className="flex items-center gap-3 sm:gap-5">
-          {/* Driver License Badge */}
-          <div
-            className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-black tracking-wider uppercase ${activeLicenseBadge.color}`}
-          >
-            <Award className="w-4 h-4" />
-            <span>{activeLicenseBadge.name}</span>
-            <span className="text-[9px] opacity-75 font-mono">({completedLicenseCount}/40)</span>
-          </div>
-
-          {/* Credits Counter in Gran Turismo Gold */}
-          <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-4 py-1.5 rounded-xl shadow-lg backdrop-blur-md">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">CR</span>
-            <span className="text-sm font-black font-mono text-amber-400">
-              {playerCredits.toLocaleString()} <span className="text-[10px] text-amber-500 font-bold">CR</span>
-            </span>
-          </div>
-
-          {/* Return to Garage Button */}
-          <button
-            onClick={() => {
-              playSoundBlip('select');
-              onBackToGarage();
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black tracking-widest uppercase transition-all shadow-lg hover:shadow-rose-600/30 cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">GARAGE</span>
-            <span className="sm:hidden">EXIT</span>
-          </button>
-        </div>
-      </div>
-
-
+      {/* FLOATING CONCOURS HUD - maison mark + driver plaque, no solid header slab */}
+      <CareerConcoursHud
+        car={currentCar}
+        carName={activeCarName}
+        credits={playerCredits}
+        licenseLabel={licenseSealTier}
+        time={currentDateTime.time}
+        date={currentDateTime.date}
+        onReturnToGarage={() => {
+          playSoundBlip('select');
+          onBackToGarage();
+        }}
+        onHover={() => playSoundBlip('hover')}
+      />
 
       {/* 2D SCREEN-PROJECTED GRAN TURISMO 7 FLOATING LANDMARK PINS */}
       <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden">
@@ -1075,10 +819,10 @@ export default function CareerMap({
         <div className="absolute bottom-6 left-6 z-10 pointer-events-none flex flex-col gap-1.5 bg-slate-950/85 border border-slate-800 px-4 py-3 rounded-2xl backdrop-blur-md max-w-xs shadow-xl">
           <div className="flex items-center gap-2 text-[10px] font-black tracking-widest text-cyan-400 uppercase">
             <Sparkles className="w-3.5 h-3.5" />
-            GT7 WORLD RESORT
+            MOTORSPORT VALLEY
           </div>
           <p className="text-xs text-zinc-400 leading-relaxed">
-            Drag to pan view. Click on any resort venue pin to enter championships, license academy, or free roam.
+            Drag to swing the view across the valley, scroll to zoom. Click any colosseum pin to enter championships, license academy, or free roam.
           </p>
         </div>
       )}
