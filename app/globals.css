@@ -10,6 +10,9 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-jetbrains-mono);
   --font-mono: var(--font-jetbrains-mono);
+  --font-display: 'Rajdhani', sans-serif;
+  --font-speed: 'Chakra Petch', sans-serif;
+  --font-syne: 'Syne', sans-serif;
 
   --animate-fadeIn: fadeIn 0.3s ease-out forwards;
   --animate-scaleIn: scaleIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
@@ -29,6 +32,18 @@
   --animate-dealerBlackOut: dealerBlackOut 0.7s ease-out forwards;
   --animate-glowPulseCyan: glowPulseCyan 2s infinite alternate;
   --animate-glowPulseRose: glowPulseRose 2s infinite alternate;
+}
+
+.font-display {
+  font-family: 'Rajdhani', sans-serif;
+}
+
+.font-speed {
+  font-family: 'Chakra Petch', sans-serif;
+}
+
+.font-syne {
+  font-family: 'Syne', sans-serif;
 }
 
 @keyframes circleBubbleExpand {
@@ -952,3 +967,67 @@ body {
   background: rgba(225, 29, 72, 0.8);
 }
 
+
+/* ===========================================================
+   CAREER CONCOURS HUD — luxury plaque motion
+   Slow, quiet, watch-boutique cadence. Nothing should "pop".
+   =========================================================== */
+@keyframes concoursSheen {
+  0%   { transform: translateX(-140%) skewX(-18deg); opacity: 0; }
+  12%  { opacity: 0.55; }
+  55%  { opacity: 0.35; }
+  100% { transform: translateX(240%) skewX(-18deg); opacity: 0; }
+}
+
+@keyframes concoursRise {
+  from { opacity: 0; transform: translateY(-14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes concoursFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes concoursColon {
+  0%, 48%   { opacity: 1; }
+  49%, 100% { opacity: 0.22; }
+}
+
+@keyframes concoursSeal {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(201, 169, 97, 0.45), 0 0 10px rgba(201, 169, 97, 0.18); }
+  50%      { box-shadow: 0 0 0 1px rgba(230, 210, 168, 0.75), 0 0 18px rgba(201, 169, 97, 0.38); }
+}
+
+.concours-sheen {
+  animation: concoursSheen 9s ease-in-out infinite;
+  animation-delay: 1.6s;
+}
+
+.concours-rise {
+  animation: concoursRise 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.concours-fade {
+  animation: concoursFade 900ms ease-out both;
+}
+
+.concours-colon {
+  animation: concoursColon 2s steps(1, end) infinite;
+}
+
+.concours-seal {
+  animation: concoursSeal 4.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .concours-sheen,
+  .concours-colon,
+  .concours-seal {
+    animation: none;
+  }
+  .concours-rise,
+  .concours-fade {
+    animation-duration: 1ms;
+  }
+}

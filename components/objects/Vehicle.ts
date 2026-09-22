@@ -999,15 +999,71 @@ export class Vehicle {
   }
 
   private buildProceduralMesh() {
-    // Chassis Base
-    const chassisGeom = new THREE.BoxGeometry(2.4, 0.5, 4.8);
-    const chassisMat = this.createPaintMaterial(this.color);
-    const chassis = new THREE.Mesh(chassisGeom, chassisMat);
-    chassis.position.y = 0.45;
+    const paintMat = this.createPaintMaterial(this.color);
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: 0x18181c,
+      roughness: 0.6,
+      metalness: 0.1
+    });
+
+    // Lower Chassis Floor / Underbody
+    const floorGeom = new THREE.BoxGeometry(2.36, 0.32, 4.7);
+    const floor = new THREE.Mesh(floorGeom, trimMat);
+    floor.position.y = 0.34;
+    this.mesh.add(floor);
+
+    // Main Mid-Body Chassis
+    const chassisGeom = new THREE.BoxGeometry(2.38, 0.46, 4.6);
+    const chassis = new THREE.Mesh(chassisGeom, paintMat);
+    chassis.position.y = 0.54;
     this.mesh.add(chassis);
 
+    // Front Hood - Aerodynamic slope over engine bay
+    const hoodGeom = new THREE.BoxGeometry(1.86, 0.34, 1.6);
+    const hood = new THREE.Mesh(hoodGeom, paintMat);
+    hood.position.set(0, 0.68, 1.45);
+    hood.rotation.x = -0.06;
+    this.mesh.add(hood);
+
+    // Front Wheel Arches / Fenders (Flared covers so wheels sit flush inside)
+    const frontFenderGeom = new THREE.BoxGeometry(0.32, 0.48, 1.35);
+    const leftFrontFender = new THREE.Mesh(frontFenderGeom, paintMat);
+    leftFrontFender.position.set(-1.06, 0.74, 1.6);
+    this.mesh.add(leftFrontFender);
+
+    const rightFrontFender = leftFrontFender.clone();
+    rightFrontFender.position.x = 1.06;
+    this.mesh.add(rightFrontFender);
+
+    // Rear Quarter Panel Fenders (Muscular rear haunches over rear wheels)
+    const rearFenderGeom = new THREE.BoxGeometry(0.34, 0.50, 1.35);
+    const leftRearFender = new THREE.Mesh(rearFenderGeom, paintMat);
+    leftRearFender.position.set(-1.06, 0.76, -1.6);
+    this.mesh.add(leftRearFender);
+
+    const rightRearFender = leftRearFender.clone();
+    rightRearFender.position.x = 1.06;
+    this.mesh.add(rightRearFender);
+
+    // Front Bumper / Fascia & Splitter
+    const frontBumperGeom = new THREE.BoxGeometry(2.36, 0.40, 0.35);
+    const frontBumper = new THREE.Mesh(frontBumperGeom, paintMat);
+    frontBumper.position.set(0, 0.48, 2.45);
+    this.mesh.add(frontBumper);
+
+    const frontSplitterGeom = new THREE.BoxGeometry(2.38, 0.07, 0.4);
+    const frontSplitter = new THREE.Mesh(frontSplitterGeom, trimMat);
+    frontSplitter.position.set(0, 0.25, 2.48);
+    this.mesh.add(frontSplitter);
+
+    // Lower Front Grille
+    const grilleGeom = new THREE.BoxGeometry(1.4, 0.16, 0.1);
+    const grille = new THREE.Mesh(grilleGeom, trimMat);
+    grille.position.set(0, 0.38, 2.63);
+    this.mesh.add(grille);
+
     // Cabin/Windshield
-    const cabinGeom = new THREE.BoxGeometry(1.8, 0.6, 2.2);
+    const cabinGeom = new THREE.BoxGeometry(1.76, 0.56, 2.1);
     const cabinMat = new THREE.MeshPhysicalMaterial({
       color: 0x050510,
       roughness: 0.05,
@@ -1019,31 +1075,31 @@ export class Vehicle {
       opacity: 0.5
     });
     const cabin = new THREE.Mesh(cabinGeom, cabinMat);
-    cabin.position.set(0, 0.9, -0.2); // Sits slightly back
+    cabin.position.set(0, 0.95, -0.2); // Sits slightly back
     this.mesh.add(cabin);
 
     // Windshield frame
-    const windshieldGeom = new THREE.BoxGeometry(1.7, 0.5, 1.2);
+    const windshieldGeom = new THREE.BoxGeometry(1.68, 0.48, 1.15);
     const windshieldMat = this.createWindshieldMaterial();
     const windshield = new THREE.Mesh(windshieldGeom, windshieldMat);
-    windshield.position.set(0, 0.85, 0.8);
-    windshield.rotation.x = -0.5; // Angled windshield
+    windshield.position.set(0, 0.88, 0.78);
+    windshield.rotation.x = -0.52; // Angled windshield
     this.mesh.add(windshield);
 
-    // Realistic Headlights (Xenon white cylinders)
-    const headlightGeom = new THREE.BoxGeometry(0.6, 0.12, 0.2);
+    // Realistic Headlights (Xenon white cylinders / LED strips)
+    const headlightGeom = new THREE.BoxGeometry(0.55, 0.10, 0.18);
     const headlightMat = new THREE.MeshStandardMaterial({
-      color: 0xe0e8ff,
+      color: 0xf0f6ff,
       emissive: 0xe0e8ff,
-      emissiveIntensity: 2.0
+      emissiveIntensity: 2.5
     });
 
     const leftHeadlight = new THREE.Mesh(headlightGeom, headlightMat);
-    leftHeadlight.position.set(-0.8, 0.45, 2.4);
+    leftHeadlight.position.set(-0.78, 0.54, 2.54);
     this.mesh.add(leftHeadlight);
 
     const rightHeadlight = leftHeadlight.clone();
-    rightHeadlight.position.x = 0.8;
+    rightHeadlight.position.x = 0.78;
     this.mesh.add(rightHeadlight);
 
     // Dynamic light beam emitting from front
@@ -1054,7 +1110,7 @@ export class Vehicle {
     this.mesh.add(frontSpot.target);
 
     // Red Tail lights
-    const taillightGeom = new THREE.BoxGeometry(0.8, 0.1, 0.1);
+    const taillightGeom = new THREE.BoxGeometry(1.8, 0.09, 0.1);
     const taillightMat = new THREE.MeshStandardMaterial({
       color: 0x550000,
       roughness: 0.2,
@@ -1063,50 +1119,58 @@ export class Vehicle {
       emissiveIntensity: 0.5
     });
     const tailLight = new THREE.Mesh(taillightGeom, taillightMat);
-    tailLight.position.set(0, 0.5, -2.4);
+    tailLight.position.set(0, 0.56, -2.36);
     this.mesh.add(tailLight);
     this.taillightMaterials.push(taillightMat);
 
+    // Rear Lower Diffuser
+    const diffuserGeom = new THREE.BoxGeometry(2.36, 0.22, 0.35);
+    const diffuser = new THREE.Mesh(diffuserGeom, trimMat);
+    diffuser.position.set(0, 0.32, -2.4);
+    this.mesh.add(diffuser);
+
     // Exhaust Boost Engine
-    const exhaustGeom = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
+    const exhaustGeom = new THREE.CylinderGeometry(0.24, 0.24, 0.7, 8);
     exhaustGeom.rotateX(Math.PI / 2);
     const exhaustMat = new THREE.MeshStandardMaterial({
-      color: 0x222233,
+      color: 0x333344,
       metalness: 0.9,
+      roughness: 0.2
     });
     const exhaust = new THREE.Mesh(exhaustGeom, exhaustMat);
-    exhaust.position.set(0, 0.35, -2.4);
+    exhaust.position.set(0, 0.35, -2.44);
     this.mesh.add(exhaust);
 
     // Add spoiler if config specifies it
     if (this.hasSpoiler) {
-      const spoilerPillarsGeom = new THREE.BoxGeometry(0.1, 0.6, 0.2);
+      const spoilerPillarsGeom = new THREE.BoxGeometry(0.08, 0.55, 0.18);
       const spoilerPillarsMat = new THREE.MeshStandardMaterial({ color: 0x111122 });
 
       const leftPillar = new THREE.Mesh(spoilerPillarsGeom, spoilerPillarsMat);
-      leftPillar.position.set(-0.8, 0.9, -2.1);
+      leftPillar.position.set(-0.8, 0.95, -2.05);
       this.mesh.add(leftPillar);
 
       const rightPillar = leftPillar.clone();
       rightPillar.position.x = 0.8;
       this.mesh.add(rightPillar);
 
-      const wingGeom = new THREE.BoxGeometry(2.6, 0.08, 0.6);
+      const wingGeom = new THREE.BoxGeometry(2.5, 0.07, 0.55);
       const wingMat = this.createPaintMaterial(this.color);
       const wing = new THREE.Mesh(wingGeom, wingMat);
-      wing.position.set(0, 1.2, -2.1);
+      wing.position.set(0, 1.22, -2.05);
       wing.rotation.x = 0.05;
       this.mesh.add(wing);
     }
 
-    // Wheels (4 Cylinders)
-    const wheelGeom = new THREE.CylinderGeometry(this.wheelRadius, this.wheelRadius, 0.44, 16);
+    // Wheels - Proportioned tire width & sleek alloy rims tucked neatly under fenders
+    const tireWidth = 0.34;
+    const wheelGeom = new THREE.CylinderGeometry(this.wheelRadius, this.wheelRadius, tireWidth, 24);
     wheelGeom.rotateZ(Math.PI / 2); // Rotate to stand vertically
     const wheelMat = new THREE.MeshStandardMaterial({
-      color: 0x111115,
-      roughness: 0.8,
+      color: 0x16161a,
+      roughness: 0.85,
     });
-    const rimGeom = new THREE.CylinderGeometry(this.wheelRadius * (0.28 / 0.48), this.wheelRadius * (0.28 / 0.48), 0.46, 8);
+    const rimGeom = new THREE.CylinderGeometry(this.wheelRadius * 0.62, this.wheelRadius * 0.62, tireWidth + 0.01, 16);
     rimGeom.rotateZ(Math.PI / 2);
     const rimMat = this.createRimMaterial();
 
@@ -1137,11 +1201,11 @@ export class Vehicle {
       }
     };
 
-    // Position wheels
-    createWheelAssembly(-1.25, 0.48, 1.6, true);  // Front Left
-    createWheelAssembly(1.25, 0.48, 1.6, true);   // Front Right
-    createWheelAssembly(-1.25, 0.48, -1.6, false); // Rear Left
-    createWheelAssembly(1.25, 0.48, -1.6, false);  // Rear Right
+    // Position wheels: tucked at x = ±1.05 so outer tire edge (1.05 + 0.17 = 1.22) sits perfectly flush inside fender (1.22)
+    createWheelAssembly(-1.05, 0.48, 1.6, true);   // Front Left
+    createWheelAssembly(1.05, 0.48, 1.6, true);    // Front Right
+    createWheelAssembly(-1.05, 0.48, -1.6, false); // Rear Left
+    createWheelAssembly(1.05, 0.48, -1.6, false);  // Rear Right
 
     // Enable shadows for the entire vehicle assembly
     this.mesh.traverse((child) => {

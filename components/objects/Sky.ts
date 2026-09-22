@@ -198,9 +198,14 @@ export class Sky {
   private skyMesh!: THREE.Mesh;
   private skyMaterial!: THREE.ShaderMaterial;
   private clock = new THREE.Clock();
-  
+
   private uTimeOfDayTarget = 1.0;
   private uTimeOfDayVal = 1.0;
+
+  private pmrem!: THREE.PMREMGenerator;
+  private envScene!: THREE.Scene;
+  private envTarget?: THREE.WebGLRenderTarget;
+  private envTimeOfDayVal = Number.NaN;
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer, ambientLight: THREE.AmbientLight, dirLight: THREE.DirectionalLight) {
     this.scene = scene;
@@ -209,6 +214,7 @@ export class Sky {
     this.dirLight = dirLight;
 
     this.createSkyDome();
+    this.createEnvironmentProbe();
     this.updateTimeOfDay('night'); // Default to night initially
   }
 
@@ -227,6 +233,26 @@ export class Sky {
 
     this.skyMesh = new THREE.Mesh(geometry, this.skyMaterial);
     this.scene.add(this.skyMesh);
+  }
+
+  // Metallic and clearcoat materials get their specular response almost entirely
+  // from an environment map. Without one the car's paint and rims have nothing to
+  // reflect and render as flat matte shapes, so the sky is probed into an IBL here.
+  private createEnvironmentProbe() {
+    this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envScene = new THREE.Scene();
+    // The shader normalizes local position, so radius only has to sit inside the
+    // probe's near/far range. The material is shared with the dome, which keeps
+    // the reflections locked to the same time of day and sun direction.
+    this.envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 24), this.skyMaterial));
+  }
+
+  private refreshEnvironment() {
+    const previous = this.envTarget;
+    this.envTarget = this.pmrem.fromScene(this.envScene, 0, 0.1, 100);
+    this.scene.environment = this.envTarget.texture;
+    this.envTimeOfDayVal = this.uTimeOfDayVal;
+    previous?.dispose();
   }
 
   /**

@@ -12,7 +12,7 @@ from mathutils import Vector, Euler
 ORIGINAL_BLEND = r"D:\trifilpla\honda_accord_2026_game_ready.blend"
 NEW_SHOWCASE_BLEND = r"D:\trifilpla\honda_accord_2026_ingame_showcase.blend"
 OUTPUT_DIR = r"D:\trifilpla"
-ARTIFACT_DIR = r"C:\Users\User\.gemini\antigravity-ide\brain\4b481bbd-6bf4-4257-9864-905d7ac12a8f"
+ARTIFACT_DIR = r"C:\Users\User\.gemini\antigravity-ide\brain\1fe2baac-f89a-4f77-a97d-7efb06dd58d3"
 
 # Step 1: Ensure we are operating in the new separate file immediately
 bpy.ops.wm.save_as_mainfile(filepath=NEW_SHOWCASE_BLEND)
@@ -414,34 +414,6 @@ if c_bsdf:
         c_bsdf.inputs['Emission Color'].default_value = (0.1, 0.25, 0.45, 1.0)
         c_bsdf.inputs['Emission Strength'].default_value = 0.4
 
-# Low-poly distant mountain / horizon silhouettes placed far away (lateral/distant)
-dist_coords = [
-    (120.0, -180.0, 60.0, 60.0, 35.0),
-    (-140.0, -170.0, 70.0, 70.0, 45.0),
-    (150.0, 180.0, 65.0, 65.0, 40.0),
-    (-150.0, 170.0, 75.0, 75.0, 48.0),
-]
-
-for idx, (bx, by, bw, bd, bh) in enumerate(dist_coords):
-    m = bpy.data.meshes.new(f"Distant_Hills_{idx}")
-    o = bpy.data.objects.new(f"Distant_Hills_{idx}", m)
-    showcase_col.objects.link(o)
-    hw, hd = bw * 0.5, bd * 0.5
-    v = [
-        Vector((bx - hw, by - hd, 0.0)),
-        Vector((bx + hw, by - hd, 0.0)),
-        Vector((bx + hw, by + hd, 0.0)),
-        Vector((bx - hw, by + hd, 0.0)),
-        Vector((bx, by, bh)),
-    ]
-    f = [
-        (0, 1, 2, 3),
-        (0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4)
-    ]
-    m.from_pydata(v, [], f)
-    m.update()
-    o.data.materials.append(city_mat)
-
 # ------------------------------------------------------------------------------
 # 3. EXQUISITE LIGHTING ARCHITECTURE (GOLDEN HOUR / SUNSET RACETRACK)
 # ------------------------------------------------------------------------------
@@ -468,14 +440,14 @@ w_sky.ozone_density = 1.0
 w_sky.turbidity = 2.4
 w_sky.ground_albedo = 0.2
 
-w_bg.inputs['Strength'].default_value = 1.2
+w_bg.inputs['Strength'].default_value = 0.04 # Calibrated for physical atmospheric radiance
 wlinks.new(w_sky.outputs['Color'], w_bg.inputs['Color'])
 wlinks.new(w_bg.outputs['Background'], w_out.inputs['Surface'])
 
 # B. Key Sunlight: Low-angle golden sun casting dramatic long shadows
 sun_data = bpy.data.lights.new(name="Sun_Key_Light", type='SUN')
-sun_data.energy = 5.2
-sun_data.color = (1.0, 0.88, 0.74) # Warm golden sunlight
+sun_data.energy = 4.2
+sun_data.color = (1.0, 0.90, 0.78) # Warm golden sunlight
 sun_data.angle = math.radians(0.54) # Realistic sharp solar disc
 sun_obj = bpy.data.objects.new(name="Sun_Key_Light", object_data=sun_data)
 showcase_col.objects.link(sun_obj)
@@ -484,7 +456,7 @@ sun_obj.rotation_euler = Euler((math.radians(24), math.radians(38), math.radians
 
 # C. Cool Cyan Rim / Kicker Light (High-tech edge outline)
 rim_data = bpy.data.lights.new(name="Neon_Rim_Light", type='SUN')
-rim_data.energy = 2.4
+rim_data.energy = 2.0
 rim_data.color = (0.28, 0.75, 1.0) # Cool cyan sky rim
 rim_data.angle = math.radians(2.0)
 rim_obj = bpy.data.objects.new(name="Neon_Rim_Light", object_data=rim_data)
@@ -494,7 +466,7 @@ rim_obj.rotation_euler = Euler((math.radians(-25), math.radians(-35), math.radia
 
 # D. Road Specular Highlight Fill (Low ground point light to produce asphalt road shine)
 road_fill_data = bpy.data.lights.new(name="Road_Gleam_Light", type='POINT')
-road_fill_data.energy = 280.0
+road_fill_data.energy = 200.0
 road_fill_data.color = (1.0, 0.82, 0.65)
 road_fill_data.shadow_soft_size = 0.5
 road_fill_obj = bpy.data.objects.new(name="Road_Gleam_Light", object_data=road_fill_data)
@@ -503,7 +475,7 @@ showcase_col.objects.link(road_fill_obj)
 
 # E. Underchassis Ambient Bounce (Soft fill for wheel wells and red calipers)
 under_data = bpy.data.lights.new(name="Underchassis_Bounce_Light", type='POINT')
-under_data.energy = 65.0
+under_data.energy = 50.0
 under_data.color = (0.5, 0.65, 0.85)
 under_data.shadow_soft_size = 1.2
 under_obj = bpy.data.objects.new(name="Underchassis_Bounce_Light", object_data=under_data)
@@ -523,7 +495,7 @@ eevee.taa_render_samples = 64
 # Color Management: AgX Medium High Contrast for automotive grade photorealism
 scene.view_settings.view_transform = 'AgX'
 scene.view_settings.look = 'AgX - Medium High Contrast'
-scene.view_settings.exposure = 0.25
+scene.view_settings.exposure = 0.05
 
 scene.render.resolution_x = 1920
 scene.render.resolution_y = 1080
@@ -538,11 +510,10 @@ def create_camera(name, location, target, focal_length):
     cam_data.sensor_width = 36.0
     cam_obj = bpy.data.objects.new(name, cam_data)
     showcase_col.objects.link(cam_obj)
-    cam_obj.location = Vector(location)
     
-    # Point camera towards target
-    dir_vec = Vector(target) - Vector(location)
-    rot_quat = dir_vec.to_track_quat('-Z', 'Y')
+    cam_obj.location = Vector(location)
+    direction = Vector(target) - cam_obj.location
+    rot_quat = direction.to_track_quat('-Z', 'Y')
     cam_obj.rotation_euler = rot_quat.to_euler()
     return cam_obj
 
@@ -560,9 +531,9 @@ cameras = {
         "filename": "accord_showcase_chase.png"
     },
     "InGame_Cam_Trackside": {
-        "loc": (7.8, -1.5, 0.72),
-        "tgt": (0.0, -0.4, 0.58),
-        "lens": 85,
+        "loc": (9.2, -2.8, 1.45),
+        "tgt": (0.0, -0.1, 0.55),
+        "lens": 65,
         "filename": "accord_showcase_trackside.png"
     },
     "InGame_Cam_Hero_Nose": {

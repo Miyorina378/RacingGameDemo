@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/.agents/plugins/**)",
+      "Read(//d/.agents/plugins/blender/**)",
+      "Read(//d/scripts/**)",
+      "Bash(/c/Python313/python \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--trifilpla\\\\b3b4d190-067c-48d7-81f9-8684f6df7e14\\\\scratchpad\\\\probe_blender.py\")",
+      "Bash(netstat -ano)",
+      "Bash(tasklist //FI \"PID eq 3460\" //FO LIST)",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 3460 | Select-Object Id,ProcessName,Path,StartTime | Format-List\")",
+      "Bash(/c/Python313/python \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--trifilpla\\\\b3b4d190-067c-48d7-81f9-8684f6df7e14\\\\scratchpad\\\\probe_blender2.py\")"
+    ]
+  }
+}
