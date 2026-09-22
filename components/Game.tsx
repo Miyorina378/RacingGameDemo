@@ -555,12 +555,12 @@ export default function Game() {
   // Synced States with Engine
   const [activeMode, setActiveMode] = useState<'garage' | 'free_roam' | 'license' | 'race' | 'tutorial' | 'editor'>('garage');
   const [tutorialStep, setTutorialStep] = useState<number>(0);
-  const [activeCarId, setActiveCarId] = useState<string>('starter');
+  const [activeCarId, setActiveCarId] = useState<string>('toyota_gt_one_1998');
   const [playerCredits, setPlayerCredits] = useState<number>(500);
   const [hasLicense, setHasLicense] = useState<boolean>(false);
   const [licenseProgress, setLicenseProgress] = useState<LicenseProgress>(() => createDefaultLicenseProgress(false));
   const [activeLicenseTestId, setActiveLicenseTestId] = useState<string>(DEFAULT_LICENSE_TEST_ID);
-  const [purchasedCars, setPurchasedCars] = useState<string[]>(['starter']);
+  const [purchasedCars, setPurchasedCars] = useState<string[]>(['starter', 'toyota_gt_one_1998']);
   const [activeTrackId, setActiveTrackId] = useState<string>('sprint_circuit');
   /** Course variation in play, so the HUD draws the layout actually being raced. */
   const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null);
@@ -1238,9 +1238,25 @@ export default function Game() {
       if (savedCredits) setPlayerCredits(parseInt(savedCredits));
       setLicenseProgress(loadedLicenseProgress);
       setHasLicense(hasAnyLicense(loadedLicenseProgress));
-      if (savedCars) setPurchasedCars(JSON.parse(savedCars));
+      if (savedCars) {
+        try {
+          const parsed = JSON.parse(savedCars);
+          if (Array.isArray(parsed)) {
+            if (!parsed.includes('toyota_gt_one_1998')) {
+              parsed.push('toyota_gt_one_1998');
+            }
+            setPurchasedCars(parsed);
+          }
+        } catch (e) {
+          setPurchasedCars(['starter', 'toyota_gt_one_1998']);
+        }
+      } else {
+        setPurchasedCars(['starter', 'toyota_gt_one_1998']);
+      }
       if (savedColor) setSelectedColor(savedColor);
-      if (savedActiveCar) setActiveCarId(savedActiveCar);
+      if (savedActiveCar) {
+        setActiveCarId(savedActiveCar === 'starter' ? 'toyota_gt_one_1998' : savedActiveCar);
+      }
 
       const savedUpgrades = localStorage.getItem('cyberdrive_upgrades');
       if (savedUpgrades) {

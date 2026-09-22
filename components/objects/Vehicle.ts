@@ -920,7 +920,8 @@ export class Vehicle {
       carId !== 'honda_s2000' &&
       carId !== 'honda_accord_2026' &&
       carId !== 'ford_gt_2006' &&
-      carId !== 'cybertruck'
+      carId !== 'cybertruck' &&
+      carId !== 'toyota_gt_one_1998'
     ) {
       this.clearCurrentVisual();
       this.buildProceduralMesh();
@@ -946,6 +947,8 @@ export class Vehicle {
       this.buildGltfMesh('/models/ford_gt_2006.glb', generation, carId, color, onLoadProgress, onLoadComplete);
     } else if (carId === 'cybertruck') {
       this.buildGltfMesh('/models/tesla_cybertruck_awd.glb', generation, carId, color, onLoadProgress, onLoadComplete);
+    } else if (carId === 'toyota_gt_one_1998') {
+      this.buildGltfMesh('/models/toyota_gt_one_1998.glb', generation, carId, color, onLoadProgress, onLoadComplete);
     } else if (generation === this.visualGeneration) {
       this.clearCurrentVisual();
       this.buildProceduralMesh();
@@ -1328,18 +1331,19 @@ export class Vehicle {
           // valid wheel pivots. Keep the broad heuristic for legacy cars.
           const candidates: THREE.Object3D[] = [];
           const posRegex = /(?:^|[_ -])(front|rear|back|left|right|fl|fr|rl|rr|lf|rf|lr|f|b|l|r)(?:$|[_ -]|\d)/i;
-          const accordWheelNames = new Set([
+          const standardWheelNames = new Set([
             'wheel_front_left',
             'wheel_front_right',
             'wheel_rear_left',
             'wheel_rear_right',
           ]);
+          const isStandardWheelCar = requestedCarId === 'honda_accord_2026' || requestedCarId === 'toyota_gt_one_1998';
 
           model.traverse((child: THREE.Object3D) => {
             const name = child.name.toLowerCase();
-            const isAccordWheel = requestedCarId === 'honda_accord_2026' && accordWheelNames.has(name);
+            const isStrictWheel = isStandardWheelCar && standardWheelNames.has(name);
             const isLegacyWheel = name.includes('wheel') || name.includes('tire') || name.includes('rim');
-            if (isAccordWheel || (requestedCarId !== 'honda_accord_2026' && isLegacyWheel && posRegex.test(child.name))) {
+            if (isStrictWheel || (!isStandardWheelCar && isLegacyWheel && posRegex.test(child.name))) {
               candidates.push(child);
             }
           });
@@ -1358,8 +1362,7 @@ export class Vehicle {
 
           // Process collected wheels with a 2-level pivot hierarchy:
           //   steerPivot (position + steering Y) → spinNode (rolling X) → wheel parent
-          // Accord wheel parents are authored at hub center, so preserve their local
-          // hierarchy and transform instead of recentering their child geometry again.
+          // Authored wheel parents sit at hub center, preserving local hierarchy & rotation.
           const wheelCorner = (name: string): 'frontLeft' | 'frontRight' | 'rearLeft' | 'rearRight' => {
             const lower = name.toLowerCase();
             const isFront = /(?:^|[_ -])(front|fore|f|fl|fr)(?:$|[_ -]|\d)/i.test(lower);
@@ -1375,7 +1378,7 @@ export class Vehicle {
             const bbox = new THREE.Box3().setFromObject(child);
             const isHubCentered =
               child.userData.origin_is_hub_center === true ||
-              (requestedCarId === 'honda_accord_2026' && accordWheelNames.has(child.name.toLowerCase()));
+              (isStandardWheelCar && standardWheelNames.has(child.name.toLowerCase()));
             const pivotCenter = isHubCentered
               ? child.getWorldPosition(new THREE.Vector3())
               : bbox.getCenter(new THREE.Vector3());
