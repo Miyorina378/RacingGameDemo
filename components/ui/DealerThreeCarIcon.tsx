@@ -71,7 +71,7 @@ export const DealerThreeCarIcon = ({
     displayRoot.rotation.x = -0.08;
     scene.add(displayRoot);
 
-    let isGltfReady = car.id !== 'honda_s2000' && car.id !== 'honda_accord_2026' && car.id !== 'ford_gt_2006' && car.id !== 'cybertruck';
+    let isGltfReady = car.id !== 'honda_s2000' && car.id !== 'honda_accord_2026' && car.id !== 'ford_gt_2006' && car.id !== 'cybertruck' && car.id !== 'toyota_gt_one_1998';
     const iconVehicle = new Vehicle(car.id, car.color, undefined, undefined, () => {
       isGltfReady = true;
     });

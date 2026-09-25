@@ -1573,7 +1573,7 @@ export default function Garage({
     : activeMarketMode === 'race'
       ? dealerFilteredCars.filter((car) => car.tier === 'Hyper Tier' || car.tier === 'Legendary Tier' || car.requiresLicense)
       : activeMarketMode === 'new'
-        ? dealerFilteredCars.filter((car) => car.tier !== 'Hyper Tier' && car.tier !== 'Legendary Tier' && !car.requiresLicense)
+        ? dealerFilteredCars.filter((car) => (car.tier !== 'Hyper Tier' && car.tier !== 'Legendary Tier' && !car.requiresLicense) || car.id === 'toyota_gt_one_1998')
         : dealerFilteredCars;
   const dealerMarketCars = rawMarketCars.length > 0 ? rawMarketCars : (dealerFilteredCars.length > 0 ? dealerFilteredCars : dealerCars);
   const dealerActiveBrands = dealerCityConfig?.brands || [];
