@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TrackConfig, TrackLayout, TrackNode, TrackSpur } from '../config/TrackDatabase';
+import { TRACK_WIDTH_SCALE } from '../config/WorldScale';
 import { Heightmap } from './terrain';
 
 /**
@@ -10,8 +11,47 @@ import { Heightmap } from './terrain';
  * they disagree about where the road actually goes on sharp corners.
  */
 
-export const CURB_WIDTH = 1.5;
+// Curbs are built in real metres (1.5 authored units narrowed to the world scale).
+export const CURB_WIDTH = 1.5 * TRACK_WIDTH_SCALE;
+/** Authored default; it goes through scaleTrackWidths like any other width. */
 export const DEFAULT_GRASS_WIDTH = 5.0;
+
+const scaleOptional = (value: number | undefined, k: number) => (value === undefined ? undefined : value * k);
+
+/**
+ * The track with every lateral width (road, grass, per-node and spur overrides)
+ * narrowed to real-car proportions; see config/WorldScale.ts. Lengths, corner
+ * radii and positions are already real and stay as authored. Safe to call on an
+ * already scaled config.
+ */
+export const scaleTrackWidths = (config: TrackConfig, k: number = TRACK_WIDTH_SCALE): TrackConfig => {
+  if (config.widthScale !== undefined) return config;
+  const path = config.path.map((point) =>
+    point instanceof THREE.Vector3
+      ? point
+      : {
+          ...point,
+          width: scaleOptional(point.width, k),
+          grassWidth: scaleOptional(point.grassWidth, k),
+          leftGrassWidth: scaleOptional(point.leftGrassWidth, k),
+          rightGrassWidth: scaleOptional(point.rightGrassWidth, k),
+        }
+  );
+  const spurs = config.spurs?.map((spur) => ({
+    ...spur,
+    width: scaleOptional(spur.width, k),
+    leftGrassWidth: scaleOptional(spur.leftGrassWidth, k),
+    rightGrassWidth: scaleOptional(spur.rightGrassWidth, k),
+  }));
+  return {
+    ...config,
+    roadWidth: config.roadWidth * k,
+    GrassWidth: (config.GrassWidth ?? DEFAULT_GRASS_WIDTH) * k,
+    path,
+    spurs,
+    widthScale: k,
+  };
+};
 
 /** Fallback layout for a track that declares none: the whole authored path. */
 export const DEFAULT_TRACK_LAYOUT: TrackLayout = { id: 'full', name: 'Full Circuit' };
@@ -183,7 +223,16 @@ const raceSpurIntoPath = (config: TrackConfig, layoutId: string): TrackConfig =>
   return { ...config, path, spurs: remainingSpurs };
 };
 
+/**
+ * The config a race actually drives on: the chosen layout applied and the widths
+ * brought to world scale. Every race-geometry consumer goes through here.
+ */
 export const resolveTrackLayout = (
+  config: TrackConfig,
+  layoutId?: string | null
+): TrackConfig => scaleTrackWidths(applyTrackLayout(config, layoutId));
+
+const applyTrackLayout = (
   config: TrackConfig,
   layoutId?: string | null
 ): TrackConfig => {

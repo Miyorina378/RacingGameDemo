@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map as MapIcon, Trophy, Building2, Trees, FlagTriangleRight, Route, ChevronLeft, ChevronRight, Flag } from 'lucide-react';
+import { Coins, HelpCircle, Compass, Award, Lock, Paintbrush, Play, Timer, LogOut, Wrench, Settings, Check, Map as MapIcon, Trophy, Building2, Trees, FlagTriangleRight, Route, ChevronLeft, ChevronRight } from 'lucide-react';
 import * as THREE from 'three';
 import { CARS_DATABASE, CarConfig } from '../config/CarDatabase';
 import { TRACKS_DATABASE, TrackConfig } from '../config/TrackDatabase';
@@ -17,6 +17,7 @@ import {
   isLicenseTestUnlocked
 } from '../config/LicenseDatabase';
 import CareerMap from './CareerMap';
+import DealerWorldMap from './DealerWorldMap';
 import { DealerThreeCarIcon } from './DealerThreeCarIcon';
 
 // Custom Icons
@@ -405,40 +406,42 @@ const DEALER_CITIES: Array<{
     {
       id: 'east',
       name: 'East City',
-      region: 'Far East Imports',
-      description: 'Japanese and street-spec imports line the neon port roads.',
-      hoverDescription: 'East City stocks Toyota, Nissan, and Honda around a lantern street, compact towers, and late-night import shops.',
+      region: 'Japanese Imports',
+      description: 'Japanese makers under neon towers, a pagoda and a harbour torii.',
+      hoverDescription: 'East City stocks Toyota, Nissan, and Honda between neon towers, a five-storey pagoda, a castle keep, and the container port.',
       brands: ['Toyota', 'Nissan', 'Honda'],
       accent: 'rose',
     },
     {
       id: 'west',
       name: 'West City',
-      region: 'Far West Brands',
-      description: 'A bridge city for American power and European exotics.',
-      hoverDescription: 'West City wraps Ford, Tesla, Porsche, Ferrari, Audi, and Chevrolet around a red suspension bridge and bay road.',
-      brands: ['Ford', 'Tesla', 'Porsche', 'Ferrari', 'Audi', 'Chevrolet'],
+      region: 'American Motors',
+      description: 'American power and EVs around Art Deco towers and the red bridge.',
+      hoverDescription: 'West City sells Ford, Tesla, and Chevrolet under Art Deco towers, beside the stadium, the EV plant, and the red suspension bridge.',
+      brands: ['Ford', 'Tesla', 'Chevrolet'],
       accent: 'cyan',
     },
     {
       id: 'north',
       name: 'North City',
-      region: 'Cold Line Exchange',
-      description: 'A crisp city square with a tall steel landmark.',
-      hoverDescription: 'North City is a specialist market under a tall steel tower, cold plazas, and narrow dealer lanes.',
-      brands: ['Porsche', 'Audi'],
+      region: 'European Marques',
+      description: 'European marques in a gabled old town under a cathedral.',
+      hoverDescription: 'North City houses Porsche, Ferrari, and Audi in a gabled old town with a cathedral, a clock tower, an iron tower, and a castle on the ridge.',
+      brands: ['Porsche', 'Ferrari', 'Audi'],
       accent: 'blue',
     },
     {
       id: 'south',
       name: 'South City',
-      region: 'Coastal Auto Market',
-      description: 'Coastal garages sit beside palms, marina roads, and tuned muscle.',
-      hoverDescription: 'South City serves Chevrolet, Ford, and Toyota beside palm-lined roads, low garages, and a harbor lighthouse.',
-      brands: ['Chevrolet', 'Ford', 'Toyota'],
+      region: 'Chinese & Korean Makers',
+      description: 'Chinese and Korean makers among glass supertalls and a pearl tower.',
+      hoverDescription: 'South City is home to BYD, Hyundai, and Kia among glass supertalls, a pearl tower, a temple with hanok houses, and the marina.',
+      brands: ['BYD', 'Hyundai', 'Kia'],
       accent: 'amber',
     },
   ];
+
+const DEALER_CITY_NAMES = DEALER_CITIES.map(({ id, name }) => ({ id, name }));
 
 const getDealerCityCars = (city: DealerCityId | null) => {
   if (!city) return [];
@@ -695,548 +698,6 @@ const getDealerCityClasses = (accent: string) => {
     glow: 'hover:border-rose-500/55 hover:shadow-[0_0_28px_rgba(244,63,94,0.16)]',
     text: 'text-rose-300',
   };
-};
-
-// ============================================================================
-// DEALER MAP CAMERA CONFIGURATION
-// Edit these values to configure the overview camera and city zoom behavior!
-// ============================================================================
-const DEALER_MAP_CAMERA_CONFIG = {
-  // Field of View in degrees
-  fov: 42,
-
-  // Default camera position in overview mode (X, Y, Z) - lower Y and Z to zoom in closer
-  defaultPosition: { x: 0, y: 8, z: 10 },
-
-  // Point where camera looks in overview mode (X, Y, Z)
-  defaultLookAt: { x: 0, y: 0.5, z: 0 },
-
-  // Tilt angle of the 3D map board in radians (-0.08 default)
-  mapTiltX: -0.08,
-  mapTiltY: 0,
-  mapTiltZ: 0,
-
-  // Position offset of the map board root in 3D space (X, Y, Z)
-  mapRootOffset: { x: 0, y: 0, z: 0 },
-
-  // Offset of the 3D map models to center all city buildings and landmarks dead-center at (0,0,0)
-  mapContentOffset: { x: -0.18, y: 0, z: 0.8 },
-
-  // Automatic distance scaling for narrow portrait mobile screens (< 1.0 aspect)
-  autoScalePortrait: true,
-
-  // Camera offset when zoomed into a city (relative to city position)
-  cityZoomOffset: { x: 0, y: 4.6, z: 5.5 },
-
-  // LookAt target offset when zoomed into a city (relative to city position)
-  cityZoomTargetOffset: { x: 0, y: 0.75, z: -0.5 },
-};
-
-const DealerCityMapScene = ({
-  selectedCity,
-  lastSelectedCity,
-  hoveredCity,
-  onHoverCity,
-  onClickCity,
-}: {
-  selectedCity: DealerCityId | null;
-  lastSelectedCity: DealerCityId | null;
-  hoveredCity: DealerCityId | null;
-  onHoverCity: (cityId: DealerCityId | null) => void;
-  onClickCity: (cityId: DealerCityId) => void;
-}) => {
-  const mountRef = useRef<HTMLDivElement | null>(null);
-  const hoveredCityRef = useRef<DealerCityId | null>(hoveredCity);
-  const selectedCityRef = useRef<DealerCityId | null>(selectedCity);
-  const lastSelectedCityRef = useRef<DealerCityId | null>(lastSelectedCity);
-
-  useEffect(() => {
-    hoveredCityRef.current = hoveredCity;
-  }, [hoveredCity]);
-
-  useEffect(() => {
-    selectedCityRef.current = selectedCity;
-  }, [selectedCity]);
-
-  useEffect(() => {
-    lastSelectedCityRef.current = lastSelectedCity;
-  }, [lastSelectedCity]);
-
-  useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount) return;
-
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x050507, 15, 80);
-
-    const { fov, defaultPosition, defaultLookAt } = DEALER_MAP_CAMERA_CONFIG;
-    const camera = new THREE.PerspectiveCamera(fov, 1, 0.1, 80);
-    camera.position.set(defaultPosition.x, defaultPosition.y, defaultPosition.z);
-    camera.lookAt(defaultLookAt.x, defaultLookAt.y, defaultLookAt.z);
-
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.domElement.style.display = 'block';
-    renderer.domElement.style.width = '100%';
-    renderer.domElement.style.height = '100%';
-    mount.appendChild(renderer.domElement);
-
-    const mapRoot = new THREE.Group();
-    mapRoot.rotation.x = DEALER_MAP_CAMERA_CONFIG.mapTiltX;
-    mapRoot.rotation.y = DEALER_MAP_CAMERA_CONFIG.mapTiltY;
-    mapRoot.rotation.z = DEALER_MAP_CAMERA_CONFIG.mapTiltZ;
-    const { mapRootOffset } = DEALER_MAP_CAMERA_CONFIG;
-    mapRoot.position.set(mapRootOffset.x, mapRootOffset.y, mapRootOffset.z);
-    scene.add(mapRoot);
-
-    // mapContent container shifts all 3D models (cities, roads, landmarks) so their geometric center aligns with (0,0,0)
-    const mapContent = new THREE.Group();
-    const { mapContentOffset } = DEALER_MAP_CAMERA_CONFIG;
-    mapContent.position.set(mapContentOffset.x, mapContentOffset.y, mapContentOffset.z);
-    mapRoot.add(mapContent);
-
-    const cityColors: Record<DealerCityId, number> = {
-      east: 0xff0258,
-      west: 0x06b6d4,
-      north: 0x3b82f6,
-      south: 0xf59e0b,
-    };
-    const cityPositions: Record<DealerCityId, THREE.Vector3> = {
-      west: new THREE.Vector3(-3.8, 0, -1.6),
-      north: new THREE.Vector3(-0.6, 0, -2.55),
-      east: new THREE.Vector3(3.75, 0, -0.9),
-      south: new THREE.Vector3(1.35, 0, 2.55),
-    };
-
-    const base = new THREE.Mesh(
-      new THREE.BoxGeometry(10.8, 0.12, 7.2),
-      new THREE.MeshBasicMaterial({ color: 0x0b0f0d, transparent: true, opacity: 0.92 })
-    );
-    base.position.y = -0.08;
-    mapContent.add(base);
-
-    const grid = new THREE.GridHelper(12, 24, 0x3f3f46, 0x27272a);
-    grid.position.y = 0.01;
-    mapContent.add(grid);
-
-    const roadMat = new THREE.MeshBasicMaterial({ color: 0x171719, transparent: true, opacity: 0.96 });
-    const laneMat = new THREE.MeshBasicMaterial({ color: 0xb7b7a6, transparent: true, opacity: 0.42 });
-    const grassMat = new THREE.MeshBasicMaterial({ color: 0x12311f, transparent: true, opacity: 0.76 });
-    const trunkMat = new THREE.MeshBasicMaterial({ color: 0x6b3f20, transparent: true, opacity: 0.9 });
-    const leafMat = new THREE.MeshBasicMaterial({ color: 0x2f8f46, transparent: true, opacity: 0.9 });
-    const roofMat = new THREE.MeshBasicMaterial({ color: 0x0b0b0d, transparent: true, opacity: 0.9 });
-    const glowMats = Object.fromEntries(
-      DEALER_CITIES.map((city) => [
-        city.id,
-        new THREE.MeshBasicMaterial({
-          color: cityColors[city.id],
-          transparent: true,
-          opacity: selectedCityRef.current === city.id || selectedCityRef.current === null ? 0.34 : 0.12,
-        }),
-      ])
-    ) as Record<DealerCityId, THREE.MeshBasicMaterial>;
-
-    const makeRoad = (x: number, z: number, width: number, depth: number, rotation = 0, lane = true) => {
-      const road = new THREE.Mesh(new THREE.BoxGeometry(width, 0.04, depth), roadMat);
-      road.position.set(x, 0.04, z);
-      road.rotation.y = rotation;
-      mapContent.add(road);
-      if (lane) {
-        const laneStrip = new THREE.Mesh(new THREE.BoxGeometry(width * 0.84, 0.012, Math.max(depth * 0.08, 0.018)), laneMat);
-        laneStrip.position.set(x, 0.068, z);
-        laneStrip.rotation.y = rotation;
-        mapContent.add(laneStrip);
-      }
-      return road;
-    };
-
-    makeRoad(0, -0.05, 9.6, 0.28, -0.1);
-    makeRoad(-1.65, -0.05, 0.26, 5.7, 0.34);
-    makeRoad(2.35, 0.55, 0.26, 5.4, -0.48);
-    makeRoad(-0.2, -2.35, 6.3, 0.22, 0.12);
-    makeRoad(0.6, 2.35, 7.2, 0.22, -0.18);
-    makeRoad(-4.1, 0.75, 0.22, 3.7, -0.72);
-    makeRoad(3.78, 0.92, 0.22, 3.3, 0.64);
-
-    const parkPatches = [
-      [-3.05, 1.8, 1.3, 0.75, 0.16],
-      [3.18, 1.72, 1.05, 0.62, -0.22],
-      [0.1, -1.05, 0.95, 0.54, 0.4],
-    ];
-    parkPatches.forEach(([x, z, width, depth, rotation]) => {
-      const park = new THREE.Mesh(new THREE.BoxGeometry(width, 0.025, depth), grassMat);
-      park.position.set(x, 0.055, z);
-      park.rotation.y = rotation;
-      mapContent.add(park);
-    });
-
-    const makeTree = (x: number, z: number, scale = 1) => {
-      const tree = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.035 * scale, 0.045 * scale, 0.28 * scale, 6), trunkMat);
-      trunk.position.y = 0.22 * scale;
-      tree.add(trunk);
-      const leaves = new THREE.Mesh(new THREE.ConeGeometry(0.18 * scale, 0.42 * scale, 8), leafMat);
-      leaves.position.y = 0.56 * scale;
-      tree.add(leaves);
-      tree.position.set(x, 0.04, z);
-      mapContent.add(tree);
-      return tree;
-    };
-
-    [
-      [-4.7, 1.55, 0.9], [-4.25, 2.05, 1], [-3.5, 1.55, 0.8], [-2.7, 2.16, 0.9],
-      [2.55, 1.65, 0.85], [3.05, 2.08, 0.9], [3.7, 1.58, 0.75],
-      [-0.7, -0.98, 0.72], [0.34, -1.15, 0.72],
-    ].forEach(([x, z, scale]) => makeTree(x, z, scale));
-
-    // Raycasting setup
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    let raycastHoveredCity: DealerCityId | null = null;
-
-    // Map each city's meshes to its cityId for raycasting
-    const meshToCityId = new Map<THREE.Object3D, DealerCityId>();
-
-    const cityGroups: Partial<Record<DealerCityId, THREE.Group>> = {};
-    // Store per-city materials for hover effects
-    const cityMaterials: Partial<Record<DealerCityId, {
-      pad: THREE.MeshBasicMaterial;
-      ring: THREE.MeshBasicMaterial;
-      buildingMats: THREE.MeshBasicMaterial[];
-    }>> = {};
-
-    const makeLandmark = (cityId: DealerCityId, color: number) => {
-      const landmark = new THREE.Group();
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.92 });
-      const darkDetailMat = new THREE.MeshBasicMaterial({ color: 0x050507, transparent: true, opacity: 0.88 });
-
-      if (cityId === 'west') {
-        const deck = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.08, 0.12), mat);
-        deck.position.set(0, 0.72, -0.78);
-        landmark.add(deck);
-        [-0.62, 0.62].forEach((x) => {
-          const tower = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.95, 0.12), mat);
-          tower.position.set(x, 0.92, -0.78);
-          landmark.add(tower);
-          const cable = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.035, 0.035), mat);
-          cable.position.set(x / 2, 1.28, -0.78);
-          cable.rotation.z = x < 0 ? 0.34 : -0.34;
-          landmark.add(cable);
-        });
-      } else if (cityId === 'north') {
-        const towerBase = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.56, 0.16, 4), mat);
-        towerBase.position.set(0, 0.58, -0.62);
-        towerBase.rotation.y = Math.PI / 4;
-        landmark.add(towerBase);
-        const towerMid = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.18, 4), mat);
-        towerMid.position.set(0, 1.18, -0.62);
-        towerMid.rotation.y = Math.PI / 4;
-        landmark.add(towerMid);
-        const towerCut = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.09, 0.09), darkDetailMat);
-        towerCut.position.set(0, 1.03, -0.62);
-        landmark.add(towerCut);
-      } else if (cityId === 'east') {
-        const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.92, 0.12), mat);
-        leftPost.position.set(-0.42, 0.86, -0.7);
-        landmark.add(leftPost);
-        const rightPost = leftPost.clone();
-        rightPost.position.x = 0.42;
-        landmark.add(rightPost);
-        const beam = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.12, 0.14), mat);
-        beam.position.set(0, 1.3, -0.7);
-        landmark.add(beam);
-        const roof = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.08, 0.18), roofMat);
-        roof.position.set(0, 1.46, -0.7);
-        landmark.add(roof);
-      } else {
-        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.9, 12), mat);
-        body.position.set(0.36, 0.9, -0.62);
-        landmark.add(body);
-        const light = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, 0.2, 12), new THREE.MeshBasicMaterial({ color: 0xfff3a3, transparent: true, opacity: 0.9 }));
-        light.position.set(0.36, 1.45, -0.62);
-        landmark.add(light);
-        const cap = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.22, 12), roofMat);
-        cap.position.set(0.36, 1.66, -0.62);
-        landmark.add(cap);
-      }
-
-      return landmark;
-    };
-
-    DEALER_CITIES.forEach((city) => {
-      const cityGroup = new THREE.Group();
-      const position = cityPositions[city.id];
-      cityGroup.position.copy(position);
-      cityGroups[city.id] = cityGroup;
-
-      const isActive = selectedCityRef.current === city.id || selectedCityRef.current === null;
-      const color = cityColors[city.id];
-
-      const padMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.42 : 0.16 });
-      const pad = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.92, 1.08, 0.16, 6),
-        padMat
-      );
-      pad.position.y = 0.12;
-      pad.rotation.y = Math.PI / 6;
-      cityGroup.add(pad);
-      meshToCityId.set(pad, city.id);
-
-      const ringMat = glowMats[city.id];
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(1.08, 0.035, 8, 36),
-        ringMat
-      );
-      ring.position.y = 0.24;
-      ring.rotation.x = Math.PI / 2;
-      cityGroup.add(ring);
-      meshToCityId.set(ring, city.id);
-
-      const buildingMats: THREE.MeshBasicMaterial[] = [];
-      const buildingMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.72 : 0.25 });
-      const darkMat = new THREE.MeshBasicMaterial({ color: 0x111113, transparent: true, opacity: 0.88 });
-      const blockOffsets = [
-        [-0.34, -0.18, 0.58],
-        [0.2, 0.08, 0.88],
-        [0.48, -0.32, 0.42],
-        [-0.1, 0.42, 0.64],
-      ];
-      blockOffsets.forEach(([x, z, height], index) => {
-        const mat = index % 2 === 0 ? buildingMat : darkMat;
-        if (index % 2 === 0) buildingMats.push(buildingMat);
-        const block = new THREE.Mesh(new THREE.BoxGeometry(0.32, height, 0.32), mat);
-        block.position.set(x, 0.24 + height / 2, z);
-        cityGroup.add(block);
-        meshToCityId.set(block, city.id);
-        const roof = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.035, 0.38), roofMat);
-        roof.position.set(x, 0.27 + height, z);
-        cityGroup.add(roof);
-        meshToCityId.set(roof, city.id);
-      });
-
-      const landmark = makeLandmark(city.id, color);
-      cityGroup.add(landmark);
-      landmark.traverse((child) => {
-        if (child instanceof THREE.Mesh) meshToCityId.set(child, city.id);
-      });
-
-      cityMaterials[city.id] = { pad: padMat, ring: ringMat, buildingMats };
-      mapContent.add(cityGroup);
-    });
-
-    // Add invisible hit-test spheres for easier raycasting
-    const hitSpheres: THREE.Mesh[] = [];
-    DEALER_CITIES.forEach((city) => {
-      const hitSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(1.3, 8, 8),
-        new THREE.MeshBasicMaterial({ visible: false })
-      );
-      hitSphere.position.copy(cityPositions[city.id]);
-      hitSphere.position.y = 0.5;
-      mapContent.add(hitSphere);
-      hitSpheres.push(hitSphere);
-      meshToCityId.set(hitSphere, city.id);
-    });
-
-    const ambient = new THREE.AmbientLight(0xffffff, 0.75);
-    scene.add(ambient);
-    const key = new THREE.DirectionalLight(0xffffff, 1.35);
-    key.position.set(2, 5, 4);
-    scene.add(key);
-
-    const resize = () => {
-      const rect = mount.getBoundingClientRect();
-      const width = Math.max(1, rect.width);
-      const height = Math.max(1, rect.height);
-      camera.aspect = width / height;
-
-      const { defaultPosition, defaultLookAt, autoScalePortrait } = DEALER_MAP_CAMERA_CONFIG;
-      const scale = autoScalePortrait && camera.aspect < 1.0 ? Math.max(1.0, 1.0 / camera.aspect) : 1.0;
-
-      camera.position.set(
-        defaultPosition.x * scale,
-        defaultPosition.y * scale,
-        defaultPosition.z * scale
-      );
-      camera.lookAt(defaultLookAt.x, defaultLookAt.y, defaultLookAt.z);
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height, false);
-    };
-    resize();
-    window.addEventListener('resize', resize);
-
-    const t1 = setTimeout(resize, 100);
-    const t2 = setTimeout(resize, 350);
-    const t3 = setTimeout(resize, 750);
-
-    // Mouse event handlers for raycasting
-    const onMouseMove = (event: MouseEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    };
-
-    const onClick = () => {
-      if (raycastHoveredCity) {
-        onClickCity(raycastHoveredCity);
-      }
-    };
-
-    const onMouseLeave = () => {
-      mouse.x = -999;
-      mouse.y = -999;
-      if (raycastHoveredCity !== null) {
-        raycastHoveredCity = null;
-        onHoverCity(null);
-      }
-    };
-
-    renderer.domElement.addEventListener('mousemove', onMouseMove);
-    renderer.domElement.addEventListener('click', onClick);
-    renderer.domElement.addEventListener('mouseleave', onMouseLeave);
-    renderer.domElement.style.cursor = 'default';
-
-    let frameId = 0;
-    const startTime = performance.now();
-    let lastTime = performance.now();
-    let zoomProgress = selectedCityRef.current !== null ? 1 : 0;
-    let lastActiveCityId: DealerCityId | null = selectedCityRef.current;
-
-    const animate = (time: number) => {
-      const t = (time - startTime) / 1000;
-      mapRoot.rotation.x = DEALER_MAP_CAMERA_CONFIG.mapTiltX;
-      mapRoot.rotation.y = DEALER_MAP_CAMERA_CONFIG.mapTiltY + Math.sin(t * 0.18) * 0.05;
-      mapRoot.rotation.z = DEALER_MAP_CAMERA_CONFIG.mapTiltZ;
-
-      const { mapRootOffset } = DEALER_MAP_CAMERA_CONFIG;
-      mapRoot.position.set(mapRootOffset.x, mapRootOffset.y, mapRootOffset.z);
-
-      const now = performance.now();
-      const deltaTime = Math.min((now - lastTime) / 1000, 0.1);
-      lastTime = now;
-
-      // Update zoom progress over 1.0 second
-      const isZoomed = selectedCityRef.current !== null;
-      if (isZoomed) {
-        zoomProgress = Math.min(1, zoomProgress + deltaTime / 1.0);
-      } else {
-        zoomProgress = Math.max(0, zoomProgress - deltaTime / 1.0);
-      }
-
-      if (selectedCityRef.current) {
-        lastActiveCityId = selectedCityRef.current;
-      }
-
-      // Linear transition (1 second duration)
-      const easeT = zoomProgress;
-
-      const { defaultLookAt, cityZoomOffset, cityZoomTargetOffset } = DEALER_MAP_CAMERA_CONFIG;
-      const defaultLookAtVec = new THREE.Vector3(defaultLookAt.x, defaultLookAt.y, defaultLookAt.z);
-
-      // Default camera position comes from resize function (scaled for viewport aspect)
-      const defaultCamPos = camera.position.clone();
-
-      const targetCamPos = new THREE.Vector3().copy(defaultCamPos);
-      const targetLookAt = new THREE.Vector3().copy(defaultLookAtVec);
-
-      const activeCityId = selectedCityRef.current ? selectedCityRef.current : (zoomProgress > 0.001 ? lastActiveCityId : null);
-      if (activeCityId && zoomProgress > 0.001) {
-        const cityPos = cityPositions[activeCityId].clone().add(mapContent.position);
-        const cityCenterTarget = cityPos.clone().add(new THREE.Vector3(cityZoomTargetOffset.x, cityZoomTargetOffset.y, cityZoomTargetOffset.z));
-        const zoomedCamPos = cityPos.clone().add(new THREE.Vector3(cityZoomOffset.x, cityZoomOffset.y, cityZoomOffset.z));
-        targetCamPos.lerpVectors(defaultCamPos, zoomedCamPos, easeT);
-        targetLookAt.lerpVectors(defaultLookAtVec, cityCenterTarget, easeT);
-      }
-
-      camera.position.copy(targetCamPos);
-      camera.lookAt(targetLookAt);
-
-      // Raycast to detect hovered city
-      raycaster.setFromCamera(mouse, camera);
-      const allHitTargets = [...hitSpheres];
-      // Also test city group meshes
-      DEALER_CITIES.forEach((city) => {
-        const group = cityGroups[city.id];
-        if (group) {
-          group.traverse((child) => {
-            if (child instanceof THREE.Mesh) allHitTargets.push(child);
-          });
-        }
-      });
-      const intersects = raycaster.intersectObjects(allHitTargets, false);
-      let newRaycastHover: DealerCityId | null = null;
-      for (const hit of intersects) {
-        const cid = meshToCityId.get(hit.object);
-        if (cid) {
-          newRaycastHover = cid;
-          break;
-        }
-      }
-      if (newRaycastHover !== raycastHoveredCity) {
-        raycastHoveredCity = newRaycastHover;
-        onHoverCity(newRaycastHover);
-      }
-
-      // Determine effective hover: either from 3D raycast or from 2D card hover
-      const effectiveHover = hoveredCityRef.current;
-
-      // Update cursor
-      renderer.domElement.style.cursor = raycastHoveredCity ? 'pointer' : 'default';
-
-      DEALER_CITIES.forEach((city, index) => {
-        const group = cityGroups[city.id];
-        if (!group) return;
-        const isHovered = effectiveHover === city.id;
-        const isSelected = selectedCityRef.current === city.id || selectedCityRef.current === null;
-        const target = isSelected ? 1 : 0.86;
-        const hoverBoost = isHovered ? 1.12 : 1;
-        const pulse = 1 + Math.sin(t * 1.4 + index) * 0.035;
-        group.scale.setScalar(target * pulse * hoverBoost);
-        const baseY = Math.sin(t * 1.2 + index * 0.7) * 0.04;
-        group.position.y = isHovered ? baseY + 0.15 : baseY;
-
-        // Update material opacities for hover glow
-        const mats = cityMaterials[city.id];
-        if (mats) {
-          const padTarget = isHovered ? 0.72 : (isSelected ? 0.42 : 0.16);
-          const ringTarget = isHovered ? 0.65 : (isSelected ? 0.34 : 0.12);
-          const buildingTarget = isHovered ? 1.0 : (isSelected ? 0.72 : 0.25);
-          mats.pad.opacity += (padTarget - mats.pad.opacity) * 0.12;
-          mats.ring.opacity += (ringTarget - mats.ring.opacity) * 0.12;
-          mats.buildingMats.forEach((bm) => {
-            bm.opacity += (buildingTarget - bm.opacity) * 0.12;
-          });
-        }
-      });
-
-      renderer.render(scene, camera);
-      frameId = requestAnimationFrame(animate);
-    };
-    frameId = requestAnimationFrame(animate);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      cancelAnimationFrame(frameId);
-      window.removeEventListener('resize', resize);
-      renderer.domElement.removeEventListener('mousemove', onMouseMove);
-      renderer.domElement.removeEventListener('click', onClick);
-      renderer.domElement.removeEventListener('mouseleave', onMouseLeave);
-      renderer.dispose();
-      scene.traverse((object) => {
-        if (object instanceof THREE.Mesh) {
-          object.geometry.dispose();
-          const materials = Array.isArray(object.material) ? object.material : [object.material];
-          materials.forEach((material) => material.dispose());
-        }
-      });
-      renderer.domElement.remove();
-    };
-  }, [onHoverCity, onClickCity]);
-
-  return <div ref={mountRef} className="absolute inset-0 z-[1]" aria-hidden="true" />;
 };
 
 const DEFAULT_UPGRADES = {
@@ -1737,6 +1198,10 @@ export default function Garage({
   const [dealerMarketMode, setDealerMarketMode] = useState<DealerMarketMode | null>(null);
   const [dealerMapTransitioning, setDealerMapTransitioning] = useState(false);
   const [dealerExiting, setDealerExiting] = useState(false);
+  // Road trip between the Dealer District and the career valley, through the gate.
+  const [dealerArrivalFromCareer, setDealerArrivalFromCareer] = useState(false);
+  const [dealerDepartingToCareer, setDealerDepartingToCareer] = useState(false);
+  const [careerArrivalFromDealer, setCareerArrivalFromDealer] = useState(false);
   const [dealerBrandTransitioning, setDealerBrandTransitioning] = useState(false);
   const [showSlowLoadingOverlay, setShowSlowLoadingOverlay] = useState(false);
   const [brandCrossFadeTarget, setBrandCrossFadeTarget] = useState<string | null>(null);
@@ -1844,6 +1309,8 @@ export default function Garage({
       setDealerExiting(false);
       setDealerBrandTransitioning(false);
       setLastSelectedCity(null);
+      setDealerArrivalFromCareer(false);
+      setDealerDepartingToCareer(false);
       if (selectedBrand !== 'All') setSelectedBrand('All');
     }
   }, [activeGarageTab, selectedBrand, setSelectedBrand]);
@@ -2421,12 +1888,26 @@ export default function Garage({
                 : 'opacity-100'
                 }`}
             >
-              <DealerCityMapScene
+              <DealerWorldMap
+                cities={DEALER_CITY_NAMES}
                 selectedCity={dealerCity}
                 lastSelectedCity={lastSelectedCity}
                 hoveredCity={hoveredCity}
                 onHoverCity={setHoveredCity}
                 onClickCity={handleDealerCitySelect}
+                arrivingFromCareer={dealerArrivalFromCareer}
+                onArrivalComplete={() => setDealerArrivalFromCareer(false)}
+                departingToCareer={dealerDepartingToCareer}
+                onRequestCareer={() => setDealerDepartingToCareer(true)}
+                onClickHome={handleDealerBackClick}
+                onDepartComplete={() => {
+                  // The screen is hazed over at the gate: open the valley on the far side of it.
+                  setDealerDepartingToCareer(false);
+                  setCareerArrivalFromDealer(true);
+                  setActiveGarageTab('drive');
+                  setDriveSubMode('career');
+                  setTimeout(() => setCareerArrivalFromDealer(false), 1000);
+                }}
               />
               {/* Clear canvas overlay without dark vignette */}
             </div>
@@ -2451,40 +1932,8 @@ export default function Garage({
                 </button>
               </div>
 
-              {dealerPage === 'map' && !dealerMapTransitioning && !dealerExiting && !dealerCityConfig && (
+              {dealerPage === 'map' && !dealerMapTransitioning && !dealerExiting && !dealerCityConfig && !dealerDepartingToCareer && !dealerArrivalFromCareer && (
                 <>
-                  {dealerHoverConfig && (
-                    <div
-                      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full border border-white/15 bg-black/88 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] text-white shadow-[0_0_20px_rgba(0,0,0,0.55)]"
-                      style={DEALER_CITY_LABEL_POSITIONS[dealerHoverConfig.id]}
-                    >
-                      {dealerHoverConfig.name}
-                    </div>
-                  )}
-                  {/* Seamless Portal to Career Motorsport Resort on the Left */}
-                  <div className="pointer-events-auto absolute left-8 top-1/2 -translate-y-1/2 z-30">
-                    <button
-                      onClick={() => {
-                        setActiveGarageTab('drive');
-                        setDriveSubMode('career');
-                      }}
-                      className="group flex flex-col items-center gap-2 p-3.5 rounded-3xl bg-slate-950/90 hover:bg-slate-900 border-2 border-cyan-400/60 hover:border-cyan-400 text-white shadow-2xl backdrop-blur-xl transition-all duration-300 hover:scale-105 cursor-pointer"
-                      title="Seamlessly move to Career Motorsport World Map"
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-cyan-400/40 border border-cyan-400/60 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500 group-hover:text-black transition-colors shadow-lg">
-                        <Flag className="w-6 h-6" />
-                      </div>
-                      <div className="flex flex-col text-center">
-                        <span className="text-[8px] font-black tracking-widest text-cyan-400 uppercase">
-                          WEST DISTRICT
-                        </span>
-                        <span className="text-xs font-black text-white uppercase tracking-wider flex items-center justify-center gap-0.5 mt-0.5">
-                          <ChevronLeft className="w-3.5 h-3.5 text-cyan-400 group-hover:-translate-x-0.5 transition-transform" />
-                          CAREER RESORT
-                        </span>
-                      </div>
-                    </button>
-                  </div>
                   <DealerHoverBar city={dealerHoverConfig || null} />
                 </>
               )}
@@ -4480,7 +3929,10 @@ export default function Garage({
                   setActiveMode('editor');
                   setActiveGarageTab(null);
                 }}
+                arrivingFromDealer={careerArrivalFromDealer}
                 onNavigateToDealer={() => {
+                  // Called once the valley camera has passed through the gate.
+                  setDealerArrivalFromCareer(true);
                   setDriveSubMode(null);
                   setActiveGarageTab('dealer');
                 }}

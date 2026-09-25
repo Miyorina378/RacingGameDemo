@@ -293,6 +293,11 @@ export class PostProcessing {
   // Keep quality for backward compat / bloom strength scaling
   private quality: 'low' | 'medium' | 'high' = 'high';
   private bloomIntensity: number = 1.1;
+  /**
+   * Scenes that are bright by design (the white dealer room) set their own bloom
+   * threshold and strength factor; null uses the time-of-day curve below.
+   */
+  public bloomOverride: { threshold: number; strengthFactor: number } | null = null;
   private width: number;
   private height: number;
 
@@ -510,12 +515,17 @@ export class PostProcessing {
     if (this.bloomPass) {
       const baseThreshold = 0.18;
       
-      // Interpolate threshold: higher in afternoon (0.85) to prevent sky/ground glow, lower at night
-      this.bloomPass.threshold = THREE.MathUtils.lerp(0.85, baseThreshold, timeOfDayVal);
-      
-      // Interpolate strength: softer in afternoon (50% strength) to prevent blinding, full at night
-      const strengthFactor = THREE.MathUtils.lerp(0.5, 1.0, timeOfDayVal);
-      this.bloomPass.strength = this.bloomIntensity * strengthFactor;
+      if (this.bloomOverride) {
+        this.bloomPass.threshold = this.bloomOverride.threshold;
+        this.bloomPass.strength = this.bloomIntensity * this.bloomOverride.strengthFactor;
+      } else {
+        // Interpolate threshold: higher in afternoon (0.85) to prevent sky/ground glow, lower at night
+        this.bloomPass.threshold = THREE.MathUtils.lerp(0.85, baseThreshold, timeOfDayVal);
+
+        // Interpolate strength: softer in afternoon (50% strength) to prevent blinding, full at night
+        const strengthFactor = THREE.MathUtils.lerp(0.5, 1.0, timeOfDayVal);
+        this.bloomPass.strength = this.bloomIntensity * strengthFactor;
+      }
     }
 
     const normalizedSpeed = Math.min(speed / 280, 1.0);

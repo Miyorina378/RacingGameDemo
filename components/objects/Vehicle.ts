@@ -314,6 +314,8 @@ export class Vehicle {
   public finalDrive = 3.42;
   public wheelRadius = 0.48; // Physical tire radius used by the simulation
   private visualWheelRadius = 0.48; // Imported visual radius after model scaling
+  /** Bounds of the drawn car in its own frame (+Z forward, ground at y = 0); cameras size themselves from it. */
+  public visualBounds = new THREE.Box3(new THREE.Vector3(-0.93, 0, -2.4), new THREE.Vector3(0.93, 1.4, 2.4));
 
   // Shifting and transmission state variables
   public isShifting = false;
@@ -986,6 +988,25 @@ export class Vehicle {
     return mat;
   }
 
+  private createTintedGlassMaterial(): THREE.MeshPhysicalMaterial {
+    // Factory privacy-tint look: the cabin shows through, but the glass still
+    // reads as dark glass rather than an empty frame.
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: 0x080c10,
+      roughness: 0.04,
+      metalness: 0.1,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.03,
+      transparent: true,
+      opacity: 0.78,
+      // Panes never overlap each other, so skipping depth writes avoids
+      // transparent sorting artefacts without hiding the cabin behind them.
+      depthWrite: false
+    });
+    this.windshieldMaterials.push(mat);
+    return mat;
+  }
+
   private createRimMaterial(): THREE.MeshPhysicalMaterial {
     const mat = new THREE.MeshPhysicalMaterial({
       color: 0xcccccc,
@@ -1207,6 +1228,17 @@ export class Vehicle {
     createWheelAssembly(-1.05, 0.48, -1.6, false); // Rear Left
     createWheelAssembly(1.05, 0.48, -1.6, false);  // Rear Right
 
+    // World scale (config/WorldScale.ts): the parts above are drawn around a 3.2 m
+    // wheelbase, about 1.2x a real car. Shrink the whole car so its drawn wheelbase
+    // matches the physics wheelbase, then it sits at real size next to the imported
+    // cars on the same roads.
+    const worldFit = this.wheelBase / 3.2;
+    this.mesh.children.forEach((child) => {
+      child.position.multiplyScalar(worldFit);
+      child.scale.multiplyScalar(worldFit);
+    });
+    this.visualWheelRadius = this.wheelRadius * worldFit;
+
     // Enable shadows for the entire vehicle assembly
     this.mesh.traverse((child) => {
       if (child instanceof THREE.Mesh) {
@@ -1214,6 +1246,45 @@ export class Vehicle {
         child.receiveShadow = true;
       }
     });
+    this.updateVisualBounds();
+  }
+
+  /**
+   * Lowest point of the drawn car in its own frame: normally 0 (the model is
+   * fitted with its tyres on y = 0), below that when the suspension lets the
+   * wheels droop. Stands and stages add their height to it so tyres sit on top.
+   */
+  public getLowestVisualPoint(): number {
+    let lowest = this.visualBounds.min.y;
+    this.wheels.forEach((wheel) => {
+      const drop = typeof wheel.userData.tyreDrop === 'number' ? wheel.userData.tyreDrop : this.visualWheelRadius;
+      lowest = Math.min(lowest, wheel.position.y - drop);
+    });
+    return lowest;
+  }
+
+  /** Measures the drawn car in the car's own frame, whatever its world pose. */
+  private updateVisualBounds() {
+    const pos = this.mesh.position.clone();
+    const quat = this.mesh.quaternion.clone();
+    this.mesh.position.set(0, 0, 0);
+    this.mesh.quaternion.identity();
+    this.mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    this.mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.visible) box.expandByObject(child);
+    });
+    // How far each tyre reaches below its hub, measured from the real tyre mesh so
+    // it holds for imported models whose tyre differs from the physics radius.
+    const hub = new THREE.Vector3();
+    this.wheels.forEach((wheel) => {
+      const tyre = new THREE.Box3().setFromObject(wheel);
+      if (!tyre.isEmpty()) wheel.userData.tyreDrop = wheel.getWorldPosition(hub).y - tyre.min.y;
+    });
+    this.mesh.position.copy(pos);
+    this.mesh.quaternion.copy(quat);
+    this.mesh.updateMatrixWorld(true);
+    if (!box.isEmpty()) this.visualBounds.copy(box);
   }
 
   private buildGltfMesh(
@@ -1258,6 +1329,18 @@ export class Vehicle {
         this.clearCurrentVisual();
 
         const model = gltf.scene;
+
+        // Some downloaded models ship stray helper geometry (the S2000 GLB carries a
+        // 2 m, material-less Icosphere around a 4 cm car). Left in, it sets the fit
+        // size below and shows as a white ball.
+        const strays: THREE.Mesh[] = [];
+        model.traverse((child: THREE.Object3D) => {
+          if (child instanceof THREE.Mesh && /^icosphere/i.test(child.name)) strays.push(child);
+        });
+        strays.forEach((stray) => {
+          stray.removeFromParent();
+          stray.geometry.dispose();
+        });
 
         // Auto-scale and align the model
         // We compute the bounding box of ONLY the THREE.Mesh children in the model,
@@ -1361,7 +1444,13 @@ export class Vehicle {
                   matName.includes('windshield')
                 ) {
                   this.visualOrphanedMaterials.add(mat);
-                  const upgradedGlassMat = this.createWindshieldMaterial();
+                  // The Accord has a modelled cabin behind single-layer panes, so its
+                  // glass is see-through; other imported cars keep the opaque glass.
+                  const isAccordGlass = requestedCarId === 'honda_accord_2026';
+                  const upgradedGlassMat = isAccordGlass
+                    ? this.createTintedGlassMaterial()
+                    : this.createWindshieldMaterial();
+                  if (isAccordGlass) child.castShadow = false;
                   if (Array.isArray(child.material)) {
                     child.material[idx] = upgradedGlassMat;
                   } else {
@@ -1551,6 +1640,7 @@ export class Vehicle {
         }
 
         // Add underglow, lights, and exhaust particle systems (only light sources/particles, no duplicate box meshes)
+        this.updateVisualBounds();
         this.addGltfVisualHelpers();
         this.committedVisualCarId = requestedCarId;
 

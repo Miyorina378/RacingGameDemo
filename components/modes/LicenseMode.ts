@@ -3,6 +3,7 @@ import { BaseMode } from './BaseMode';
 import { Checkpoint } from '../objects/Checkpoint';
 import { DEFAULT_LICENSE_TEST_ID, getLicenseTestById } from '../config/LicenseDatabase';
 import { GameEngine } from '../gameEngine';
+import { scaleTrackWidths } from './trackNodes';
 import { Vehicle } from '../objects/Vehicle';
 import { ParticleSystem } from '../objects/ParticleSystem';
 
@@ -36,10 +37,11 @@ export class LicenseMode extends BaseMode {
     this.clearEnvironment();
     this.particles.clear();
     
-    const trackConfig = getLicenseTestById(this.licenseTestId);
-    if (!trackConfig) {
+    const authored = getLicenseTestById(this.licenseTestId);
+    if (!authored) {
       throw new Error("License test config not found in LicenseDatabase.");
     }
+    const trackConfig = scaleTrackWidths(authored);
     this.pathVectors = trackConfig.path.map(p => p instanceof THREE.Vector3 ? p : p.pos);
 
     // Position car at the first marker facing the second marker

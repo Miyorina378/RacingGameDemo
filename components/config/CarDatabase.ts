@@ -92,8 +92,12 @@ export interface CarConfig {
   wheelRadius?: number;
   maxRpm?: number;
   baseMass?: number;
+  /**
+   * Extra multiplier on top of visualLength. Leave at 1: the world is in metres
+   * and every car is drawn at its real size (config/WorldScale.ts).
+   */
   visualScale?: number;
-  /** Physical display length used when fitting imported models. */
+  /** Real overall length in metres; imported models are fitted to it. */
   visualLength?: number;
   driverCameraOffset?: { x: number; y: number; z: number };
 
@@ -413,7 +417,8 @@ export const CARS_DATABASE: CarConfig[] = [
       { rpm: 9000, torque: 280 },
       { rpm: 10500, torque: 110 }
     ],
-    visualScale: 5.6829 / 4.8,
+    visualLength: 5.6829,
+    visualScale: 1.0,
     driverCameraOffset: { x: 0, y: 1.42, z: 0.55 },
     engineLayout: 'mid',
     massConcentration: 1.08,
@@ -663,8 +668,10 @@ export const CARS_DATABASE: CarConfig[] = [
     baseMass: 1250,
     engineLayout: 'front_mid',
     massConcentration: 0.91,
-    visualScale: 3,
-    driverCameraOffset: { x: 0, y: 0.5, z: 0.3 },
+    // 2000 S2000 AP1: 4.135 m long.
+    visualLength: 4.135,
+    visualScale: 1.0,
+    driverCameraOffset: { x: 0, y: 1.0, z: -0.25 },
     character: { weightDistribution: 0.50, rearGripMultiplier: 0.92, yawInertia: 0.85, oversteerResistance: 0.48 }
   },
   {
@@ -738,7 +745,8 @@ export const CARS_DATABASE: CarConfig[] = [
     // Official 2026 Accord length; do not shrink the sedan to the generic 4.8m target.
     visualLength: 4.97078,
     visualScale: 1.0,
-    driverCameraOffset: { x: 0, y: 0.65, z: 0.85 },
+    // Driver's eye in the modelled cockpit: left seat, behind the wheel.
+    driverCameraOffset: { x: 0.37, y: 1.15, z: -0.4 },
     hasSpoiler: false,
     boosterColor: 0x48b8ff,
     character: { weightDistribution: 0.61, rearGripMultiplier: 1.08, yawInertia: 1.08, oversteerResistance: 0.88 }
@@ -808,8 +816,11 @@ export const CARS_DATABASE: CarConfig[] = [
       { rpm: 5200, torque: 650 },
       { rpm: 6500, torque: 590 }
     ],
-    visualScale: 1.5,
-    driverCameraOffset: { x: 0, y: 1, z: 1 },
+    // 2006 Ford GT: 4.643 m long. It used to be drawn 1.5x (7.2 m), and the race
+    // tracks' widths were laid out around that size.
+    visualLength: 4.643,
+    visualScale: 1.0,
+    driverCameraOffset: { x: 0, y: 0.95, z: 0.35 },
     character: { weightDistribution: 0.43, rearGripMultiplier: 1.12, yawInertia: 1.05, oversteerResistance: 0.62 }
   }
 ];

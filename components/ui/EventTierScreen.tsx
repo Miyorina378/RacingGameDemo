@@ -33,6 +33,12 @@ import {
 } from '../config/CareerEventDatabase';
 import { TRACKS_DATABASE } from '../config/TrackDatabase';
 import { TIRE_COMPOUNDS } from '../objects/TireCompound';
+import {
+  AmateurSkyBackdrop,
+  AmateurEventPoster,
+  AmateurTierBadge,
+  hasAmateurPoster
+} from './AmateurSkyTheme';
 
 export interface EventTierScreenProps {
   initialTier: CareerTierId;
@@ -103,7 +109,7 @@ const playSoundBlip = (type: 'hover' | 'select' | 'launch' | 'slide' | 'pop') =>
 };
 
 // Bottom marquee movie bar with news ticker animation for overflowing text (no badge)
-const EventSubtitleBar = ({ event }: { event: CareerEvent | null }) => {
+const EventSubtitleBar = ({ event, sky = false }: { event: CareerEvent | null; sky?: boolean }) => {
   const windowRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
@@ -133,10 +139,17 @@ const EventSubtitleBar = ({ event }: { event: CareerEvent | null }) => {
 
   return (
     <div
-      className={`dealer-movie-bar pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden border-y border-white/12 bg-black/92 px-6 py-4 text-center shadow-[0_0_35px_rgba(0,0,0,0.65)] transition-all duration-400 ease-in-out ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
+      className={`dealer-movie-bar pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden border-y px-6 py-4 text-center transition-all duration-400 ease-in-out ${sky
+        ? 'border-white/55 bg-[linear-gradient(90deg,rgba(8,145,178,0.62),rgba(56,189,248,0.5),rgba(8,145,178,0.62))] shadow-[0_-10px_34px_rgba(14,116,144,0.25)]'
+        : 'border-white/12 bg-black/92 shadow-[0_0_35px_rgba(0,0,0,0.65)]'
+        } ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
         }`}
     >
-      <div ref={windowRef} className="dealer-marquee-window text-sm font-semibold text-zinc-100">
+      <div
+        ref={windowRef}
+        className={`dealer-marquee-window text-sm font-semibold ${sky ? 'text-white [text-shadow:0_1px_6px_rgba(8,70,100,0.55)]' : 'text-zinc-100'
+          }`}
+      >
         <div ref={trackRef} className={`dealer-marquee-track ${isOverflowing ? 'is-overflowing' : 'is-centered'}`}>
           {activeEvent?.description || ''}
         </div>
@@ -352,6 +365,21 @@ export default function EventTierScreen({
    * so one theme switch drives every surface in the expanded block.
    */
   const isLightTheme = activeTier === 'amateur';
+
+  /** Ticket surfaces: the amateur field tints its paper toward the cyan sky. */
+  const ticket = isLightTheme
+    ? {
+      surface: 'bg-[linear-gradient(165deg,#f4fdff_0%,#e0f6fb_60%,#cdeff8_100%)]',
+      rule: 'bg-[#a9dce8]',
+      edge: 'border-[#b0dfea]',
+      perforation: 'border-[#7cc4d6]'
+    }
+    : {
+      surface: 'bg-[#dbe5ee]',
+      rule: 'bg-[#b4c3d0]',
+      edge: 'border-[#b8c8d6]',
+      perforation: 'border-[#8da0b3]'
+    };
 
   const tierConfig = useMemo(() => {
     return TIER_CONFIGS[activeTier];
@@ -590,9 +618,14 @@ export default function EventTierScreen({
       }
     }, 380);
   };
+  const arrowSkin = isLightTheme
+    ? 'border-white/70 bg-white/40 hover:bg-white/60 shadow-[0_10px_26px_rgba(14,116,144,0.25)] backdrop-blur-xl'
+    : 'border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white shadow-2xl backdrop-blur-md';
+  const arrowHover = isLightTheme ? 'hover:border-white' : 'hover:border-zinc-600';
+
   const content = (
     <div
-      className={`fixed inset-0 z-[9999] w-screen h-screen flex flex-col bg-zinc-950 text-white select-none overflow-hidden font-sans transition-opacity duration-400 ease-out ${
+      className={`fixed inset-0 z-[9999] w-screen h-screen flex flex-col ${isLightTheme ? 'bg-[#9fe6f5]' : 'bg-zinc-950'} text-white select-none overflow-hidden font-sans transition-opacity duration-400 ease-out ${
         isScreenExiting ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
     >
@@ -601,13 +634,19 @@ export default function EventTierScreen({
         className="absolute inset-0 z-0 overflow-hidden pointer-events-none"
         style={{ filter: `brightness(${0.4 + (effectiveBrightness / 5.0) * 0.6})` }}
       >
-        <img
-          src={tierConfig.bgImage}
-          alt={tierConfig.name}
-          className="w-full h-full object-cover object-center scale-105 filter blur-[3px] brightness-[0.92] saturate-[1.05]"
-        />
-        {/* Soft ambient lighting: bright sky preserved, smooth and gentle on eyes */}
-        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/40 via-transparent to-zinc-950/50" />
+        {isLightTheme ? (
+          <AmateurSkyBackdrop />
+        ) : (
+          <>
+            <img
+              src={tierConfig.bgImage}
+              alt={tierConfig.name}
+              className="w-full h-full object-cover object-center scale-105 filter blur-[3px] brightness-[0.92] saturate-[1.05]"
+            />
+            {/* Soft ambient lighting: bright sky preserved, smooth and gentle on eyes */}
+            <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/40 via-transparent to-zinc-950/50" />
+          </>
+        )}
       </div>
 
       {/* 2. TOP BAR: HORIZONTALLY REVERSED SVG BACK BUTTON (Left) & BANK (Right) ONLY */}
@@ -621,16 +660,24 @@ export default function EventTierScreen({
           <img
             src="/icon/back_button.svg"
             alt="Back"
-            className="h-full w-full object-contain drop-shadow-[0_0_18px_rgba(0,0,0,0.65)] transition-[filter] duration-300 ease-in-out -scale-x-150 scale-y-150 brightness-100 group-hover:brightness-125"
+            className={`h-full w-full object-contain ${isLightTheme ? 'drop-shadow-[0_4px_14px_rgba(8,80,110,0.45)]' : 'drop-shadow-[0_0_18px_rgba(0,0,0,0.65)]'} transition-[filter] duration-300 ease-in-out -scale-x-150 scale-y-150 brightness-100 group-hover:brightness-125`}
             draggable={false}
           />
         </button>
 
+        {isLightTheme && <AmateurTierBadge name={tierConfig.name} subtitle={tierConfig.subtitle} />}
+
         {/* Bank Balance Badge */}
-        <div className="flex items-center gap-2 bg-zinc-950/85 border border-zinc-800 px-4 py-2 rounded-xl shadow-2xl backdrop-blur-md">
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">BANK</span>
-          <span className="text-sm font-black font-mono text-amber-400">
-            {playerCredits.toLocaleString()} <span className="text-[10px] text-amber-500 font-bold">CR</span>
+        <div
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl ${isLightTheme
+            ? 'border border-white/70 bg-white/40 shadow-[0_10px_30px_rgba(14,116,144,0.22)] backdrop-blur-xl'
+            : 'bg-zinc-950/85 border border-zinc-800 shadow-2xl backdrop-blur-md'
+            }`}
+        >
+          <span className={`text-[10px] font-bold uppercase tracking-widest ${isLightTheme ? 'text-cyan-800/80' : 'text-zinc-400'}`}>BANK</span>
+          <span className={`text-sm font-black font-mono ${isLightTheme ? 'text-sky-950' : 'text-amber-400'}`}>
+            {playerCredits.toLocaleString()}{' '}
+            <span className={`text-[10px] font-bold ${isLightTheme ? 'text-cyan-700' : 'text-amber-500'}`}>CR</span>
           </span>
         </div>
       </div>
@@ -641,20 +688,20 @@ export default function EventTierScreen({
         <button
           disabled={activeSlideIndex === 0}
           onClick={handlePrevSlide}
-          className={`absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all duration-300 shadow-2xl backdrop-blur-md cursor-pointer ${expandedEventId ? 'opacity-0 pointer-events-none' : activeSlideIndex === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
+          className={`absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border flex items-center justify-center transition-all duration-300 cursor-pointer ${arrowSkin} ${expandedEventId ? 'opacity-0 pointer-events-none' : activeSlideIndex === 0 ? 'opacity-30 cursor-not-allowed' : `hover:scale-110 active:scale-95 ${arrowHover}`
             }`}
         >
-          <ChevronLeft className="w-6 h-6 text-zinc-200" />
+          <ChevronLeft className={`w-6 h-6 ${isLightTheme ? 'text-cyan-800' : 'text-zinc-200'}`} />
         </button>
 
         {/* Right Floating Carousel Button */}
         <button
           disabled={activeSlideIndex === tierEvents.length - 1}
           onClick={handleNextSlide}
-          className={`absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border border-zinc-800 bg-zinc-950/85 hover:bg-zinc-900 text-white flex items-center justify-center transition-all duration-300 shadow-2xl backdrop-blur-md cursor-pointer ${expandedEventId ? 'opacity-0 pointer-events-none' : activeSlideIndex === tierEvents.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95 hover:border-zinc-600'
+          className={`absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full border flex items-center justify-center transition-all duration-300 cursor-pointer ${arrowSkin} ${expandedEventId ? 'opacity-0 pointer-events-none' : activeSlideIndex === tierEvents.length - 1 ? 'opacity-30 cursor-not-allowed' : `hover:scale-110 active:scale-95 ${arrowHover}`
             }`}
         >
-          <ChevronRight className="w-6 h-6 text-zinc-200" />
+          <ChevronRight className={`w-6 h-6 ${isLightTheme ? 'text-cyan-800' : 'text-zinc-200'}`} />
         </button>
 
         {/* Carousel Scroll Container with balanced vertical padding */}
@@ -741,7 +788,7 @@ export default function EventTierScreen({
                       handleMinimizeCard();
                     }
                   }}
-                  className={`relative z-20 w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none cursor-pointer bg-zinc-950 shadow-[8px_0_24px_rgba(0,0,0,0.65)] transition-[border-radius] duration-400 ease-in-out ${isVisibleExpanded ? 'rounded-l-[32px]' : 'rounded-[32px]'
+                  className={`relative z-20 w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-6 overflow-hidden select-none cursor-pointer ${isLightTheme ? 'bg-sky-300 shadow-[8px_0_28px_rgba(8,120,160,0.35)]' : 'bg-zinc-950 shadow-[8px_0_24px_rgba(0,0,0,0.65)]'} transition-[border-radius] duration-400 ease-in-out ${isVisibleExpanded ? 'rounded-l-[32px]' : 'rounded-[32px]'
                     }`}
                   title={isVisibleExpanded ? 'Click to collapse into card' : undefined}
                 >
@@ -751,7 +798,7 @@ export default function EventTierScreen({
                       e.stopPropagation();
                       handleMinimizeCard();
                     }}
-                    className={`absolute top-4 right-4 z-30 flex items-center gap-1.5 px-3 py-1.5 bg-black/65 hover:bg-black/90 backdrop-blur-md rounded-full text-[10px] font-black text-white uppercase tracking-wider transition-all duration-300 shadow-xl border border-white/25 cursor-pointer hover:scale-105 active:scale-95 ${isVisibleExpanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+                    className={`absolute top-4 right-4 z-30 flex items-center gap-1.5 px-3 py-1.5 ${isLightTheme ? 'bg-sky-950/45 hover:bg-sky-950/70' : 'bg-black/65 hover:bg-black/90'} backdrop-blur-md rounded-full text-[10px] font-black text-white uppercase tracking-wider transition-all duration-300 shadow-xl border border-white/25 cursor-pointer hover:scale-105 active:scale-95 ${isVisibleExpanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
                       }`}
                   >
                     <ChevronLeft className="w-3.5 h-3.5 text-[#38ecff]" />
@@ -760,14 +807,31 @@ export default function EventTierScreen({
 
                   {/* Inner Box Artwork Image */}
                   <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-                    <img
-                      src={event.bgImage}
-                      alt={event.name}
-                      className="w-full h-full object-cover object-center filter brightness-[0.96] saturate-[1.05] transition-all duration-700 ease-in-out"
-                    />
+                    {isLightTheme && hasAmateurPoster(event.id) ? (
+                      <AmateurEventPoster eventId={event.id} />
+                    ) : (
+                      <img
+                        src={event.bgImage}
+                        alt={event.name}
+                        className="w-full h-full object-cover object-center filter brightness-[0.96] saturate-[1.05] transition-all duration-700 ease-in-out"
+                      />
+                    )}
                     {/* Subtle soft top vignette only for title legibility, keeping poster bright */}
-                    <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/20 pointer-events-none" />
+                    <div
+                      className={`absolute inset-0 pointer-events-none ${isLightTheme
+                        ? 'bg-gradient-to-br from-[#05405c]/45 to-transparent to-45%'
+                        : 'bg-gradient-to-b from-black/45 via-transparent to-black/20'
+                        }`}
+                    />
                   </div>
+
+                  {/* Sticker rim on the sky posters */}
+                  {isLightTheme && (
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] ring-2 ring-inset ring-white/60"
+                    />
+                  )}
 
                   {/* Top: Event Title + Dash */}
                   <div className="relative z-10 flex flex-col pt-2 text-left">
@@ -777,7 +841,12 @@ export default function EventTierScreen({
                         <span>LICENSE REQ</span>
                       </div>
                     )}
-                    <h3 className="text-2xl sm:text-[28px] font-black text-white uppercase tracking-wider leading-[1.05] drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]">
+                    <h3
+                      className={`text-2xl sm:text-[28px] font-black text-white uppercase tracking-wider leading-[1.05] ${isLightTheme
+                        ? 'drop-shadow-[0_2px_8px_rgba(5,55,85,0.7)]'
+                        : 'drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]'
+                        }`}
+                    >
                       {event.name}
                     </h3>
                     <div className="w-6 h-1 bg-white/90 rounded-full mt-2.5 shadow-sm" />
@@ -787,15 +856,29 @@ export default function EventTierScreen({
                   <div className="flex-1" />
 
                   {/* Bottom: Checkered Flag Pill with Races Completed */}
-                  <div className="relative z-10 bg-slate-950/85 border border-white/15 backdrop-blur-md rounded-2xl p-2.5 sm:p-3 flex items-center gap-3 shadow-xl">
-                    <div className="w-10 h-10 rounded-full bg-slate-800/90 border border-white/10 flex items-center justify-center shrink-0">
-                      <Flag className="w-5 h-5 text-[#38ecff] fill-[#38ecff]/20" />
+                  <div
+                    className={`relative z-10 rounded-2xl p-2.5 sm:p-3 flex items-center gap-3 ${isLightTheme
+                      ? 'border border-white/70 bg-white/45 shadow-[0_8px_24px_rgba(8,90,120,0.28)] backdrop-blur-xl'
+                      : 'bg-slate-950/85 border border-white/15 backdrop-blur-md shadow-xl'
+                      }`}
+                  >
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isLightTheme ? 'bg-white/85 border border-white' : 'bg-slate-800/90 border border-white/10'
+                        }`}
+                    >
+                      <Flag
+                        className={`w-5 h-5 ${isLightTheme ? 'text-cyan-500 fill-cyan-300/40' : 'text-[#38ecff] fill-[#38ecff]/20'}`}
+                      />
                     </div>
                     <div className="flex flex-col min-w-0 text-left">
-                      <span className="text-base sm:text-lg font-black font-mono text-white leading-none">
+                      <span
+                        className={`text-base sm:text-lg font-black font-mono leading-none ${isLightTheme ? 'text-sky-950' : 'text-white'}`}
+                      >
                         {wins} / {totalStages}
                       </span>
-                      <span className="text-[8px] sm:text-[9px] font-extrabold tracking-wider text-[#38ecff] uppercase mt-1">
+                      <span
+                        className={`text-[8px] sm:text-[9px] font-extrabold tracking-wider uppercase mt-1 ${isLightTheme ? 'text-cyan-700' : 'text-[#38ecff]'}`}
+                      >
                         RACES COMPLETED
                       </span>
                     </div>
@@ -812,7 +895,7 @@ export default function EventTierScreen({
                 >
                   {/* MIDDLE COLUMN: Regulation, Tires Restrictions, License, Prize Table */}
                   <div
-                    className="flex-1 flex flex-col justify-between px-6 sm:px-8 py-6 bg-[#dbe5ee] text-slate-950 select-none overflow-y-auto scrollbar-none min-w-[320px]"
+                    className={`flex-1 flex flex-col justify-between px-6 sm:px-8 py-6 ${ticket.surface} text-slate-950 select-none overflow-y-auto scrollbar-none min-w-[320px]`}
                     style={{
                       WebkitMaskImage:
                         'radial-gradient(circle 14px at 100% 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 100% 100%, transparent 13.5px, black 14px)',
@@ -854,7 +937,7 @@ export default function EventTierScreen({
                     </div>
 
                     {/* Divider line */}
-                    <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
+                    <div className={`h-px w-full ${ticket.rule} my-1.5`} />
 
                     {/* 2. Tires Restrictions */}
                     <div className="flex items-start gap-3.5">
@@ -879,7 +962,7 @@ export default function EventTierScreen({
                     </div>
 
                     {/* Divider line */}
-                    <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
+                    <div className={`h-px w-full ${ticket.rule} my-1.5`} />
 
                     {/* 3. License and Entry Fee */}
                     <div className="flex items-start gap-3.5">
@@ -894,7 +977,7 @@ export default function EventTierScreen({
                       </div>
                       <div className="relative grid grid-cols-2 gap-4 min-w-0 flex-1 text-left">
                         <div
-                          className="pointer-events-none absolute top-0 bottom-0 left-[175px] z-20 w-0.5 bg-[#b4c3d0]"
+                          className={`pointer-events-none absolute top-0 bottom-0 left-[175px] z-20 w-0.5 ${ticket.rule}`}
                           aria-hidden="true"
                         />
                         <div className="flex flex-col gap-1 min-w-0">
@@ -919,7 +1002,7 @@ export default function EventTierScreen({
                     </div>
 
                     {/* Divider line */}
-                    <div className="h-px w-full bg-[#b4c3d0] my-1.5" />
+                    <div className={`h-px w-full ${ticket.rule} my-1.5`} />
 
                     {/* 4. Prize Table */}
                     <div className="flex flex-col gap-1.5 min-w-0 w-full text-left pt-0.25">
@@ -932,7 +1015,7 @@ export default function EventTierScreen({
                           {prizeRows.map(([left]) => (
                             <div
                               key={left.rank}
-                              className="relative flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
+                              className={`relative flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border ${ticket.edge} shadow-sm`}
                             >
                               <div className="flex items-center">
                                 <span className="text-xs font-black text-slate-950 w-5">
@@ -976,7 +1059,7 @@ export default function EventTierScreen({
                           {prizeRows.map(([, right]) => (
                             <div
                               key={right.rank}
-                              className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border border-[#b8c8d6] shadow-sm"
+                              className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/70 border ${ticket.edge} shadow-sm`}
                             >
                               <span className="text-xs font-black text-slate-950">
                                 {right.place.split(' ')[0]}
@@ -992,11 +1075,11 @@ export default function EventTierScreen({
                   </div>
 
                   {/* Vertical Ticket Perforation Divider */}
-                  <div className="relative w-0 flex items-stretch border-r-2 border-dashed border-[#8da0b3] my-3.5 z-10" />
+                  <div className={`relative w-0 flex items-stretch border-r-2 border-dashed ${ticket.perforation} my-3.5 z-10`} />
 
                   {/* RIGHT COLUMN: Ticket Stub (Stages List + Barcode + ADMIT ONE) */}
                   <div
-                    className="relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-5 bg-[#dbe5ee] select-none rounded-r-[32px] overflow-hidden"
+                    className={`relative w-[240px] sm:w-[270px] h-full shrink-0 flex flex-col justify-between p-5 ${ticket.surface} select-none rounded-r-[32px] overflow-hidden`}
                     style={{
                       WebkitMaskImage:
                         'radial-gradient(circle 14px at 0 0, transparent 13.5px, black 14px), radial-gradient(circle 14px at 0 100%, transparent 13.5px, black 14px)',
@@ -1050,7 +1133,7 @@ export default function EventTierScreen({
                               e.stopPropagation();
                               if (!isStageLocked) handleLaunchStage(event, stage);
                             }}
-                            className={`flex items-center gap-2.5 p-1.5 rounded-xl border border-[#b8c8d6] bg-white/70 hover:border-[#38ecff] hover:bg-white transition-all cursor-pointer group/stage shadow-sm ${isStageLocked ? 'opacity-40 cursor-not-allowed' : ''
+                            className={`flex items-center gap-2.5 p-1.5 rounded-xl border ${ticket.edge} bg-white/70 hover:border-[#38ecff] hover:bg-white transition-all cursor-pointer group/stage shadow-sm ${isStageLocked ? 'opacity-40 cursor-not-allowed' : ''
                               }`}
                             title={isStageLocked ? 'License required' : `Race ${trackNameFor(stage)}`}
                           >
@@ -1079,7 +1162,7 @@ export default function EventTierScreen({
                         e.stopPropagation();
                         if (eventStages[0]) handleLaunchStage(event, eventStages[0]);
                       }}
-                      className="relative z-10 pt-2.5 border-t border-[#b4c3d0] flex flex-col items-center gap-1.5 cursor-pointer group/barcode hover:opacity-90 transition-opacity"
+                      className={`relative z-10 pt-2.5 border-t ${isLightTheme ? 'border-[#a9dce8]' : 'border-[#b4c3d0]'} flex flex-col items-center gap-1.5 cursor-pointer group/barcode hover:opacity-90 transition-opacity`}
                       title="Enter Event Race"
                     >
                       {/* Crisp vertical barcode bars */}
@@ -1127,7 +1210,7 @@ export default function EventTierScreen({
       </div>
 
       {/* 5. MOVIE-STYLE BOTTOM BAR (Always shows active event description) */}
-      <EventSubtitleBar event={activeDisplayEvent} />
+      <EventSubtitleBar event={activeDisplayEvent} sky={isLightTheme} />
     </div>
   );
 

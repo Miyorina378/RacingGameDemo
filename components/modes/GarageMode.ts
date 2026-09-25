@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 import { BaseMode } from './BaseMode';
+import { SHOWROOM_STAGE_TOP, ShowroomRoom, createStudioEnvironment } from './ShowroomRooms';
+import { buildLuxuryRoom } from './ShowroomLuxury';
+import { buildWhiteRoom } from './ShowroomWhite';
+
+// Tops of the surfaces the car is displayed on. The car is lifted so its lowest
+// tyre point rests exactly on them instead of sinking into the platform. The
+// neon Quick Play stage and the dealer rooms share SHOWROOM_STAGE_TOP (0.27).
+const GARAGE_STAND_TOP = 0.15;   // stand: 0.15 tall, centred at y 0.075
+const TUNING_FLOOR_TOP = 0.0;
 
 export class GarageMode extends BaseMode {
   private grid?: THREE.GridHelper;
@@ -7,6 +16,12 @@ export class GarageMode extends BaseMode {
   private ring?: THREE.Mesh;
   private roomGroup?: THREE.Group;
   private showroomGroup?: THREE.Group;
+  // Dealer rooms: titanium-black luxury for race cars, clean white for new/used.
+  private luxuryRoom?: ShowroomRoom;
+  private whiteRoom?: ShowroomRoom;
+  private studioEnvironment?: THREE.WebGLRenderTarget;
+  private savedEnvironment: THREE.Texture | null = null;
+  private studioEnvironmentActive = false;
   private srKeySpot?: THREE.SpotLight;
   private srFillSpot?: THREE.SpotLight;
   private srTopSpot?: THREE.SpotLight;
@@ -265,6 +280,10 @@ export class GarageMode extends BaseMode {
     this.showroomGroup.visible = false;
     this.environmentGroup.add(this.showroomGroup);
 
+    this.luxuryRoom = buildLuxuryRoom();
+    this.whiteRoom = buildWhiteRoom();
+    this.environmentGroup.add(this.luxuryRoom.group, this.whiteRoom.group);
+
     // Main Garage Spotlights
     this.mainGarageSpot = new THREE.SpotLight(0xffffff, 15, 30, Math.PI / 6, 0.4, 1);
     this.mainGarageSpot.position.set(0, 10, 0);
@@ -428,6 +447,47 @@ export class GarageMode extends BaseMode {
     this.srFillSpot?.color.setHex(safeBrandColor);
   }
 
+  /** The dealer room for a market, or undefined for the neon studio (Quick Play, museum). */
+  private roomFor(mode: string | null): ShowroomRoom | undefined {
+    if (mode === 'race') return this.luxuryRoom;
+    if (mode === 'new' || mode === 'used') return this.whiteRoom;
+    return undefined;
+  }
+
+  /** Studio reflections on the car in the dealer rooms; the sky's probe everywhere else. */
+  private setStudioEnvironment(on: boolean, intensity = 1) {
+    const scene = this.engine.scene;
+    if (!scene) return;
+    if (on) {
+      if (!this.studioEnvironment && this.engine.renderer) {
+        this.studioEnvironment = createStudioEnvironment(this.engine.renderer);
+      }
+      if (!this.studioEnvironment) return;
+      if (!this.studioEnvironmentActive) {
+        this.savedEnvironment = scene.environment;
+        this.studioEnvironmentActive = true;
+      }
+      scene.environment = this.studioEnvironment.texture;
+      scene.environmentIntensity = intensity;
+    } else if (this.studioEnvironmentActive) {
+      scene.environment = this.savedEnvironment;
+      scene.environmentIntensity = 1;
+      this.studioEnvironmentActive = false;
+    }
+  }
+
+  private hideDealerRooms() {
+    if (this.luxuryRoom) this.luxuryRoom.group.visible = false;
+    if (this.whiteRoom) this.whiteRoom.group.visible = false;
+    this.setStudioEnvironment(false);
+    if (this.engine.postProcessing) this.engine.postProcessing.bloomOverride = null;
+  }
+
+  /** Puts the car's lowest tyre point on a surface at height `surfaceY`. */
+  private seatVehicleOn(surfaceY: number) {
+    this.vehicle.mesh.position.set(0, surfaceY - this.vehicle.getLowestVisualPoint(), 0);
+  }
+
   public update(deltaTime: number) {
     const tuningState = (this.engine as any).tuningState || 'closed';
     const isTuning = tuningState !== 'closed';
@@ -446,9 +506,10 @@ export class GarageMode extends BaseMode {
     if (isTuning) {
       // Keep vehicle stationary facing the camera directly
       this.vehicle.mesh.rotation.y = 0;
-      this.vehicle.mesh.position.set(0, 0, 0);
+      this.seatVehicleOn(TUNING_FLOOR_TOP);
 
       // Hide showroom & garage background components, show tuning room background
+      this.hideDealerRooms();
       if (this.showroomGroup) this.showroomGroup.visible = false;
       if (this.grid) this.grid.visible = false;
       if (this.stand) this.stand.visible = false;
@@ -515,7 +576,7 @@ export class GarageMode extends BaseMode {
     } else if (isShowroomMode) {
       // DEDICATED 3D SHOWROOM MODE (Quick Play Car Select OR Dealer Car Showroom)
       this.vehicle.mesh.rotation.y = 0;
-      this.vehicle.mesh.position.set(0, 0, 0);
+      this.seatVehicleOn(SHOWROOM_STAGE_TOP);
 
       // Show 3D Showroom background, hide standard garage grid/stand/room
       if (this.showroomGroup) this.showroomGroup.visible = true;
@@ -594,14 +655,47 @@ export class GarageMode extends BaseMode {
       if (this.quickPlayLeftLight) this.quickPlayLeftLight.visible = false;
       if (this.quickPlayRightLight) this.quickPlayRightLight.visible = false;
 
-      // Restore vehicle lights and emissives
+      // Dealer markets get a furnished room instead of the neon studio.
+      const room = this.roomFor(isQuickPlay ? null : dealerMarketMode);
+      if (this.luxuryRoom) this.luxuryRoom.group.visible = room === this.luxuryRoom;
+      if (this.whiteRoom) this.whiteRoom.group.visible = room === this.whiteRoom;
+      if (room) {
+        if (this.showroomGroup) this.showroomGroup.visible = false;
+        if (this.engine.renderer) this.engine.renderer.setClearColor(room.background, 1);
+        if (this.engine.scene) this.engine.scene.background = room.background;
+        room.setAccent(dealerMarketMode === 'race' ? 0xffd7a8 : dealerMarketMode === 'used' ? 0xfff1dc : 0xe8f4ff);
+        const pulse = this.purchaseCelebrationTimer > 0
+          ? Math.sin((this.purchaseCelebrationTimer / 2.5) * Math.PI * 6) * 0.5 + 0.5
+          : 0;
+        room.keyLight.intensity = room.keyIntensity * (1 + pulse * 0.8);
+        if (this.engine.ambientLight) {
+          this.engine.ambientLight.color.setHex(room.ambientColor);
+          this.engine.ambientLight.intensity = room.ambientIntensity;
+        }
+        this.setStudioEnvironment(true, room.environmentIntensity);
+        if (this.engine.postProcessing) this.engine.postProcessing.bloomOverride = room.bloom;
+      } else {
+        this.setStudioEnvironment(false);
+        if (this.engine.postProcessing) this.engine.postProcessing.bloomOverride = null;
+      }
+
+      // Restore vehicle lights and emissives. In the dealer rooms the car's own
+      // headlamp spot is switched off: it flooded the floor with a white blob.
+      const carLightsOn = !this.roomFor(isQuickPlay ? null : dealerMarketMode);
+      // Lamps stay lit but dimmed there too, or they bloom into a white flare
+      // (and again in the mirror floor of the race hall).
+      const lampLevel = carLightsOn ? 1 : 0.3;
       this.vehicle.mesh.traverse((child) => {
         if (child instanceof THREE.Light) {
-          child.visible = true;
+          child.visible = carLightsOn;
         }
         if (child instanceof THREE.Mesh) {
-          if (child.material && (child.material as THREE.MeshStandardMaterial).emissive && (child as any).originalEmissiveIntensity !== undefined) {
-            (child.material as THREE.MeshStandardMaterial).emissiveIntensity = (child as any).originalEmissiveIntensity;
+          const material = child.material as THREE.MeshStandardMaterial;
+          if (material && material.emissive) {
+            if ((child as any).originalEmissiveIntensity === undefined) {
+              (child as any).originalEmissiveIntensity = material.emissiveIntensity;
+            }
+            material.emissiveIntensity = (child as any).originalEmissiveIntensity * lampLevel;
           }
         }
       });
@@ -609,11 +703,12 @@ export class GarageMode extends BaseMode {
       // DEFAULT MAIN GARAGE MODE
       if (this.vehicle && this.vehicle.mesh) {
         this.vehicle.mesh.visible = true;
-        this.vehicle.mesh.position.set(0, 0, 0);
+        this.seatVehicleOn(GARAGE_STAND_TOP);
         this.vehicle.mesh.rotation.y = 0;
       }
 
       // Show standard garage components, hide showroom and room
+      this.hideDealerRooms();
       if (this.showroomGroup) this.showroomGroup.visible = false;
       if (this.grid) this.grid.visible = true;
       if (this.stand) this.stand.visible = true;
@@ -658,6 +753,10 @@ export class GarageMode extends BaseMode {
   }
 
   public cleanup() {
+    this.setStudioEnvironment(false);
+    if (this.engine.postProcessing) this.engine.postProcessing.bloomOverride = null;
+    this.studioEnvironment?.dispose();
+    this.studioEnvironment = undefined;
     this.clearEnvironment();
   }
 

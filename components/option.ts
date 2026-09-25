@@ -145,3 +145,59 @@ export function saveDrivingMode(mode: DrivingMode): void {
     console.error('Failed to save driving mode:', e);
   }
 }
+
+// ---------------------------------------------------------------------------
+// CAREER MAP GRAPHICS
+// ---------------------------------------------------------------------------
+// The 3D career map has its own render pipeline (components/engine/
+// CareerMapGraphics.ts). Every upgrade in it can be switched off separately
+// from Settings > Graphics, and the map picks changes up live.
+
+export interface MapGraphicsSettings {
+  /** Tinted ambient + sky/ground hemisphere, balanced exposure, tuned materials. */
+  enhancedLighting: boolean;
+  /** Soft directional sun shadows from buildings, trees, lamps and cliffs. */
+  shadows: boolean;
+  /** GTAO contact shadows where buildings and cliffs meet the ground. */
+  ambientOcclusion: boolean;
+  /** Soft glow on neon arena trim, road paint and lit street lamps. */
+  bloom: boolean;
+  /** Faint height contours and slope shading on the terrain. */
+  terrainDetail: boolean;
+  /** Faceted low-poly shading on the terrain. */
+  flatShading: boolean;
+}
+
+export const DEFAULT_MAP_GRAPHICS: MapGraphicsSettings = {
+  enhancedLighting: true,
+  shadows: true,
+  ambientOcclusion: true,
+  bloom: true,
+  terrainDetail: true,
+  flatShading: false,
+};
+
+/** Fired on window whenever the map graphics settings are saved. */
+export const MAP_GRAPHICS_EVENT = 'cyberdrive:map-graphics-change';
+
+const MAP_GRAPHICS_KEY = 'cyberdrive_map_graphics';
+
+export function loadMapGraphics(): MapGraphicsSettings {
+  if (!isClient) return { ...DEFAULT_MAP_GRAPHICS };
+  try {
+    const saved = localStorage.getItem(MAP_GRAPHICS_KEY);
+    return saved ? { ...DEFAULT_MAP_GRAPHICS, ...JSON.parse(saved) } : { ...DEFAULT_MAP_GRAPHICS };
+  } catch {
+    return { ...DEFAULT_MAP_GRAPHICS };
+  }
+}
+
+export function saveMapGraphics(settings: MapGraphicsSettings): void {
+  if (!isClient) return;
+  try {
+    localStorage.setItem(MAP_GRAPHICS_KEY, JSON.stringify(settings));
+  } catch (e) {
+    console.error('Failed to save map graphics settings:', e);
+  }
+  window.dispatchEvent(new CustomEvent<MapGraphicsSettings>(MAP_GRAPHICS_EVENT, { detail: settings }));
+}

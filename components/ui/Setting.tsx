@@ -1,11 +1,31 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { RotateCcw, HelpCircle, LogOut, Wrench, Map, Timer } from 'lucide-react';
-import { HUDConfig, KeyBindings, DEFAULT_KEY_BINDINGS } from '../option';
+import {
+  HUDConfig,
+  KeyBindings,
+  DEFAULT_KEY_BINDINGS,
+  DEFAULT_MAP_GRAPHICS,
+  MapGraphicsSettings,
+  loadMapGraphics,
+  saveMapGraphics
+} from '../option';
 import { GraphicsFeatures, QUALITY_PRESETS } from '../PostProcessing';
 
 type AntiAliasingMode = 'off' | 'fxaa' | 'taa';
+
+/** How far above centre (beside the original toggles) the Live Preview sits. */
+const PREVIEW_LIFT_PX = 80;
+
+const MAP_GRAPHICS_ROWS: { key: keyof MapGraphicsSettings; label: string; desc: string }[] = [
+  { key: 'enhancedLighting', label: 'Enhanced Lighting & Materials', desc: 'Sky-tinted ambient, warm ground bounce, balanced exposure, lifted dark surfaces' },
+  { key: 'shadows', label: 'Soft Sun Shadows', desc: 'Buildings, trees, lamps and cliffs cast soft directional shadows' },
+  { key: 'ambientOcclusion', label: 'Ambient Occlusion (GTAO)', desc: 'Contact shadows where buildings and cliffs meet the ground' },
+  { key: 'bloom', label: 'Neon Bloom', desc: 'Soft glow on arena trim, road paint and lit street lamps' },
+  { key: 'terrainDetail', label: 'Terrain Contours & Slope Shading', desc: 'Faint height lines and darker slopes so the landform reads' },
+  { key: 'flatShading', label: 'Low-Poly Terrain', desc: 'Faceted flat shading on the ground for a stylised look' },
+];
 
 interface SettingProps {
   activeGarageTab: string | null;
@@ -78,6 +98,59 @@ export default function Setting({
   changeSfxVolume,
   backLabel = 'Back to Garage',
 }: SettingProps) {
+  // Career map graphics live in their own store (option.ts): the map is not
+  // mounted alongside this page, so it reads them - and listens for changes -
+  // itself.
+  const [mapGraphics, setMapGraphics] = useState<MapGraphicsSettings>(() => loadMapGraphics());
+
+  // Live Preview pin (graphics tab). The preview used to be centred beside the
+  // original toggles; the career map block made that column taller, which
+  // pushed the preview down and let it scroll away. Measure the original
+  // toggles, put the preview back in that exact spot, and hold it there.
+  const graphicsBaseRef = useRef<HTMLDivElement>(null);
+  const previewColRef = useRef<HTMLDivElement>(null);
+  const [previewPin, setPreviewPin] = useState<{ margin: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (settingsSubTab !== 'graphics') return;
+    const base = graphicsBaseRef.current;
+    const preview = previewColRef.current;
+    if (!base || !preview) return;
+
+    const measure = () => {
+      if (!window.matchMedia('(min-width: 768px)').matches) {
+        setPreviewPin(null); // stacked layout on narrow screens: normal flow
+        return;
+      }
+      const row = base.parentElement?.parentElement;
+      const scroller = preview.closest('.overflow-y-auto') as HTMLElement | null;
+      if (!row) return;
+      const centred = (base.offsetHeight - preview.offsetHeight) / 2;
+      const margin = Math.max(0, Math.round(centred - PREVIEW_LIFT_PX));
+      // Sticky offsets count from inside the scroller's padding.
+      const rowTop = scroller
+        ? row.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
+          - (parseFloat(getComputedStyle(scroller).paddingTop) || 0)
+        : 0;
+      const next = { margin, top: Math.round(rowTop + margin) };
+      setPreviewPin((prev) => (prev && prev.margin === next.margin && prev.top === next.top ? prev : next));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(base);
+    observer.observe(preview);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [settingsSubTab, settingsVisible, settingsTransitionComplete]);
+  const updateMapGraphics = (next: MapGraphicsSettings) => {
+    setMapGraphics(next);
+    saveMapGraphics(next);
+  };
+
   const [rebindingAction, setRebindingAction] = useState<keyof KeyBindings | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -288,6 +361,10 @@ export default function Setting({
           {settingsSubTab === 'graphics' && (
             <div className="flex flex-col md:flex-row gap-8">
               <div className="flex-1 flex flex-col gap-5 text-left">
+                {/* The original toggles. Measured, so the Live Preview can
+                    keep the exact spot it had beside them before the career
+                    map block was added underneath. */}
+                <div ref={graphicsBaseRef} className="flex flex-col gap-5">
                 <h3 className="text-xs font-black text-rose-500 tracking-widest uppercase">
                   Graphics & Performance Toggles
                 </h3>
@@ -510,10 +587,84 @@ export default function Setting({
                     </div>
                   </div>
                 </div>
+                </div>
+
+                <div className="flex flex-col select-none">
+                  {/* ═══════════════════════════════════════════════ */}
+                  {/* CAREER MAP GRAPHICS — the 3D map's own pipeline  */}
+                  {/* ═══════════════════════════════════════════════ */}
+                  <div className="mt-1 mb-1 rounded-xl border-2 p-4 transition-all duration-300 border-rose-600/40 bg-rose-950/10">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-black tracking-widest uppercase text-white">
+                        Career Map Graphics
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => updateMapGraphics({
+                            enhancedLighting: true, shadows: true, ambientOcclusion: true,
+                            bloom: true, terrainDetail: true, flatShading: mapGraphics.flatShading
+                          })}
+                          className="px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase tracking-wider cursor-pointer bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                        >
+                          All On
+                        </button>
+                        <button
+                          onClick={() => updateMapGraphics({
+                            enhancedLighting: false, shadows: false, ambientOcclusion: false,
+                            bloom: false, terrainDetail: false, flatShading: false
+                          })}
+                          className="px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase tracking-wider cursor-pointer bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                        >
+                          Classic
+                        </button>
+                        <button
+                          onClick={() => updateMapGraphics({ ...DEFAULT_MAP_GRAPHICS })}
+                          className="px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase tracking-wider cursor-pointer bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                        >
+                          Default
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] mb-3 leading-relaxed text-rose-300/40">
+                      Rendering upgrades for the 3D career world map. Changes apply instantly, even while the map is open.
+                    </p>
+                    <div className="h-px mb-3 bg-rose-600/20" />
+                    <div className="flex flex-col gap-1">
+                      {MAP_GRAPHICS_ROWS.map((row) => {
+                        const isOn = mapGraphics[row.key];
+                        return (
+                          <div key={row.key} className="flex items-center justify-between gap-3 py-1.5">
+                            <div className="flex flex-col">
+                              <span className="text-[11px] font-bold text-zinc-200">{row.label}</span>
+                              <span className="text-[9px] text-zinc-500">{row.desc}</span>
+                            </div>
+                            <button
+                              onClick={() => updateMapGraphics({ ...mapGraphics, [row.key]: !isOn })}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border cursor-pointer min-w-[52px] text-center ${isOn
+                                ? 'bg-emerald-600/80 border-emerald-500 text-white shadow-[0_0_8px_rgba(16,185,129,0.25)]'
+                                : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
+                                }`}
+                            >
+                              {isOn ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
               </div>
 
-              {/* Live Preview Placeholder for shrinking 3D Canvas */}
-              <div className="w-full md:w-[480px] flex flex-col gap-4 text-left self-center">
+              {/* Live Preview Placeholder for shrinking 3D Canvas.
+                  Pinned: it sits where it always did beside the original
+                  toggles and stays there while the page scrolls, so the 3D
+                  canvas fitted into it never drifts. */}
+              <div
+                ref={previewColRef}
+                className="w-full md:w-[480px] flex flex-col gap-4 text-left self-center md:self-start"
+                style={previewPin ? { marginTop: previewPin.margin, position: 'sticky', top: previewPin.top } : undefined}
+              >
                 <span className="text-xs font-black tracking-widest text-rose-500 uppercase">
                   Live Preview
                 </span>

@@ -20,7 +20,7 @@ import {
   GameStatus,
   createDefaultEditorState
 } from './engine/types';
-import { resolveTrackLayout } from './modes/trackNodes';
+import { resolveTrackLayout, scaleTrackWidths } from './modes/trackNodes';
 import { InputController } from './engine/InputController';
 import { createThreeWorld } from './engine/threeWorld';
 import { applyShadowsToScene, disposeSceneObjects } from './engine/sceneUtils';
@@ -287,26 +287,50 @@ export class GameEngine {
       const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
       this.camera.up.copy(worldUp);
     } else {
-      this.camera.up.set(0, 1, 0);
-      const followDist = 8.5;
-      const heightOffset = 3.6;
-
-      const backOffset = new THREE.Vector3(0, 0, -1)
-        .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.vehicle.yaw)
-        .multiplyScalar(followDist);
-
-      const camPos = new THREE.Vector3()
-        .copy(this.vehicle.pos)
-        .add(backOffset);
-      camPos.y += heightOffset;
-
-      this.camera.position.copy(camPos);
-
-      const lookTarget = new THREE.Vector3()
-        .copy(this.vehicle.pos)
-        .add(new THREE.Vector3(0, 0.5, 0));
-      this.camera.lookAt(lookTarget);
+      this.updateChaseCamera(0, true);
     }
+  }
+
+  // Chase camera state: the heading and height it is easing towards.
+  private chaseYaw = 0;
+  private chaseBaseY = 0;
+
+  /**
+   * Gran Turismo style chase camera. It stays at a fixed distance and height
+   * behind the car, sized from the car itself (the framing the Ford GT had when
+   * the tracks were laid out: 1.18 car lengths back, 0.5 up), so it never
+   * stretches out at speed. Only the heading and the ride height are eased, which
+   * lets the car swing a little in corners and keeps bumps off the screen.
+   */
+  private updateChaseCamera(deltaTime: number, snap = false) {
+    this.camera.up.set(0, 1, 0);
+    const bounds = this.vehicle.visualBounds;
+    const length = Math.max(3, bounds.max.z - bounds.min.z);
+    const followDist = length * 1.18;
+    const heightOffset = length * 0.5;
+    const lookHeight = length * 0.07;
+
+    const yaw = this.vehicle.yaw;
+    const groundY = this.vehicle.pos.y;
+    if (snap) {
+      this.chaseYaw = yaw;
+      this.chaseBaseY = groundY;
+    } else {
+      const yawEase = 1 - Math.exp(-7 * deltaTime);
+      const heightEase = 1 - Math.exp(-10 * deltaTime);
+      let dYaw = yaw - this.chaseYaw;
+      dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw));
+      this.chaseYaw += dYaw * yawEase;
+      this.chaseBaseY += (groundY - this.chaseBaseY) * heightEase;
+    }
+
+    const back = new THREE.Vector3(-Math.sin(this.chaseYaw), 0, -Math.cos(this.chaseYaw));
+    this.camera.position.set(
+      this.vehicle.pos.x + back.x * followDist,
+      this.chaseBaseY + heightOffset,
+      this.vehicle.pos.z + back.z * followDist
+    );
+    this.camera.lookAt(this.vehicle.pos.x, this.chaseBaseY + lookHeight, this.vehicle.pos.z);
   }
 
   public buildGarage() {
@@ -330,7 +354,7 @@ export class GameEngine {
 
     this.activeLicenseTestId = testConfig.id;
     this.sky.updateTimeOfDay(testConfig.time ?? 'afternoon', testConfig.fogDistance);
-    this.suggestedGearAdvisor.setTrack(testConfig, true);
+    this.suggestedGearAdvisor.setTrack(scaleTrackWidths(testConfig), true);
     this.changeMode('license', new LicenseMode(this, this.scene, this.vehicle, this.particles, this.environmentGroup, this.keys, testConfig.id));
   }
 
@@ -907,13 +931,16 @@ export class GameEngine {
         this.tuningTheta += 0.25 * deltaTime;
       }
 
-      // Calculate position in spherical coordinates centered around (0, carHeight * 0.4, 0)
+      // Orbit a point 40% up the car. The car stands on a raised stage in the
+      // garage and showroom, so measure from its tyres, not from y = 0.
+      const carBase = Number.isFinite(box.min.y) ? box.min.y : 0;
+      const focusY = carBase + carHeight * 0.4;
       const targetX = Math.sin(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
-      const targetY = (carHeight * 0.4) + Math.sin(this.tuningPhi) * activeRadius;
+      const targetY = focusY + Math.sin(this.tuningPhi) * activeRadius;
       const targetZ = Math.cos(this.tuningTheta) * Math.cos(this.tuningPhi) * activeRadius;
 
       this.camera.position.set(targetX, targetY, targetZ);
-      this.camera.lookAt(0, carHeight * 0.4, 0);
+      this.camera.lookAt(0, focusY, 0);
     } else {
       if (this.cameraViewMode === 'tv') {
         this.updateTvCamera(deltaTime);
@@ -935,27 +962,7 @@ export class GameEngine {
         const worldUp = localUp.clone().transformDirection(this.vehicle.mesh.matrixWorld);
         this.camera.up.copy(worldUp);
       } else {
-        this.camera.up.set(0, 1, 0);
-
-        const followDist = 8.5;
-        const heightOffset = 3.6;
-
-        const backOffset = new THREE.Vector3(0, 0, -1)
-          .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.vehicle.yaw)
-          .multiplyScalar(followDist);
-
-        const targetCamPos = new THREE.Vector3()
-          .copy(this.vehicle.pos)
-          .add(backOffset);
-
-        targetCamPos.y += heightOffset;
-        this.camera.position.lerp(targetCamPos, 0.15);
-
-        const lookTarget = new THREE.Vector3()
-          .copy(this.vehicle.pos)
-          .add(new THREE.Vector3(0, 0.5, 0));
-
-        this.camera.lookAt(lookTarget);
+        this.updateChaseCamera(deltaTime);
       }
     }
 
@@ -963,11 +970,14 @@ export class GameEngine {
     if (this.activeMode !== 'garage' && this.rearCamera && this.vehicle) {
       this.vehicle.mesh.updateMatrixWorld(true);
 
-      const localRearCamPos = new THREE.Vector3(0, 1.15, -0.2);
+      // Just behind the rear bumper: a camera inside the car would film its cabin.
+      const bounds = this.vehicle.visualBounds;
+      const rearCamHeight = THREE.MathUtils.clamp((bounds.max.y - bounds.min.y) * 0.8, 0.9, 1.4);
+      const localRearCamPos = new THREE.Vector3(0, rearCamHeight, bounds.min.z - 0.15);
       const worldRearCamPos = localRearCamPos.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
       this.rearCamera.position.copy(worldRearCamPos);
 
-      const localRearLookDir = new THREE.Vector3(0, 1.15, -20.0);
+      const localRearLookDir = new THREE.Vector3(0, rearCamHeight, bounds.min.z - 20.0);
       const worldRearLookTarget = localRearLookDir.clone().applyMatrix4(this.vehicle.mesh.matrixWorld);
       this.rearCamera.lookAt(worldRearLookTarget);
 

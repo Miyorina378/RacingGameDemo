@@ -197,7 +197,8 @@ export class Sky {
   
   private skyMesh!: THREE.Mesh;
   private skyMaterial!: THREE.ShaderMaterial;
-  private clock = new THREE.Clock();
+  // THREE.Clock is deprecated; Timer replaces it.
+  private timer = new THREE.Timer();
 
   private uTimeOfDayTarget = 1.0;
   private uTimeOfDayVal = 1.0;
@@ -319,7 +320,8 @@ export class Sky {
     }
 
     // Get time elapsed
-    const elapsed = this.clock.getElapsedTime();
+    this.timer.update();
+    const elapsed = this.timer.getElapsed();
     if (this.skyMaterial) {
       this.skyMaterial.uniforms.uTime.value = elapsed;
 

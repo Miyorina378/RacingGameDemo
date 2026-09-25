@@ -98,6 +98,11 @@ export interface TrackConfig {
   id: string;
   name: string;
   description: string;
+  /**
+   * Set by scaleTrackWidths once the widths are in real-car metres. Authored
+   * configs leave it unset; it stops a resolved copy from being narrowed twice.
+   */
+  widthScale?: number;
   timeLimit: number;
   roadWidth: number;
   hasObstacles: boolean;
